@@ -1703,6 +1703,7 @@ describe("a -c script's moved positional parameters", () => {
     `bash -c 'shift; cd /tmp && git status' _ /tmp /tmp/w`,
     `sh -c 'set -- /tmp/w; cd /tmp && git status' sh /tmp`,
     `bash -c 'cd "$1" && git status' _ /tmp`,
+    `bash -c '"shift"; cd /tmp && git status' _ /tmp /tmp/w`,
   ])("%s runs", async (command) => {
     expect(await bash(command, "/tmp")).toBeUndefined()
   })

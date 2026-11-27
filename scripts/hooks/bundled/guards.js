@@ -3570,15 +3570,17 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   if (operand && inline) {
     const script = operand.value;
     const after = args.slice(args.indexOf(operand) + 1);
-    const { replace } = xargs ?? {};
+    const { appends, replace } = xargs ?? {};
     if (!replace || ![operand, ...after].some((w) => w.value.includes(replace))) {
-      const inner = withPositionals(env, script, after, (value) => value, !!xargs && !replace);
+      const added = !!xargs && (!replace || !!appends);
+      const inner = withPositionals(env, script, after, (value) => value, added);
       return run2(lexScript(script, inner), inner, visit, builtins);
     }
+    const bound = !appends ? after.length : operand.value.includes(replace) ? 0 : after.findIndex((w) => w.value.includes(replace));
     const texts = new Set([...await xargsTexts(cmd, [xargs], env)].map((text) => text ?? UNKNOWN));
     for (const text of texts.size > 0 ? texts : [""]) {
       const body = filled(script, replace, text);
-      const inner = withPositionals(env, body, after, (value) => filled(value, replace, text), false);
+      const inner = withPositionals(env, body, after, (value) => filled(value, replace, text), !!appends, bound);
       const lexed = lexScript(body, inner);
       const verdict = await run2(lexed, inner, visit, builtins);
       if (verdict)
@@ -3594,13 +3596,32 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   }
 }
 var DIGIT_PARAMETERS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
-var MOVES_POSITIONALS = /(?:^|[\s;&|(){}`])(?:shift|set|getopts|eval|source|\.)(?=$|[\s;&|()`])|\bargv\b|(?:^|[\s;&|(){}`])\d+\+?=|\(\s*\)|\bfunction\b/;
-function withPositionals(env, script, after, fill, appended) {
+var MOVERS = new Set([".", "eval", "getopts", "set", "shift", "source"]);
+var MOVING_ASSIGNMENT = /^(?:argv|BASH_ARGV0|\d+)(?:\[[^\]]*\])?\+?=/;
+function movesPositionals(script, env) {
+  if (/\(\s*\)/.test(script.replace(/["'\\]/g, "")))
+    return true;
+  const all = (list) => list.flatMap((c) => [c, ...all(c.inner?.() ?? [])]);
+  return all(lexScript(script, env).commands).some((c) => {
+    const lead = c.words.find((w) => w.quoted || !RESERVED.has(w.value));
+    if (lead && !lead.quoted && lead.value === "function")
+      return true;
+    for (const w of c.words) {
+      if (!ASSIGN.test(w.value) && !/^\d+\+?=/.test(w.value))
+        break;
+      if (MOVING_ASSIGNMENT.test(w.value))
+        return true;
+    }
+    return readings(parse(c)).some(({ name }) => MOVERS.has(name) || marked(name));
+  });
+}
+function withPositionals(env, script, after, fill, appended, bound = after.length) {
   const known = { ...env.known };
   for (const key of [...DIGIT_PARAMETERS, "@", "*"])
     delete known[key];
-  if (!MOVES_POSITIONALS.test(script)) {
-    for (const [k, w] of after.slice(0, DIGIT_PARAMETERS.length).entries())
+  if (!movesPositionals(script, { ...env, known })) {
+    const words = after.slice(0, Math.min(bound, DIGIT_PARAMETERS.length));
+    for (const [k, w] of words.entries())
       known[DIGIT_PARAMETERS[k]] = fill(w.value);
     const oneWord = after.length === 2;
     if (oneWord && !appended)
@@ -13130,7 +13151,7 @@ var leak = async (cmd, parsed, env) => {
     state().changed = true;
   if (state().policy.anyWrite) {
     state().movedBefore = state().moved;
-    if (MOVERS.has(name) || first?.unknown)
+    if (MOVERS2.has(name) || first?.unknown)
       state().moved = true;
   }
   const head = args[0]?.value ?? "";
@@ -13193,7 +13214,7 @@ function changesState(cmd, { args, name }) {
   const targets = cmd.redirects.flatMap((r) => r.target ? [r.target] : []);
   return [...args, ...targets].some((w) => GIT_CONFIG_PATH.test(w.value));
 }
-var MOVERS = new Set(["gh", "git"]);
+var MOVERS2 = new Set(["gh", "git"]);
 var implicit = (env, local) => state().policy.anyWrite && state().changed ? [undefined] : implicitRepos(env, local);
 async function gh(args, cmd, env, local, xargs) {
   const { head, repos, rest } = ghCommand(args);

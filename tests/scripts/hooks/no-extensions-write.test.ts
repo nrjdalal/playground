@@ -4285,6 +4285,14 @@ describe("a -c script's moved positional parameters", () => {
     `cat /tmp/no-such-names.txt | xargs sh -c 'cat "$@"' sh /tmp/w`,
     "cat /tmp/no-such-names.txt | xargs sh -c 'cat $*' sh /tmp/a",
     `echo /tmp/w/x | xargs sh -c 'cat "$@"' sh /tmp/a`,
+    `bash -c '"shift"; cat "$1"' _ /tmp/a /tmp/w/x`,
+    `bash -c 'shift>/dev/null; cat "$1"' _ /tmp/a /tmp/w/x`,
+    `bash -c '\${1+shift}; cat "$1"' _ /tmp/a /tmp/w/x`,
+    `bash -c '"set" -- /tmp/w/x; cat "$1"' _ /tmp/a`,
+    `bash -c 'BASH_ARGV0=/tmp/w/x; cat "$0"' /tmp/a`,
+    // BSD xargs -J: the words before its string's word bind, and the ones from it on are unread
+    `cat /tmp/no-such-names.txt | xargs -J % sh -c 'cat "$2"' sh % /tmp/a`,
+    `cat /tmp/no-such-names.txt | xargs -J % sh -c 'rm -f "$0"' /tmp/w/x %`,
   ])("%s runs", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })

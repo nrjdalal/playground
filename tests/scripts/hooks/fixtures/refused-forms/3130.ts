@@ -401,7 +401,7 @@ export const groups: Group[] = [
     ],
   },
   {
-    folders: ["process tmp"],
+    folders: ["glm repo"],
     guards: ["no-glm-heavy-path"],
     rows: ({ MAIN }) => [
       [
@@ -411,6 +411,101 @@ export const groups: Group[] = [
       [
         "a set -- to a checkout, then a cd through $1 and a hard reset",
         `sh -c 'set -- ${MAIN}; cd "$1" && git reset --hard' sh /tmp`,
+      ],
+      [
+        "a quoted shift, then a cd through $1 into a checkout and a hard reset",
+        `bash -c '"shift"; cd "$1" && git reset --hard' _ /tmp ${MAIN}`,
+      ],
+    ],
+  },
+  {
+    // a mover the lexer reads with its quotes and escapes taken off, beside a redirect or from an expansion, or one that sets $0, binds no parameter either
+    folders: ["process tmp"],
+    guards: ["no-roster-write", "no-extensions-write"],
+    rows: () => [
+      [
+        "a double-quoted shift, then a forced removal through $1 of the roster",
+        `bash -c '"shift"; rm -f "$1"' _ /tmp/a ~/.playground/roster.json`,
+      ],
+      [
+        "a shift with a redirect beside it, then a forced removal through $1 of the roster",
+        `bash -c 'shift>/dev/null; rm -f "$1"' _ /tmp/a ~/.playground/roster.json`,
+      ],
+      [
+        "an escaped shift, then a forced removal through $1 of the roster",
+        `bash -c 's\\hift; rm -f "$1"' _ /tmp/a ~/.playground/roster.json`,
+      ],
+      [
+        "a single-quoted shift, then a forced removal through $1 of the roster",
+        `bash -c "'shift'; rm -f \\"\\$1\\"" _ /tmp/a ~/.playground/roster.json`,
+      ],
+      [
+        "a shift run from a variable, then a forced removal through $1 of the roster",
+        `bash -c 'S=shift; $S; rm -f "$1"' _ /tmp/a ~/.playground/roster.json`,
+      ],
+      [
+        "a shift from a parameter's expansion, then a forced removal through $1 of the roster",
+        `bash -c '\${1+shift}; rm -f "$1"' _ /tmp/a ~/.playground/roster.json`,
+      ],
+      [
+        "BASH_ARGV0 set to the roster, then a forced removal through $0",
+        `bash -c 'BASH_ARGV0=~/.playground/roster.json; rm -f "$0"' /tmp/a`,
+      ],
+    ],
+  },
+  {
+    folders: ["process tmp"],
+    guards: ["no-roster-write"],
+    rows: () => [
+      [
+        "a double-quoted shift, then a redirect through $1 onto the roster",
+        `bash -c '"shift"; echo x > "$1"' _ /tmp/a ~/.playground/roster.json`,
+      ],
+      [
+        "a names file into an xargs -I sh -c script that lists . first, then removes through $1 a name in the data folder",
+        `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'ls . ; rm -f "$1"' _ ~/.playground/{}`,
+      ],
+      [
+        "a names file into an xargs -I sh -c script that echoes the word function first, then removes through $1 a name in the data folder",
+        `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'echo function; rm -f "$1"' _ ~/.playground/{}`,
+      ],
+    ],
+  },
+  {
+    folders: ["process tmp"],
+    guards: ["no-extensions-write"],
+    rows: ({ MAIN }) => [
+      [
+        "a set with a redirect beside it to the roster, then a forced removal through $1",
+        `bash -c 'set>/dev/null -- ~/.playground/roster.json; rm -f "$1"' _ /tmp/a`,
+      ],
+      [
+        "a quoted set -- to the roster, then a forced removal through $1",
+        `bash -c '"set" -- ~/.playground/roster.json; rm -f "$1"' _ /tmp/a`,
+      ],
+      [
+        "a quoted shift, then a recursive removal through $1 of a folder under the root",
+        `bash -c '"shift"; rm -rf "$1"' _ /tmp/a ${NEVER_MADE}`,
+      ],
+      [
+        "a quoted shift, then a cd through $1 into the data folder and a removal of roster.json",
+        `bash -c '"shift"; cd "$1" && rm roster.json' _ /tmp ~/.playground`,
+      ],
+      [
+        "a quoted shift, then a cd through $1 into the main checkout and a hard reset",
+        `bash -c '"shift"; cd "$1" && git reset --hard' _ /tmp ${MAIN}`,
+      ],
+      [
+        "a names file into an xargs -I sh -c script with a quoted shift, then a removal through $1 of a name in the data folder",
+        `cat /tmp/no-such-names.txt | xargs -I{} sh -c '"shift"; rm -f "$1"' _ /tmp/a ~/.playground/{}`,
+      ],
+      [
+        "a names file into a BSD xargs -J sh -c script, removing $2, which the items move",
+        `cat /tmp/no-such-names.txt | xargs -J % sh -c 'rm -f "$2"' sh % /tmp/a`,
+      ],
+      [
+        "a names file into a BSD xargs -J sh -c script, removing $2 recursively, which the items move",
+        `cat /tmp/no-such-names.txt | xargs -J % sh -c 'rm -rf "$2"' sh % /tmp/a`,
       ],
     ],
   },
