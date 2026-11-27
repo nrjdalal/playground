@@ -1,6 +1,16 @@
 import "@packages/env/aliases"
-import { existsSync, readFileSync, realpathSync, statSync, utimesSync } from "node:fs"
-import { dirname, isAbsolute, join, resolve } from "node:path"
+import {
+  accessSync,
+  constants,
+  existsSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  utimesSync,
+} from "node:fs"
+import { basename, dirname, isAbsolute, join, resolve } from "node:path"
+
+import { dataDir } from "@packages/env/data-dir"
 
 import { stackIn } from "../../../../api/hono/src/lib/dev/stop"
 import { withoutShebang } from "../shebang"
@@ -319,6 +329,62 @@ export const prebuildStep = (
   return stale ? { refused: stale } : { build: missing }
 }
 
+// Pure: the turbo build's argv through the machine's run slot (**slots**), as `run-slot.sh <who> -- <argv>`, so the build a fresh worktree or a pull needs waits its turn rather than run beside the queue; bare under a run that already holds a slot (run-slot exports RUN_SLOT_HELD to a lane's child and RUN_SLOT_NICE to every child), so it never waits on a slot it holds, and where run-slot.sh is not there to run (a machine with no factory data folder), as commit-slot.ts does.
+export const slotted = (
+  argv: string[],
+  who: string,
+  env: Record<string, string | undefined>,
+  runSlot: string | null,
+): string[] =>
+  env.RUN_SLOT_HELD === undefined && env.RUN_SLOT_NICE === undefined && runSlot
+    ? [runSlot, who, "--", ...argv]
+    : argv
+
+// Whether this run is inside a commit's hook in this checkout: for pre-commit git sets GIT_INDEX_FILE to an index in the checkout's own git folder (`index`, or a partial commit's `next-index-<pid>.lock`), where a script's scratch index lies elsewhere and `rebase --exec` sets none (measured, 27 Nov).
+export const inCommitHook = (root: string, env: Record<string, string | undefined>): boolean => {
+  if (!env.GIT_INDEX_FILE) return false
+  try {
+    const dotGit = join(root, ".git")
+    const gitDir = statSync(dotGit).isDirectory()
+      ? dotGit
+      : resolve(
+          root,
+          readFileSync(dotGit, "utf8")
+            .replace(/^gitdir:\s*/, "")
+            .trim(),
+        )
+    return realpathSync(dirname(resolve(root, env.GIT_INDEX_FILE))) === realpathSync(gitDir)
+  } catch {
+    return false
+  }
+}
+
+// The name the build asks its slot under: inside a commit's hook in a worktree under `.claude/worktrees/` (inCommitHook), `commit-<worktree>`, which run-slot gives `run-slot-commit` under RUN_SLOT_COMMIT_STEP=1 as it does commit-slot.ts' steps, since lefthook's `bun run test:file` steps reach prebuild outside commit-slot.ts (PG-3235); else the session run-slot records as the worktree's owner (`run-slot.owner/<worktree>`, written by each named run from it), so the build takes that session's class, priority pick and focus, where run-slot knows no `prebuild-<worktree>`; else `prebuild-<worktree>`.
+export const slotWho = (
+  root: string,
+  ops: string,
+  env: Record<string, string | undefined>,
+): string => {
+  const tree = basename(root).replace(/[^A-Za-z0-9._#-]/g, "-")
+  if (/\/\.claude\/worktrees\/[^/]+$/.test(root) && inCommitHook(root, env)) return `commit-${tree}`
+  const record = join(ops, "run-slot.owner", tree)
+  const owner = existsSync(record) ? readFileSync(record, "utf8").trim() : ""
+  return /^[A-Za-z0-9._-]+$/.test(owner) && !/^(commit|prebuild)-/.test(owner)
+    ? owner
+    : `prebuild-${tree}`
+}
+
+// The machine's run-slot.sh when it can run, else null.
+const runSlotScript = (ops: string): string | null => {
+  const script = join(ops, "run-slot.sh")
+  try {
+    accessSync(script, constants.X_OK)
+    return script
+  } catch {
+    return null
+  }
+}
+
 // The folders of the given workspace packages and of every workspace package they depend on, which turbo builds first.
 const builtWith = (names: string[]): string[] => {
   const all = workspaces(ROOT)
@@ -333,7 +399,7 @@ const builtWith = (names: string[]): string[] => {
   return all.filter(({ pkg }) => pkg.name && seen.has(pkg.name)).map(({ path }) => path)
 }
 
-// Runs prebuildStep and builds what it names: each package by name (turbo builds its dependencies first) under the flags a worktree with no .env needs, then the data table's metrics when they are missing, then stamps every dist the build covered, its dependencies' included, with the build's start; the exit code.
+// Runs prebuildStep and builds what it names: each package by name, through the run slot by slotted (turbo builds its dependencies first) under the flags a worktree with no .env needs, then the data table's metrics when they are missing, then stamps every dist the build covered, its dependencies' included, with the build's start; the exit code.
 const prebuild = (target: string, missing: string[]): number => {
   const step = prebuildStep(target, missing, ROOT, process.env.PLAYGROUND_REPO)
   if ("refused" in step) {
@@ -343,31 +409,37 @@ const prebuild = (target: string, missing: string[]): number => {
   if (step.build.length === 0) return 0
   console.error(`${target}: building what ${step.build.join(", ")} needs`)
   const env = { ...process.env, NODE_ENV: "production", SKIP_ENV_VALIDATION: "true" }
+  const ops = join(dataDir(), "ops")
   const packages = [
     ...new Set(
       step.build.filter((specifier) => !specifier.startsWith("generated/")).map(packageOf),
     ),
   ]
   // turbo's output goes to stderr, so `verify --json` keeps stdout to itself
+  const turbo = [
+    join(ROOT, "node_modules/.bin/turbo"),
+    "run",
+    "build",
+    ...packages.map((name) => `--filter=${name}`),
+    "--output-logs=errors-only",
+  ]
+  const who = slotWho(ROOT, ops, process.env)
+  const build = slotted(turbo, who, process.env, runSlotScript(ops))
   const steps = [
-    ...(packages.length > 0
-      ? [
-          [
-            join(ROOT, "node_modules/.bin/turbo"),
-            "run",
-            "build",
-            ...packages.map((name) => `--filter=${name}`),
-            "--output-logs=errors-only",
-          ],
-        ]
-      : []),
+    ...(packages.length > 0 ? [build] : []),
     ...(step.build.some((specifier) => specifier.startsWith("generated/"))
       ? [[process.execPath, join(SRC, "data-table-metrics.ts")]]
       : []),
   ]
   const started = new Date()
   for (const argv of steps) {
-    const run = Bun.spawnSync(argv, { cwd: ROOT, env, stdio: ["ignore", 2, "inherit"] })
+    // a commit's build asked under commit-<worktree> carries commit-slot.ts's mark, which run-slot reads to give it run-slot-commit
+    const marked = argv !== turbo && argv === build && who.startsWith("commit-")
+    const run = Bun.spawnSync(argv, {
+      cwd: ROOT,
+      env: marked ? { ...env, RUN_SLOT_COMMIT_STEP: "1" } : env,
+      stdio: ["ignore", 2, "inherit"],
+    })
     if (run.exitCode !== 0) return run.exitCode ?? 1
   }
   // a turbo cache hit leaves a dist at the mtime it had, older than the src that sent it here, though its inputs' hash says it matches that src; so each dist the build covered takes the build's start, which reads current on the next run while a src saved during the build still reads newer

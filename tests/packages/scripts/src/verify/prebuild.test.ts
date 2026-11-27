@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, relative } from "node:path"
+import { basename, dirname, join, relative } from "node:path"
 
 import * as prebuild from "../../../../../packages/scripts/src/verify/prebuild"
 
@@ -392,6 +392,7 @@ const copyPrebuild = (dir: string): string => {
   mkdirSync(join(dir, "api/hono/src/lib/dev"), { recursive: true })
   cpSync(join(ROOT, "api/hono/src/lib/dev/stop.ts"), join(dir, "api/hono/src/lib/dev/stop.ts"))
   mkdirSync(join(dir, "node_modules/@packages"), { recursive: true })
+  symlinkSync(join(ROOT, "packages/env"), join(dir, "node_modules/@packages/env"))
   symlinkSync(join(ROOT, "packages/safe-delete"), join(dir, "node_modules/@packages/safe-delete"))
   symlinkSync(join(ROOT, "packages/scripts"), join(dir, "node_modules/@packages/scripts"))
   return verify
@@ -486,12 +487,20 @@ test(
 )
 
 // A worktree whose node_modules came from a clone, with no dist, no metrics and no .env: on 5 Nov its first test:file stopped on "Cannot find module '@packages/config/kinds'", its check-types:tests on "Cannot find module 'generated/data-table-metrics.json'", and a hand-run build without the flags on "@packages/auth:build: error: Invalid environment variables". Its turbo logs each build and writes the dist each filter names.
-const clone = (): {
+const clone = (
+  worktree?: string,
+): {
   dir: string
   log: () => string
-  run: (args: string[], main?: boolean) => { exitCode: number; stderr: string }
+  run: (
+    args: string[],
+    main?: boolean,
+    extra?: Record<string, string>,
+  ) => { exitCode: number; stderr: string }
 } => {
-  const dir = mkdtempSync(join(tmpdir(), "prebuild-clone-"))
+  const scratch = mkdtempSync(join(tmpdir(), "prebuild-clone-"))
+  const dir = worktree ? join(scratch, ".claude/worktrees", worktree) : scratch
+  mkdirSync(dir, { recursive: true })
   const log = join(dir, "build.log")
   writeFileSync(join(dir, "package.json"), JSON.stringify({ workspaces: ["api/*", "packages/*"] }))
   mkdirSync(join(dir, "api/hono"), { recursive: true })
@@ -564,15 +573,31 @@ const clone = (): {
     join(dir, "tests/table.test.ts"),
     'import { m } from "../lib/table"\nexport const n = m\n',
   )
-  const { PLAYGROUND_REPO: _, ...env } = process.env
+  const {
+    GIT_DIR: _dir,
+    GIT_INDEX_FILE: _index,
+    PLAYGROUND_REPO: _,
+    RUN_SLOT_HELD: _held,
+    RUN_SLOT_NICE: _nice,
+    ...env
+  } = process.env
   return {
     dir,
     log: () => (existsSync(log) ? readFileSync(log, "utf8") : ""),
-    run: (args, main = false) => {
+    run: (args, main = false, extra = {}) => {
       const { exitCode, stderr } = bounded(
         "test:file's prebuild",
         ["bun", join(verify, "prebuild.ts"), "tests", ...args],
-        { cwd: dir, env: { ...env, NODE_ENV: "test", ...(main ? { PLAYGROUND_REPO: dir } : {}) } },
+        {
+          cwd: dir,
+          env: {
+            ...env,
+            NODE_ENV: "test",
+            PLAYGROUND_DATA_DIR: join(dir, "data"),
+            ...(main ? { PLAYGROUND_REPO: dir } : {}),
+            ...extra,
+          },
+        },
       )
       return { exitCode, stderr: stderr.toString() }
     },
@@ -668,6 +693,182 @@ test(
     }
   },
   within(2),
+)
+
+test("slotted puts the build behind run-slot.sh under the name given, and leaves it bare under a held slot or with no run-slot.sh (PG-3212)", () => {
+  const argv = ["turbo", "run", "build"]
+  const slot = "/data/ops/run-slot.sh"
+  expect(prebuild.slotted(argv, "abc1de-worker", {}, slot)).toEqual([
+    slot,
+    "abc1de-worker",
+    "--",
+    ...argv,
+  ])
+  expect(prebuild.slotted(argv, "abc1de-worker", { RUN_SLOT_HELD: "full-1 42" }, slot)).toEqual(
+    argv,
+  )
+  expect(prebuild.slotted(argv, "abc1de-worker", { RUN_SLOT_NICE: "10" }, slot)).toEqual(argv)
+  expect(prebuild.slotted(argv, "abc1de-worker", {}, null)).toEqual(argv)
+})
+
+// run-slot ranks a run, picks it for a priority and spares it under focus by its session's name, and records the name of each named run from a worktree as that worktree's owner, which a prebuild-<worktree> name would overwrite with a name it knows no session by
+test("slotWho names the session run-slot records as the worktree's owner, and prebuild-<worktree> with no record, an empty one, or one that names no session (PG-3212)", () => {
+  const ops = mkdtempSync(join(tmpdir(), "prebuild-ops-"))
+  try {
+    expect(prebuild.slotWho("/w/PG-1 my tree", ops, {})).toBe("prebuild-PG-1-my-tree")
+    mkdirSync(join(ops, "run-slot.owner"))
+    const record = join(ops, "run-slot.owner", "PG-1-my-tree")
+    writeFileSync(record, "abc1de-worker\n")
+    expect(prebuild.slotWho("/w/PG-1 my tree", ops, {})).toBe("abc1de-worker")
+    for (const owner of ["", "prebuild-PG-1-my-tree\n", "commit-PG-1-my-tree\n", "a b\n"]) {
+      writeFileSync(record, owner)
+      expect(prebuild.slotWho("/w/PG-1 my tree", ops, {})).toBe("prebuild-PG-1-my-tree")
+    }
+  } finally {
+    rmSync(ops, { force: true, recursive: true })
+  }
+})
+
+test(
+  "test:file's due build goes through the data folder's run-slot.sh under the worktree's owner once run-slot records one, in place under a held slot, and with nothing due takes no slot (PG-3212)",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      const slot = join(dir, "data/ops/run-slot.sh")
+      mkdirSync(join(dir, "data/ops"), { recursive: true })
+      writeFileSync(
+        slot,
+        `#!/bin/bash\necho "slot $1 $2" >> ${JSON.stringify(join(dir, "build.log"))}\nshift 2\nexec "$@"\n`,
+      )
+      chmodSync(slot, 0o755)
+      const who = `slot prebuild-${basename(dir)} --`
+      expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean)).toEqual([
+        who,
+        "run build --filter=@packages/one --filter=@api/hono --filter=@packages/three --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
+      ])
+      expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean)).toHaveLength(2)
+      rmSync(join(dir, "packages/one/dist"), { force: true, recursive: true })
+      expect(run(["tests/one.test.ts"], false, { RUN_SLOT_HELD: "full-1 42" }).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean).slice(2)).toEqual([
+        "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
+      ])
+      rmSync(join(dir, "packages/one/dist"), { force: true, recursive: true })
+      mkdirSync(join(dir, "data/ops/run-slot.owner"))
+      writeFileSync(join(dir, "data/ops/run-slot.owner", basename(dir)), "abc1de-worker\n")
+      expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean).slice(3)).toEqual([
+        "slot abc1de-worker --",
+        "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
+      ])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(4),
+)
+
+// a checkout's git folder as git lays it out: a main checkout's .git folder, or a worktree's .git file naming its folder under the main one's .git/worktrees
+const gitFolders = (root: string): { main: string; tree: string; treeGit: string } => {
+  const main = join(root, "main")
+  const tree = join(root, ".claude/worktrees/wt")
+  const treeGit = join(main, ".git/worktrees/wt")
+  mkdirSync(treeGit, { recursive: true })
+  mkdirSync(tree, { recursive: true })
+  writeFileSync(join(tree, ".git"), `gitdir: ${treeGit}\n`)
+  return { main, tree, treeGit }
+}
+
+// git sets GIT_INDEX_FILE for a commit's hooks to an index in the checkout's own git folder (27 Nov, measured: `.git/index`, a worktree's `.git/worktrees/<name>/index`, a partial commit's `next-index-<pid>.lock` there); a script's scratch index lies elsewhere
+test("inCommitHook reads a commit's hook by GIT_INDEX_FILE in the checkout's own git folder, and no hook for a scratch index, another checkout's or none (PG-3235)", () => {
+  const root = mkdtempSync(join(tmpdir(), "prebuild-git-"))
+  try {
+    const { main, tree, treeGit } = gitFolders(root)
+    expect(prebuild.inCommitHook(main, { GIT_INDEX_FILE: ".git/index" })).toBe(true)
+    expect(prebuild.inCommitHook(tree, { GIT_INDEX_FILE: join(treeGit, "index") })).toBe(true)
+    expect(
+      prebuild.inCommitHook(tree, { GIT_INDEX_FILE: join(treeGit, "next-index-30078.lock") }),
+    ).toBe(true)
+    expect(prebuild.inCommitHook(tree, {})).toBe(false)
+    expect(prebuild.inCommitHook(tree, { GIT_INDEX_FILE: join(root, "scratch-index") })).toBe(false)
+    expect(prebuild.inCommitHook(tree, { GIT_INDEX_FILE: join(main, ".git/index") })).toBe(false)
+    expect(prebuild.inCommitHook(join(root, "none"), { GIT_INDEX_FILE: "x/index" })).toBe(false)
+  } finally {
+    rmSync(root, { force: true, recursive: true })
+  }
+})
+
+test("slotWho names commit-<worktree> inside a commit's hook in a worktree under .claude/worktrees, and the owner's name for a scratch index or a checkout outside them (PG-3235)", () => {
+  const root = mkdtempSync(join(tmpdir(), "prebuild-git-"))
+  try {
+    const { main, tree, treeGit } = gitFolders(root)
+    const ops = join(root, "ops")
+    mkdirSync(join(ops, "run-slot.owner"), { recursive: true })
+    writeFileSync(join(ops, "run-slot.owner", "wt"), "abc1de-worker\n")
+    writeFileSync(join(ops, "run-slot.owner", "main"), "abc1de-worker\n")
+    expect(prebuild.slotWho(tree, ops, { GIT_INDEX_FILE: join(treeGit, "index") })).toBe(
+      "commit-wt",
+    )
+    expect(prebuild.slotWho(tree, ops, {})).toBe("abc1de-worker")
+    expect(prebuild.slotWho(tree, ops, { GIT_INDEX_FILE: join(root, "scratch-index") })).toBe(
+      "abc1de-worker",
+    )
+    expect(prebuild.slotWho(main, ops, { GIT_INDEX_FILE: ".git/index" })).toBe("abc1de-worker")
+  } finally {
+    rmSync(root, { force: true, recursive: true })
+  }
+})
+
+test(
+  "test:file's due build in a commit's hook asks run-slot for the commit lane as commit-<worktree> with commit-slot.ts' mark, under the owner's name outside the hook, and in place under a held slot (PG-3235)",
+  () => {
+    const { dir, log, run } = clone("wt")
+    const scratch = dirname(dirname(dirname(dir)))
+    try {
+      mkdirSync(join(dir, "gitdir"))
+      writeFileSync(join(dir, ".git"), `gitdir: ${join(dir, "gitdir")}\n`)
+      const slot = join(dir, "data/ops/run-slot.sh")
+      mkdirSync(join(dir, "data/ops/run-slot.owner"), { recursive: true })
+      writeFileSync(join(dir, "data/ops/run-slot.owner/wt"), "abc1de-worker\n")
+      writeFileSync(
+        slot,
+        `#!/bin/bash\necho "slot $1 $2 mark=$RUN_SLOT_COMMIT_STEP" >> ${JSON.stringify(join(dir, "build.log"))}\nshift 2\nexec "$@"\n`,
+      )
+      chmodSync(slot, 0o755)
+      const hook = { GIT_INDEX_FILE: join(dir, "gitdir/index") }
+      const one =
+        "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true"
+      expect(run(["tests/one.test.ts"], false, hook).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean)).toEqual([
+        "slot commit-wt -- mark=1",
+        "run build --filter=@packages/one --filter=@api/hono --filter=@packages/three --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
+      ])
+      rmSync(join(dir, "packages/one/dist"), { force: true, recursive: true })
+      expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean).slice(2)).toEqual([
+        "slot abc1de-worker -- mark=",
+        one,
+      ])
+      rmSync(join(dir, "packages/one/dist"), { force: true, recursive: true })
+      expect(
+        run(["tests/one.test.ts"], false, {
+          ...hook,
+          GIT_INDEX_FILE: join(scratch, "scratch-index"),
+        }).exitCode,
+      ).toBe(0)
+      expect(log().split("\n").filter(Boolean).slice(4)).toEqual([
+        "slot abc1de-worker -- mark=",
+        one,
+      ])
+      rmSync(join(dir, "packages/one/dist"), { force: true, recursive: true })
+      expect(run(["tests/one.test.ts"], false, { ...hook, RUN_SLOT_NICE: "10" }).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean).slice(6)).toEqual([one])
+    } finally {
+      rmSync(scratch, { force: true, recursive: true })
+    }
+  },
+  within(4),
 )
 
 // issue 1964: a test's child process may import a package no reached source names, so test:file builds every shared package whose dist is missing, whatever its files import
