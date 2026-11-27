@@ -4250,23 +4250,49 @@ async function shell(
 // The positional parameters a `-c` script's words bind, `$0` to `$9`; one past `$9` stays unread
 const DIGIT_PARAMETERS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const
 
-// The programs that move a script's positional parameters or run a text that may: shift, set, getopts, eval, source and `.`
-const MOVERS = new Set([".", "eval", "getopts", "set", "shift", "source"])
+// The programs a script may run and still bind its positional parameters: each one a program of its own or a builtin that neither runs stored text nor sets a parameter, so only a builtin off this list (shift, set, trap, alias, read, typeset, zparseopts and the rest) can move them
+const KEEPS_POSITIONALS = new Set([
+  "[",
+  "cat",
+  "cd",
+  "cp",
+  "echo",
+  "false",
+  "git",
+  "grep",
+  "head",
+  "ls",
+  "mkdir",
+  "mv",
+  "printf",
+  "pwd",
+  "rm",
+  "tail",
+  "tee",
+  "test",
+  "touch",
+  "true",
+  "wc",
+])
 // An assignment that sets a positional parameter: zsh's `N=` and `argv`, and bash's `BASH_ARGV0` for `$0`
 const MOVING_ASSIGNMENT = /^(?:argv|BASH_ARGV0|\d+)(?:\[[^\]]*\])?\+?=/
+// Text that may set a parameter with its quotes and escapes taken off: an assigning expansion (`${1::=x}`, `${X:=y}`), zsh's `argv`, bash's BASH_ARGV, or a definition's `()`
+const MAY_SET_POSITIONALS = /\$\{[^}]*=|\bargv\b|BASH_ARGV|\(\s*\)/
 
-// A script that may move its positional parameters or read them in a function of its own, as the shared lexer reads it with its quotes and escapes taken off: a command word that is a mover (MOVERS) in any reading, or one the lexer cannot read as a plain word (`$S`, `${1+shift}`), an assignment that sets a parameter (MOVING_ASSIGNMENT), or a definition (`function f`, `f()`)
+// A script that may move its positional parameters or read them in a function of its own, read as the shared lexer reads it: every command, inner ones too, binds them only when each of its readings runs a program on KEEPS_POSITIONALS or none (a plain assignment), no word sets a parameter (MOVING_ASSIGNMENT, MAY_SET_POSITIONALS) and no definition opens (`function f`)
 function movesPositionals(script: string, env: Env): boolean {
-  if (/\(\s*\)/.test(script.replace(/["'\\]/g, ""))) return true
+  if (MAY_SET_POSITIONALS.test(script.replace(/["'\\]/g, ""))) return true
   const all = (list: Command[]): Command[] => list.flatMap((c) => [c, ...all(c.inner?.() ?? [])])
   return all(lexScript(script, env).commands).some((c) => {
     const lead = c.words.find((w) => w.quoted || !RESERVED.has(w.value))
     if (lead && !lead.quoted && lead.value === "function") return true
-    for (const w of c.words) {
-      if (!ASSIGN.test(w.value) && !/^\d+\+?=/.test(w.value)) break
-      if (MOVING_ASSIGNMENT.test(w.value)) return true
-    }
-    return readings(parse(c)).some(({ name }) => MOVERS.has(name) || marked(name))
+    if (c.words.some((w) => MOVING_ASSIGNMENT.test(w.value))) return true
+    // zsh's printf -v sets the variable it names, a positional parameter too (`printf -v 1 …`)
+    const setsVariable = (args: Word[]) => args.some((a) => /^-[^-]*v/.test(a.value))
+    return readings(parse(c)).some(
+      ({ args, name }) =>
+        name !== "" && (!KEEPS_POSITIONALS.has(name) || (name === "printf" && setsVariable(args))),
+    )
   })
 }
 

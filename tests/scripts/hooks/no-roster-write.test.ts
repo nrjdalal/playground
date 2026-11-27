@@ -316,6 +316,18 @@ describe("roster.ts and every read run", () => {
     `bash -c 'BASH_ARGV0=/tmp/w/roster.json; rm -f "$0"' /tmp/a`,
     `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'ls . ; rm -f "$1"' _ /tmp/w/{}`,
     `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'echo function; rm -f "$1"' _ /tmp/w/{}`,
+    // a builtin off the reader's closed list or an assigning expansion, on a scratch folder
+    `bash -c 'trap shift DEBUG; rm -f "$1"' _ /tmp/a /tmp/w/roster.json`,
+    `bash -c 'trap shift DEBUG; echo x > "$1"' _ /tmp/a /tmp/w/roster.json`,
+    `sh -c 'alias s=shift\ns; rm -f "$1"' _ /tmp/a /tmp/w/roster.json`,
+    "zsh -c 'argv[1]=/tmp/w/roster.json; rm -f $1' _ /tmp/a",
+    "zsh -c 'typeset argv=(/tmp/w/roster.json); rm -f $1' _ /tmp/a",
+    "zsh -c 'read -A argv <<< /tmp/w/roster.json; rm -f $1' _ /tmp/a",
+    "zsh -c 'zparseopts -D a=o; rm -f $1' _ -a /tmp/w/roster.json",
+    "zsh -c ': ${1::=/tmp/w/roster.json}; rm -f $1' _ /tmp/a",
+    "zsh -c 'printf -v 1 %s /tmp/w/roster.json; rm -f $1' _ /tmp/a",
+    // printf with no -v keeps the parameters bound
+    `bash -c 'printf "%s\\n" x > "$1"' _ /tmp/w/roster.json`,
     `cd ${DATA} && python3 -c "print(open('./roster.json').read())"`,
     `cd ${DATA}/scratch/w && python3 -c "import os; os.remove('./roster.json')"`,
     `python3 -c "import shutil; p='/tmp/y'; shutil.copy('/tmp/x', p)"`,

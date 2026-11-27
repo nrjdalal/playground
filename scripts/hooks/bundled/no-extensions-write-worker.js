@@ -9666,23 +9666,43 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   }
 }
 var DIGIT_PARAMETERS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
-var MOVERS = new Set([".", "eval", "getopts", "set", "shift", "source"]);
+var KEEPS_POSITIONALS = new Set([
+  "[",
+  "cat",
+  "cd",
+  "cp",
+  "echo",
+  "false",
+  "git",
+  "grep",
+  "head",
+  "ls",
+  "mkdir",
+  "mv",
+  "printf",
+  "pwd",
+  "rm",
+  "tail",
+  "tee",
+  "test",
+  "touch",
+  "true",
+  "wc"
+]);
 var MOVING_ASSIGNMENT = /^(?:argv|BASH_ARGV0|\d+)(?:\[[^\]]*\])?\+?=/;
+var MAY_SET_POSITIONALS = /\$\{[^}]*=|\bargv\b|BASH_ARGV|\(\s*\)/;
 function movesPositionals(script, env) {
-  if (/\(\s*\)/.test(script.replace(/["'\\]/g, "")))
+  if (MAY_SET_POSITIONALS.test(script.replace(/["'\\]/g, "")))
     return true;
   const all = (list) => list.flatMap((c) => [c, ...all(c.inner?.() ?? [])]);
   return all(lexScript(script, env).commands).some((c) => {
     const lead = c.words.find((w) => w.quoted || !RESERVED.has(w.value));
     if (lead && !lead.quoted && lead.value === "function")
       return true;
-    for (const w of c.words) {
-      if (!ASSIGN.test(w.value) && !/^\d+\+?=/.test(w.value))
-        break;
-      if (MOVING_ASSIGNMENT.test(w.value))
-        return true;
-    }
-    return readings(parse3(c)).some(({ name }) => MOVERS.has(name) || marked(name));
+    if (c.words.some((w) => MOVING_ASSIGNMENT.test(w.value)))
+      return true;
+    const setsVariable = (args) => args.some((a) => /^-[^-]*v/.test(a.value));
+    return readings(parse3(c)).some(({ args, name }) => name !== "" && (!KEEPS_POSITIONALS.has(name) || name === "printf" && setsVariable(args)));
   });
 }
 function withPositionals(env, script, after, fill, appended, bound = after.length) {

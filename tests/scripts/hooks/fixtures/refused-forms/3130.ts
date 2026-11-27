@@ -509,4 +509,93 @@ export const groups: Group[] = [
       ],
     ],
   },
+  {
+    // a script binds its parameters only when every program it runs is on the reader's closed list, so a builtin that may move them (trap, alias, typeset, local, declare, read, zparseopts) or an assigning expansion binds none
+    folders: ["process tmp"],
+    guards: ["no-roster-write", "no-extensions-write"],
+    rows: () => [
+      [
+        "a DEBUG trap that shifts before each command, then a forced removal through $1 of the roster",
+        `bash -c 'trap shift DEBUG; rm -f "$1"' _ /tmp/a ~/.playground/roster.json`,
+      ],
+      [
+        "zsh's DEBUG trap that shifts, then a forced removal through $1 of the roster",
+        "zsh -c 'trap shift DEBUG; rm -f $1' _ /tmp/a ~/.playground/roster.json",
+      ],
+      [
+        "bash's aliases on, an alias for shift run on the next line, then a forced removal through $1 of the roster",
+        `bash -c 'shopt -s expand_aliases; alias s=shift\ns; rm -f "$1"' _ /tmp/a ~/.playground/roster.json`,
+      ],
+      [
+        "an alias for shift run on the next line of an sh script, then a forced removal through $1 of the roster",
+        `sh -c 'alias s=shift\ns; rm -f "$1"' _ /tmp/a ~/.playground/roster.json`,
+      ],
+      [
+        "zsh's argv[1] set to the roster, then a forced removal through $1",
+        "zsh -c 'argv[1]=~/.playground/roster.json; rm -f $1' _ /tmp/a",
+      ],
+      [
+        "zsh's argv set to the roster by typeset, then a forced removal through $1",
+        "zsh -c 'typeset argv=(~/.playground/roster.json); rm -f $1' _ /tmp/a",
+      ],
+      [
+        "zsh's argv set to the roster by local, then a forced removal through $1",
+        "zsh -c 'local argv=(~/.playground/roster.json); rm -f $1' _ /tmp/a",
+      ],
+      [
+        "zsh's argv set to the roster by declare, then a forced removal through $1",
+        "zsh -c 'declare argv=(~/.playground/roster.json); rm -f $1' _ /tmp/a",
+      ],
+      [
+        "zsh's argv read from a here-string naming the roster, then a forced removal through $1",
+        "zsh -c 'read -A argv <<< ~/.playground/roster.json; rm -f $1' _ /tmp/a",
+      ],
+      [
+        "zsh's zparseopts -D taking an option out of the parameters, then a forced removal through $1 of the roster",
+        "zsh -c 'zparseopts -D a=o; rm -f $1' _ -a ~/.playground/roster.json",
+      ],
+      [
+        "zsh's ${1::=…} setting $1 to the roster, then a forced removal through $1",
+        "zsh -c ': ${1::=~/.playground/roster.json}; rm -f $1' _ /tmp/a",
+      ],
+      [
+        "zsh's ${argv::=…} setting the parameters to the roster, then a forced removal through $1",
+        "zsh -c ': ${argv::=~/.playground/roster.json}; rm -f $1' _ /tmp/a",
+      ],
+      [
+        "zsh's printf -v 1 setting $1 to the roster, then a forced removal through $1",
+        "zsh -c 'printf -v 1 %s ~/.playground/roster.json; rm -f $1' _ /tmp/a",
+      ],
+    ],
+  },
+  {
+    folders: ["process tmp"],
+    guards: ["no-roster-write"],
+    rows: () => [
+      [
+        "zsh's printf -v argv setting the parameters to the roster, then a forced removal through $1",
+        "zsh -c 'printf -v argv %s ~/.playground/roster.json; rm -f $1' _ /tmp/a",
+      ],
+    ],
+  },
+  {
+    folders: ["process tmp"],
+    guards: ["no-roster-write"],
+    rows: () => [
+      [
+        "a DEBUG trap that shifts, then a redirect through $1 onto the roster",
+        `bash -c 'trap shift DEBUG; echo x > "$1"' _ /tmp/a ~/.playground/roster.json`,
+      ],
+    ],
+  },
+  {
+    folders: ["process tmp"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a DEBUG trap that shifts, then a recursive removal through $1 of a folder under the root",
+        `bash -c 'trap shift DEBUG; rm -rf "$1"' _ /tmp/a ${NEVER_MADE}`,
+      ],
+    ],
+  },
 ]
