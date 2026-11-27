@@ -15,6 +15,10 @@ const OTHER = "https://github.com/acme/tools.git"
 const A = "repos/quillco/acme-skills"
 const NOT_RUN = "none of its commands ran"
 const dirs: Record<string, string> = {}
+// A remote name git would read as an option of ls-remote, which runs the program it names
+const DASHED = "--upload-pack=touch"
+const HUNG = ["r1", "r2", "r3"]
+const allowed = process.env.GIT_ALLOW_PROTOCOL
 let scratch = ""
 let stored = ""
 
@@ -42,7 +46,7 @@ async function store(name: string, values: Record<string, unknown>, login?: stri
 }
 
 beforeAll(async () => {
-  // the fixtures' GitHub URLs are made up, so the hook's ls-remote of one fails at once rather than over the network, as a remote it cannot read does
+  // the fixtures' GitHub URLs are made up, so the hook's ls-remote of one fails at once rather than over the network, as a remote it cannot read does; afterAll puts it back
   process.env.GIT_ALLOW_PROTOCOL = "file"
   scratch = await mkdtemp(join(tmpdir(), "no-extension-repo-write-"))
   stored = await store("stored", { "ext.repos": { acme: "quillco/acme-skills" } }, "quillco")
@@ -138,9 +142,31 @@ beforeAll(async () => {
     git(dirs[name], "remote", "set-url", "origin", fetch)
     git(dirs[name], "remote", "set-url", "--push", "origin", `${EXT}.git`)
   }
+  // dashed, on feature, configures a remote named DASHED and a local HEAD of it naming feature, and holds a bare repository at ./loose, whose HEAD is main, that no remote names; hung has three ssh remotes whose local HEAD names feature
+  for (const name of ["dashed", "hung"]) {
+    dirs[name] = join(scratch, "work", name)
+    git(scratch, "clone", "-q", join(scratch, "work", "copy"), dirs[name])
+    git(dirs[name], "remote", "set-url", "origin", `${EXT}.git`)
+  }
+  const remotes: [string, string][] = [
+    ["dashed", DASHED],
+    ["dashed", "loose"],
+    ...HUNG.map((r): [string, string] => ["hung", r]),
+  ]
+  for (const [name, remote] of remotes) {
+    if (name === "hung")
+      git(dirs.hung, "remote", "add", remote, `ssh://git@made-up.invalid/${remote}.git`)
+    else if (remote === DASHED) git(dirs.dashed, "config", `remote.${remote}.url`, `${EXT}.git`)
+    git(dirs[name], "update-ref", `refs/remotes/${remote}/feature`, "HEAD")
+    git(dirs[name], "symbolic-ref", `refs/remotes/${remote}/HEAD`, `refs/remotes/${remote}/feature`)
+  }
+  git(scratch, "init", "-q", "--bare", "-b", "main", join(dirs.dashed, "loose"))
+  git(dirs.dashed, "push", "-q", join(dirs.dashed, "loose"), "HEAD:main")
 })
 
 afterAll(async () => {
+  if (allowed === undefined) delete process.env.GIT_ALLOW_PROTOCOL
+  else process.env.GIT_ALLOW_PROTOCOL = allowed
   await rm(scratch, { force: true, recursive: true })
 })
 
@@ -981,4 +1007,30 @@ describe("remoteDefault reads the remote's own HEAD past the local origin/HEAD",
   ])("%s", (_, dir, want) => {
     expect(remoteDefault(dirs[dir], "origin")).toBe(want)
   })
+
+  test("the local HEAD of a name no remote configures, which git would read as a path", () => {
+    expect(remoteDefault(dirs.dashed, "loose")).toBe("feature")
+  })
+
+  test("a remote named as an option keeps its local default, its commit and push stay refused, and the program it names never runs", async () => {
+    expect(remoteDefault(dirs.dashed, DASHED)).toBe("feature")
+    await refused(bash("git commit -m x", dirs.dashed))
+    await refused(bash(`git push -- ${DASHED} feature`, dirs.dashed))
+    expect(await Bun.file(join(dirs.dashed, "HEAD")).exists()).toBe(false)
+  })
+
+  test("a commit's reads of three hung remotes share one 5 s budget and keep each local default", async () => {
+    const before = [process.env.GIT_ALLOW_PROTOCOL, process.env.GIT_SSH_COMMAND]
+    process.env.GIT_ALLOW_PROTOCOL = "file:ssh"
+    process.env.GIT_SSH_COMMAND = "sh -c 'sleep 7' x"
+    try {
+      const start = performance.now()
+      await refused(bash("git commit -m x", dirs.hung))
+      expect(performance.now() - start).toBeLessThan(7_000)
+    } finally {
+      process.env.GIT_ALLOW_PROTOCOL = before[0]
+      if (before[1] === undefined) delete process.env.GIT_SSH_COMMAND
+      else process.env.GIT_SSH_COMMAND = before[1]
+    }
+  }, 30_000)
 })

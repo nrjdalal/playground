@@ -5,7 +5,12 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, join } from "node:path"
 
 import { dataDir, dataDirOf } from "../../packages/env/src/data-dir"
-import { heldBy, pushRemote, withLiveBudget } from "../../packages/safe-delete/src/live-refs"
+import {
+  heldBy,
+  liveDefault,
+  pushRemote,
+  withLiveBudget,
+} from "../../packages/safe-delete/src/live-refs"
 import { guardedOrgs } from "../../packages/settings/src/ext"
 import { coreDir, readPolicy, readPolicySync } from "../../packages/settings/src/rendered"
 import { gatedSendsSchema } from "../../packages/settings/src/slack"
@@ -1115,12 +1120,11 @@ function commitTexts(dir: string | undefined, range: string[], what: string, aft
 }
 
 // The text of a git read in a checkout, or an unknown naming what it stood for when the read fails.
-function gitText(dir: string | undefined, args: string[], what: string, timeout?: number): Text {
+function gitText(dir: string | undefined, args: string[], what: string): Text {
   if (!dir) return unknown(`${what}, in a checkout the hook cannot resolve`)
   const proc = Bun.spawnSync(["git", "-C", dir, ...args], {
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
     stderr: "ignore",
-    timeout,
   })
   return proc.exitCode === 0 ? { value: proc.stdout.toString() } : unknown(what)
 }
@@ -1429,7 +1433,7 @@ function branchHead(dir: string): boolean {
   return !defaults.has(name)
 }
 
-// The default branch, lower case, of the remote a clone names: its local refs/remotes/<remote>/HEAD, and when that names a branch other than main or master, which stay refused anyway, the remote's own HEAD, since a clone of a local copy takes the copy's checked-out branch as that ref (issue 3185); the local one stands when the remote cannot be read in 5 s, and none when the local ref is unset.
+// The default branch, lower case, of the remote a clone names: its local refs/remotes/<remote>/HEAD, and when that names a branch other than main or master, which stay refused anyway, the configured remote's own HEAD (liveDefault), since a clone of a local copy takes the copy's checked-out branch as that ref (issue 3185); the local one stands when no remote of that name is configured or it cannot be read, and none when the local ref is unset.
 export function remoteDefault(dir: string, remote: string): string | undefined {
   const local = gitText(
     dir,
@@ -1442,14 +1446,9 @@ export function remoteDefault(dir: string, remote: string): string | undefined {
     .slice(remote.length + 1)
     .toLowerCase()
   if (name === "main" || name === "master") return name
-  const own = gitText(
-    dir,
-    ["ls-remote", "--symref", remote, "HEAD"],
-    "the remote's own HEAD",
-    5_000,
-  )
-  const head = own.unknown ? undefined : /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(own.value)?.[1]
-  return head ? head.toLowerCase() : name
+  const url = gitText(dir, ["config", "--get", `remote.${remote}.url`], "the remote's URL")
+  const remoteHead = url.unknown ? null : liveDefault(dir, remote)
+  return remoteHead ? remoteHead.toLowerCase() : name
 }
 
 // git push publishes the names of the refs it pushes and the messages of every commit the remote it pushes to (the one it names, else git's push remote) holds no live branch of (heldBy), each one when that remote cannot be read.
