@@ -47,13 +47,13 @@ export type Card = {
 export type Sent = {
   at: number
   id: string
-  // a multiSelect ask's card, whose poll takes several answers and whose reply takes several numbers
-  ticking?: true
-  // a multiSelect poll's newest vote, by its rows and when it came, which answers the card once no newer vote comes for VOTE_SETTLE_MS
-  ticked?: { at: number; rows: number[] }
   // the card's poll, when one went: its message id and its secret in base64, so the owner's vote reads back as a row
   poll?: { id: string; secret: string }
   rows: { go: boolean; label: string }[]
+  // a multiSelect poll's newest vote, by its rows and when it came, which answers the card once no newer vote comes for VOTE_SETTLE_MS
+  ticked?: { at: number; rows: number[] }
+  // a multiSelect ask's card, whose poll takes several answers and whose reply takes several numbers
+  ticking?: true
 }
 
 // WhatsApp's poll holds 2 to 12 options.

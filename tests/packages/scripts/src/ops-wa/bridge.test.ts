@@ -1217,6 +1217,17 @@ describe("a multiSelect ask on WhatsApp (PG-3177)", () => {
     expect(h.answers).toHaveLength(1)
   })
 
+  test("a vote still settling when a typed reply answers the card answers nothing more and says nothing", async () => {
+    const h = await withCards([ticks()])
+    await vote(h, ["1. Nudge Ana", "3. Nudge Cy"])
+    expect(await say(h, "1 2 #i7")).toEqual(["Answered #i7: Nudge Ana · Nudge Bo."])
+    h.advance(VOTE_SETTLE_MS)
+    const before = h.fake.sent.length
+    await h.pass()
+    expect(h.answers).toHaveLength(1)
+    expect(h.fake.sent.slice(before).flatMap((s) => s.content.text ?? [])).toEqual([])
+  })
+
   test("a vote taken back before it settles answers nothing", async () => {
     const h = await withCards([ticks()])
     await vote(h, ["2. Nudge Bo"])

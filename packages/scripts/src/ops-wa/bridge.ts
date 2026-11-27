@@ -706,14 +706,15 @@ async function cards(io: Io & Mode, inbox: Inbox) {
   let held = state.held
   let pins = await pinsOf(io.dir, now)
   try {
-    // a multiSelect poll's ticks with no newer vote for VOTE_SETTLE_MS answer its card, as a reply of those numbers would
+    const [open, terms] = await Promise.all([inbox.open(), inbox.terms()])
+    // a multiSelect poll's ticks with no newer vote for VOTE_SETTLE_MS answer its card, as a reply of those numbers would, while the card is still open; a card answered another way meanwhile drops them
     for (const [ref, card] of Object.entries(sent)) {
       if (!card.ticked || now - card.ticked.at < VOTE_SETTLE_MS) continue
       const numbers = card.ticked.rows.map((at) => at + 1)
       delete card.ticked
-      await answerCard(io, inbox, { numbers, ref: Number(ref) })
+      if (open.some((c) => c.id === card.id && c.status === "open"))
+        await answerCard(io, inbox, { numbers, ref: Number(ref) })
     }
-    const [open, terms] = await Promise.all([inbox.open(), inbox.terms()])
     // the one place a settle shows, by any route: an answer on WhatsApp or in the Inbox, a settle, an ack or a resolve each takes the card off the open list or out of open
     if (io.pin) pins = await unpinSettled(io.pin, pins, open, io.log)
     if (io.draft)
