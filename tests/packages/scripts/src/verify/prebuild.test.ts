@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, relative } from "node:path"
+import { basename, join, relative } from "node:path"
 
 import * as prebuild from "../../../../../packages/scripts/src/verify/prebuild"
 
@@ -392,6 +392,7 @@ const copyPrebuild = (dir: string): string => {
   mkdirSync(join(dir, "api/hono/src/lib/dev"), { recursive: true })
   cpSync(join(ROOT, "api/hono/src/lib/dev/stop.ts"), join(dir, "api/hono/src/lib/dev/stop.ts"))
   mkdirSync(join(dir, "node_modules/@packages"), { recursive: true })
+  symlinkSync(join(ROOT, "packages/env"), join(dir, "node_modules/@packages/env"))
   symlinkSync(join(ROOT, "packages/safe-delete"), join(dir, "node_modules/@packages/safe-delete"))
   symlinkSync(join(ROOT, "packages/scripts"), join(dir, "node_modules/@packages/scripts"))
   return verify
@@ -489,7 +490,11 @@ test(
 const clone = (): {
   dir: string
   log: () => string
-  run: (args: string[], main?: boolean) => { exitCode: number; stderr: string }
+  run: (
+    args: string[],
+    main?: boolean,
+    extra?: Record<string, string>,
+  ) => { exitCode: number; stderr: string }
 } => {
   const dir = mkdtempSync(join(tmpdir(), "prebuild-clone-"))
   const log = join(dir, "build.log")
@@ -564,15 +569,24 @@ const clone = (): {
     join(dir, "tests/table.test.ts"),
     'import { m } from "../lib/table"\nexport const n = m\n',
   )
-  const { PLAYGROUND_REPO: _, ...env } = process.env
+  const { PLAYGROUND_REPO: _, RUN_SLOT_HELD: _held, RUN_SLOT_NICE: _nice, ...env } = process.env
   return {
     dir,
     log: () => (existsSync(log) ? readFileSync(log, "utf8") : ""),
-    run: (args, main = false) => {
+    run: (args, main = false, extra = {}) => {
       const { exitCode, stderr } = bounded(
         "test:file's prebuild",
         ["bun", join(verify, "prebuild.ts"), "tests", ...args],
-        { cwd: dir, env: { ...env, NODE_ENV: "test", ...(main ? { PLAYGROUND_REPO: dir } : {}) } },
+        {
+          cwd: dir,
+          env: {
+            ...env,
+            NODE_ENV: "test",
+            PLAYGROUND_DATA_DIR: join(dir, "data"),
+            ...(main ? { PLAYGROUND_REPO: dir } : {}),
+            ...extra,
+          },
+        },
       )
       return { exitCode, stderr: stderr.toString() }
     },
@@ -668,6 +682,52 @@ test(
     }
   },
   within(2),
+)
+
+test("slotted puts the build behind run-slot.sh under the worktree's name, and leaves it bare under a held slot or with no run-slot.sh (PG-3212)", () => {
+  const argv = ["turbo", "run", "build"]
+  const slot = "/data/ops/run-slot.sh"
+  expect(prebuild.slotted(argv, "/w/PG-1 my tree", {}, slot)).toEqual([
+    slot,
+    "prebuild-PG-1-my-tree",
+    "--",
+    ...argv,
+  ])
+  expect(prebuild.slotted(argv, "/w/tree", { RUN_SLOT_HELD: "full-1 42" }, slot)).toEqual(argv)
+  expect(prebuild.slotted(argv, "/w/tree", { RUN_SLOT_NICE: "10" }, slot)).toEqual(argv)
+  expect(prebuild.slotted(argv, "/w/tree", {}, null)).toEqual(argv)
+})
+
+test(
+  "test:file's due build goes through the data folder's run-slot.sh, in place under a held slot, and with nothing due takes no slot (PG-3212)",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      const slot = join(dir, "data/ops/run-slot.sh")
+      mkdirSync(join(dir, "data/ops"), { recursive: true })
+      writeFileSync(
+        slot,
+        `#!/bin/bash\necho "slot $1 $2" >> ${JSON.stringify(join(dir, "build.log"))}\nshift 2\nexec "$@"\n`,
+      )
+      chmodSync(slot, 0o755)
+      const who = `slot prebuild-${basename(dir)} --`
+      expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean)).toEqual([
+        who,
+        "run build --filter=@packages/one --filter=@api/hono --filter=@packages/three --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
+      ])
+      expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean)).toHaveLength(2)
+      rmSync(join(dir, "packages/one/dist"), { force: true, recursive: true })
+      expect(run(["tests/one.test.ts"], false, { RUN_SLOT_HELD: "full-1 42" }).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean).slice(2)).toEqual([
+        "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
+      ])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(3),
 )
 
 // issue 1964: a test's child process may import a package no reached source names, so test:file builds every shared package whose dist is missing, whatever its files import

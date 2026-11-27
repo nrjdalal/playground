@@ -1,6 +1,16 @@
 import "@packages/env/aliases"
-import { existsSync, readFileSync, realpathSync, statSync, utimesSync } from "node:fs"
-import { dirname, isAbsolute, join, resolve } from "node:path"
+import {
+  accessSync,
+  constants,
+  existsSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  utimesSync,
+} from "node:fs"
+import { basename, dirname, isAbsolute, join, resolve } from "node:path"
+
+import { dataDir } from "@packages/env/data-dir"
 
 import { stackIn } from "../../../../api/hono/src/lib/dev/stop"
 import { withoutShebang } from "../shebang"
@@ -319,6 +329,28 @@ export const prebuildStep = (
   return stale ? { refused: stale } : { build: missing }
 }
 
+// Pure: the turbo build's argv through the machine's run slot (**slots**), as `run-slot.sh prebuild-<worktree> -- <argv>`, so the build a fresh worktree or a pull needs waits its turn rather than run beside the queue; bare under a run that already holds a slot (run-slot exports RUN_SLOT_HELD to a lane's child and RUN_SLOT_NICE to every child), so it never waits on a slot it holds, and where run-slot.sh is not there to run (a machine with no factory data folder), as commit-slot.ts does.
+export const slotted = (
+  argv: string[],
+  root: string,
+  env: Record<string, string | undefined>,
+  runSlot: string | null,
+): string[] =>
+  env.RUN_SLOT_HELD === undefined && env.RUN_SLOT_NICE === undefined && runSlot
+    ? [runSlot, `prebuild-${basename(root).replace(/[^A-Za-z0-9._#-]/g, "-")}`, "--", ...argv]
+    : argv
+
+// The machine's run-slot.sh when it can run, else null.
+const runSlotScript = (): string | null => {
+  const script = join(dataDir(), "ops", "run-slot.sh")
+  try {
+    accessSync(script, constants.X_OK)
+    return script
+  } catch {
+    return null
+  }
+}
+
 // The folders of the given workspace packages and of every workspace package they depend on, which turbo builds first.
 const builtWith = (names: string[]): string[] => {
   const all = workspaces(ROOT)
@@ -333,7 +365,7 @@ const builtWith = (names: string[]): string[] => {
   return all.filter(({ pkg }) => pkg.name && seen.has(pkg.name)).map(({ path }) => path)
 }
 
-// Runs prebuildStep and builds what it names: each package by name (turbo builds its dependencies first) under the flags a worktree with no .env needs, then the data table's metrics when they are missing, then stamps every dist the build covered, its dependencies' included, with the build's start; the exit code.
+// Runs prebuildStep and builds what it names: each package by name, through the run slot by slotted (turbo builds its dependencies first) under the flags a worktree with no .env needs, then the data table's metrics when they are missing, then stamps every dist the build covered, its dependencies' included, with the build's start; the exit code.
 const prebuild = (target: string, missing: string[]): number => {
   const step = prebuildStep(target, missing, ROOT, process.env.PLAYGROUND_REPO)
   if ("refused" in step) {
@@ -352,13 +384,18 @@ const prebuild = (target: string, missing: string[]): number => {
   const steps = [
     ...(packages.length > 0
       ? [
-          [
-            join(ROOT, "node_modules/.bin/turbo"),
-            "run",
-            "build",
-            ...packages.map((name) => `--filter=${name}`),
-            "--output-logs=errors-only",
-          ],
+          slotted(
+            [
+              join(ROOT, "node_modules/.bin/turbo"),
+              "run",
+              "build",
+              ...packages.map((name) => `--filter=${name}`),
+              "--output-logs=errors-only",
+            ],
+            ROOT,
+            process.env,
+            runSlotScript(),
+          ),
         ]
       : []),
     ...(step.build.some((specifier) => specifier.startsWith("generated/"))
