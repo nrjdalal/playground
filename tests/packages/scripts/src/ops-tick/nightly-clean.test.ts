@@ -832,9 +832,10 @@ describe("one night's run against a fixture data folder", () => {
       `list ${CARD} approved on spark-9dfb: docker image rm sha256:ccc`,
     )
     expect(runs.some((argv) => argv.includes("ask"))).toBe(false)
-    expect(
-      JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8")).card,
-    ).toBeUndefined()
+    const state = JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))
+    expect(state.card).toBeUndefined()
+    // the list the peer's line names stays readable after the night drops its card (#3161)
+    expect(state.sent).toEqual({ at: "2026-11-17T03:00:00.000Z", id: CARD, items: [items[1]] })
   })
 
   test("an image of unknown age is kept off the night's lines, its first night written to the state file for the next run", async () => {

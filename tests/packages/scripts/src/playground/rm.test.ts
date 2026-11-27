@@ -287,6 +287,100 @@ test.each<[string, string, string[], string]>([
   expect(existsSync(join(data, "ops", "tick", APPROVALS))).toBe(false)
 })
 
+// rm's own reader of the approvals (rmDeps's), run against a list machine's data folder.
+const readerOf = async <T>(main: string, data: string, run: (deps: RmDeps) => Promise<T>) => {
+  const repo0 = process.env.PLAYGROUND_REPO
+  const data0 = process.env.PLAYGROUND_DATA_DIR
+  process.env.PLAYGROUND_REPO = main
+  process.env.PLAYGROUND_DATA_DIR = data
+  try {
+    return await run(rmDeps(main))
+  } finally {
+    if (repo0 === undefined) delete process.env.PLAYGROUND_REPO
+    else process.env.PLAYGROUND_REPO = repo0
+    if (data0 === undefined) delete process.env.PLAYGROUND_DATA_DIR
+    else process.env.PLAYGROUND_DATA_DIR = data0
+  }
+}
+
+// A list machine after the night that sent Ops a peer's approved weights on list A and saved list B (or, with no B, no new list): the approval line at `bytes`, and the --card A --peer run with a stub ssh.
+const afterSave = async (opts: { bytes?: number; next?: boolean } = {}) => {
+  const { cardId, data, deps, main } = listMachine()
+  const weights = {
+    bytes: 7,
+    kind: "weights",
+    machine: "spark-b",
+    path: "/home/me/models/hf/hub/models--nvidia--Qwen-27B",
+  } satisfies CardItem
+  const sent = { at: "2026-11-17T03:00:00.000Z", id: cardId, items: [weights] }
+  const next = {
+    at: "2026-11-18T03:00:00.000Z",
+    id: "66666666-7777-8888-9999-000000000000",
+    items: [],
+  }
+  writeFileSync(
+    join(data, "ops", "tick", "nightly-clean.json"),
+    JSON.stringify({ ...(opts.next === false ? {} : { card: next }), sent }),
+  )
+  writeFileSync(
+    join(data, "ops", "tick", APPROVALS),
+    JSON.stringify({
+      at: "2026-11-17T09:00:00.000Z",
+      by: "ops",
+      bytes: opts.bytes ?? weights.bytes,
+      choice: "remove",
+      list: cardId,
+      machine: weights.machine,
+      path: weights.path,
+    }),
+  )
+  const { seen, peer } = peerRun({ code: 0, out: "Deleted the weights on the peer" })
+  const ran = await readerOf(main, data, (real) =>
+    rmTold([weights.path, "--card", cardId, "--peer", "spark-b"], {
+      ...deps,
+      approvals: real.approvals,
+      peer,
+    }),
+  )
+  return { cardId, deps, next, ran, seen, weights }
+}
+
+test.each([
+  ["the next list's save", {}],
+  ["a night that saved no new list", { next: false }],
+])(
+  "rm --card <id> --peer removes a peer's approved Remove after %s, at the size it was approved at (#3161)",
+  async (_, opts) => {
+    const { cardId, ran, seen, weights } = await afterSave(opts)
+    expect(ran.code).toBe(0)
+    expect(seen).toEqual([
+      { machine: "spark-b", command: rmPeerCommand(weights.path, weights.bytes, cardId) },
+    ])
+  },
+)
+
+test("rm --card <id> --peer still refuses after the next save an approval at another size, and sends no ssh (#3161)", async () => {
+  const { ran, seen } = await afterSave({ bytes: 8 })
+  expect(ran.code).toBe(1)
+  expect(ran.err.join("\n")).toContain("holds no approved Remove")
+  expect(seen).toEqual([])
+})
+
+test("rm --approve refuses the list a peer's Remove was sent from once the next list is saved, and --card refuses an id neither list holds (#3161)", async () => {
+  const { cardId, deps, next } = await afterSave()
+  const { code, err } = await rmTold(
+    ["--approve", cardId, "/home/me/models/x", "--peer", "spark-b"],
+    deps,
+  )
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain(`list ${cardId} is not the list nightly-clean saved`)
+  const other = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  expect(await readerOf(deps.main, deps.data, (real) => real.approvals!(other))).toBe(
+    `list ${other} is not the list nightly-clean saved`,
+  )
+  expect(next.id).not.toBe(cardId)
+})
+
 test("runRm moves a path, lists it and restores it, telling no one", async () => {
   const { deps, home, told } = machine()
   const path = join(home, "old.txt")

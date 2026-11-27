@@ -153,6 +153,10 @@ export const approvalPicks = (
   return { keep: of("keep"), remove: of("remove") }
 }
 
+// Pure: the saved list id names in nightly-clean's state, or none.
+export const listOf = (saved: { card?: CardState; sent?: CardState }, id: string) =>
+  saved.card?.id === id ? saved.card : undefined
+
 // Pure: the command each peer runs for one approved item, since approved weights reach a peer only as a narrow `playground rm --peer` that re-checks there before deleteWeights, while an image is `docker image rm` and a replay a `playground rm` with a reason.
 export const peerCommand = (item: CardItem, card: string): string =>
   item.kind === "image"
@@ -182,7 +186,7 @@ export async function cardNight(
   home: string,
   saved: { card?: CardState; kept?: Kept },
   deps: CardDeps,
-): Promise<{ card?: CardState; kept: Kept; ops: string[]; said: string }> {
+): Promise<{ card?: CardState; kept: Kept; ops: string[]; said: string; sent?: CardState }> {
   const kept = keptAfter(found, saved.kept ?? {})
   const ops: string[] = []
   const said: string[] = []
