@@ -3,6 +3,8 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { site } from "../../../../../packages/config/src/site"
 import { attachmentUrl } from "../../../../../web/next/src/lib/attachments"
 import {
+  cardDraftKey,
+  cardKept,
   DRAFTS_KEY,
   draftSaver,
   keptAttachments,
@@ -11,6 +13,7 @@ import {
   putDraft,
   readDrafts,
   takeHanded,
+  type Waiting,
   saveDraft,
 } from "../../../../../web/next/src/lib/drafts"
 import type { OutboxAttachment } from "../../../../../web/next/src/lib/outbox"
@@ -226,12 +229,64 @@ describe("posterEdit", () => {
   test("the poster's new words take the box, and the owner's own wait to be restored", () => {
     expect(posterEdit("hi, the ship moves to Friday", "hi", "hi there")).toEqual({
       draft: "hi there",
-      replaced: "hi, the ship moves to Friday",
+      waiting: { base: "hi", text: "hi, the ship moves to Friday" },
     })
   })
 
   test("nothing waits when the owner had not changed the box, or had typed the poster's new words", () => {
-    expect(posterEdit("hi", "hi", "hi there")).toEqual({ draft: "hi there", replaced: null })
-    expect(posterEdit("hi there", "hi", "hi there")).toEqual({ draft: "hi there", replaced: null })
+    expect(posterEdit("hi", "hi", "hi there")).toEqual({ draft: "hi there", waiting: null })
+    expect(posterEdit("hi there", "hi", "hi there")).toEqual({ draft: "hi there", waiting: null })
+  })
+})
+
+// InboxCard's own steps with made-up words: its mount reads the kept copy, its effect saves cardKept through one draftSaver, and a live edit runs posterEdit (PG-3176).
+describe("a draft card's kept words across a remount", () => {
+  const KEY = cardDraftKey("id-made-up")
+  const mount = (posted: string) => {
+    const kept = readDrafts()[KEY]
+    const start =
+      kept?.base !== undefined && kept.base !== posted
+        ? posterEdit(kept.text, kept.base, posted)
+        : { draft: kept?.text ?? posted, waiting: null }
+    const save = draftSaver(KEY, kept)
+    const effect = (draft: string, at: string, waiting: Waiting | null) =>
+      save(cardKept(draft, at, waiting))
+    effect(start.draft, posted, start.waiting)
+    return { effect, start }
+  }
+
+  test("words a live poster edit replaced come back as Restore my edit after a remount, until the next edit", () => {
+    useStorage()
+    const card = mount("hi")
+    card.effect("hi, the ship moves to Friday", "hi", null)
+    const live = posterEdit("hi, the ship moves to Friday", "hi", "hi there")
+    card.effect(live.draft, "hi there", live.waiting)
+    const reloaded = mount("hi there")
+    expect(reloaded.start).toEqual({
+      draft: "hi there",
+      waiting: { base: "hi", text: "hi, the ship moves to Friday" },
+    })
+    const next = posterEdit(reloaded.start.draft, "hi there", "hi all")
+    reloaded.effect(next.draft, "hi all", next.waiting)
+    expect(readDrafts()[KEY]).toBeUndefined()
+    expect(mount("hi all").start).toEqual({ draft: "hi all", waiting: null })
+  })
+
+  test("Restore my edit keeps the restored words over the poster's newer text", () => {
+    useStorage()
+    saveDraft(KEY, { attachments: [], base: "hi", text: "hi, the ship moves to Friday" })
+    const card = mount("hi there")
+    card.effect("hi, the ship moves to Friday", "hi there", null)
+    expect(mount("hi there").start).toEqual({
+      draft: "hi, the ship moves to Friday",
+      waiting: null,
+    })
+  })
+
+  test("a kept copy saved before base existed takes base once the card mounts", () => {
+    useStorage()
+    saveDraft(KEY, { attachments: [], text: "old words" })
+    mount("hi")
+    expect(readDrafts()[KEY]).toEqual({ attachments: [], base: "hi", text: "old words" })
   })
 })

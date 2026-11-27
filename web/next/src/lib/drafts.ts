@@ -111,7 +111,7 @@ export function saveDraft(to: string, draft: Draft): void {
 }
 
 const draftKey = (draft: Draft) =>
-  JSON.stringify([draft.text, draft.attachments.map((file) => file.id)])
+  JSON.stringify([draft.text, draft.attachments.map((file) => file.id), draft.base])
 
 // One composer's saves: it writes only when its own words or files differ from what it last loaded or saved, so a render with nothing new here (an idle tab's composer re-rendering on every dashboard frame) never writes its stale box over a draft typed in another tab.
 export function draftSaver(to: string, initial: Draft | undefined): (draft: Draft) => void {
@@ -162,12 +162,21 @@ export function takeHanded<Handed extends { ref?: number; text: string; to: stri
       : handed.text
 }
 
-// Pure: a draft card's box once its poster's words change from base to posted: the poster's words always, and the owner's own, typed over base, kept to restore (PG-3176).
+// The owner's words a poster's edit replaced, with the poster's text they were typed over, waiting behind Restore my edit.
+export type Waiting = { base: string; text: string }
+
+// Pure: a draft card's box once its poster's words change from base to posted: the poster's words always, and the owner's own, typed over base, waiting to be restored (PG-3176).
 export const posterEdit = (
   owner: string,
   base: string,
   posted: string,
-): { draft: string; replaced: string | null } => ({
+): { draft: string; waiting: Waiting | null } => ({
   draft: posted,
-  replaced: owner !== base && owner !== posted ? owner : null,
+  waiting: owner !== base && owner !== posted ? { base, text: owner } : null,
 })
+
+// Pure: what a draft card keeps: words waiting to be restored while the box holds the poster's text, so a remount gives them back, else the box's own words over the poster's text, none when they match it.
+export const cardKept = (draft: string, posted: string, waiting: Waiting | null): Draft =>
+  waiting && draft === posted
+    ? { attachments: [], base: waiting.base, text: waiting.text }
+    : { attachments: [], base: posted, text: draft === posted ? "" : draft }

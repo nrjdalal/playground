@@ -136,7 +136,7 @@ import { HOLDS_RELOAD } from "@/lib/build-reload"
 import { copyToClipboard } from "@/lib/clipboard"
 import { config } from "@/lib/config"
 import { dispatcherOf, useNow } from "@/lib/dashboard"
-import { cardDraftKey, draftSaver, posterEdit, readDrafts, saveDraft } from "@/lib/drafts"
+import { cardDraftKey, cardKept, draftSaver, posterEdit, readDrafts, saveDraft } from "@/lib/drafts"
 import {
   answerItem,
   canDraft,
@@ -1122,16 +1122,16 @@ export function InboxCard({
   const [start] = useState(() =>
     kept?.base !== undefined && kept.base !== posted
       ? posterEdit(kept.text, kept.base, posted)
-      : { draft: kept?.text ?? posted, replaced: null },
+      : { draft: kept?.text ?? posted, waiting: null },
   )
   const [draft, setDraft] = useState(start.draft)
   // his words a poster's edit replaced, one click from coming back until the next edit or the card closes
-  const [replaced, setReplaced] = useState(start.replaced)
+  const [restorable, setRestorable] = useState(start.waiting)
   const [saveKept] = useState(() => draftSaver(keptKey, kept))
-  // his words are kept with the poster's text they were typed over, so a remount after a newer edit shows the poster's
+  // his words are kept with the poster's text they were typed over, waiting ones included, so a remount shows the poster's newer text and gives back Restore my edit
   useEffect(() => {
-    if (keeps) saveKept({ attachments: [], base: posted, text: draft === posted ? "" : draft })
-  }, [draft, keeps, posted, saveKept])
+    if (keeps) saveKept(cardKept(draft, posted, restorable))
+  }, [draft, keeps, posted, restorable, saveKept])
   // once it is answered, settled or archived, its kept words go
   useEffect(() => {
     if (item.kind === "draft" && !keeps) saveDraft(keptKey, { attachments: [], text: "" })
@@ -1142,7 +1142,7 @@ export function InboxCard({
     setSynced(posted)
     const next = posterEdit(draft, synced, posted)
     setDraft(next.draft)
-    setReplaced(next.replaced)
+    setRestorable(next.waiting)
   }
   // a multi-question ask's picks, one option index per question, and the question in sight, held below as the single pick is so the card steps through them before its Submit sends them all at once
   const questions = item.kind === "decision" ? questionsOf(item.preview) : []
@@ -1369,15 +1369,15 @@ export function InboxCard({
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
             />
-            {replaced !== null && (
+            {restorable && (
               <Hint content="Its poster changed the message: put back the words you typed">
                 <Button
                   size="xs"
                   variant="ghost"
                   className="text-muted-foreground self-start"
                   onClick={() => {
-                    setDraft(replaced)
-                    setReplaced(null)
+                    setDraft(restorable.text)
+                    setRestorable(null)
                   }}
                 >
                   <RiArrowGoBackLine data-icon="inline-start" />
