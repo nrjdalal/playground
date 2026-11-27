@@ -4449,7 +4449,7 @@ async function check2(raw) {
 if (false) {}
 
 // scripts/hooks/no-extension-repo-write.ts
-import { existsSync as existsSync6 } from "fs";
+import { existsSync as existsSync6, statSync as statSync4 } from "fs";
 import { join as join10 } from "path";
 
 // packages/settings/src/folder.ts
@@ -14007,6 +14007,18 @@ var GUARD2 = "no-extension-repo-write";
 var OWNER_ROUTE = "Only the owner changes one, typing the command as a ! command in the dispatcher's terminal window: tell your lead what it should do, and the dispatcher hands the owner the command.";
 var REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 var decoded = (text) => text.replace(/%([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)));
+var origins2 = new Map;
+function originUrl(config) {
+  const mtime = existsSync6(config) ? statSync4(config).mtimeMs : -1;
+  const known = origins2.get(config);
+  if (known?.mtime === mtime)
+    return known.url;
+  const url = Bun.spawnSync(["git", "config", "--file", config, "--get", "remote.origin.url"], {
+    stderr: "ignore"
+  }).stdout.toString();
+  origins2.set(config, { mtime, url });
+  return url;
+}
 function guardedRepos(data, values, environment) {
   const given = values["ext.repos"];
   const named = new Map;
@@ -14018,11 +14030,7 @@ function guardedRepos(data, values, environment) {
   const repos = new Set(named.values());
   const scopes = scopesIn(data);
   for (const scope of scopes) {
-    const config = join10(extensionsDir(data), scope, ".git", "config");
-    const url = Bun.spawnSync(["git", "config", "--file", config, "--get", "remote.origin.url"], {
-      stderr: "ignore"
-    });
-    const repo = remoteRepo(url.stdout.toString());
+    const repo = remoteRepo(originUrl(join10(extensionsDir(data), scope, ".git", "config")));
     if (repo)
       repos.add(`${repo.owner}/${repo.repo}`.toLowerCase());
   }
@@ -15214,7 +15222,7 @@ import {
   readFileSync as readFileSync6,
   readlinkSync,
   realpathSync as realpathSync4,
-  statSync as statSync4
+  statSync as statSync5
 } from "fs";
 import { loadavg } from "os";
 import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute6, join as join14, relative as relative2, resolve as resolve8 } from "path";
@@ -16046,7 +16054,7 @@ function searchRoots(name, args, env) {
 }
 var isFolder2 = (path) => {
   try {
-    return statSync4(path).isDirectory();
+    return statSync5(path).isDirectory();
   } catch {
     return false;
   }
