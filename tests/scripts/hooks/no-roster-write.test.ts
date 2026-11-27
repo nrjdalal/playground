@@ -259,6 +259,8 @@ describe("roster.ts and every read run", () => {
     "chflags uchg /tmp/x",
     "zstd --rm /tmp/x",
     "pigz /tmp/x",
+    // 3134.ts's twin: an ANSI-C item naming another file of the data folder
+    "xargs -I{} sh -c 'echo x >> {}' <<< '$'\"'\"'\\x7e/.playground/notes.json'\"'\"''",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })

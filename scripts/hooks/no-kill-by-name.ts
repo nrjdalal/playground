@@ -164,7 +164,18 @@ async function inspect(raw: string, readProcs: () => Table) {
         .commands.flatMap((c) => c.words.map((w) => w.value))
         .join(" ")
     : ""
-  const bare = spelledText(`${toolInput.command} ${decoded}`).replace(/["'\\]/g, "")
+  const spelled = spelledText(`${toolInput.command} ${decoded}`)
+  // a second spelling reads each backslash escape as the word break printf, echo -e or $'…' may decode it to, so a name an escape ends (`pkill\0node`, a here-string's `$'pkill\nnode'`) passes too
+  const breaks = spelled.replace(/\\(?:x[0-9A-Fa-f]{1,2}|[0-7]{1,4}|.)/g, " ")
+  // a third decodes each hex, unicode and octal escape to the letter printf, echo -e or $'…' gives it, and reads the rest as blanks, so a name an escape spells a letter of (`p\x6bill`, `pki\154l`) passes too
+  const letters = spelled.replace(
+    /\\(?:x([0-9A-Fa-f]{1,2})|u([0-9A-Fa-f]{1,4})|U([0-9A-Fa-f]{1,8})|0?([0-7]{1,3})|.)/g,
+    (_, x, u, U, octal) => {
+      const code = x || u || U ? parseInt(x ?? u ?? U, 16) : octal ? parseInt(octal, 8) : NaN
+      return code > 32 && code <= 0x10ffff ? String.fromCodePoint(code) : " "
+    },
+  )
+  const bare = `${spelled} ${breaks} ${letters}`.replace(/["'\\]/g, "")
   // a kill's name may sit glued to an option it is the value of (`flock /tmp/l -cpkill`), so the first look takes it at a word's end too
   const namesKill =
     /(?:fuser|kill|killall|pkill)\b/.test(bare) ||
