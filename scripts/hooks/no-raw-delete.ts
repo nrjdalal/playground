@@ -76,10 +76,12 @@ const scriptStaysText = (cmd: Command, args: Word[], browserOnly: Set<Command>) 
   browserOnly.has(cmd) && browserEval(args)
 const BROWSER_FLAGS = new Set(["--ignore-https-errors", "--json"])
 const BROWSER_VALUES = new Set(["--args", "--session"])
+// the commands that take a CSS selector, a quoted one holding blanks and brackets (`'[a] [b]'`) no shell command line, read by the same rule as eval's script (PG-3221)
+const BROWSER_SELECTORS = new Set(["click", "dblclick", "fill", "focus", "hover", "scrollintoview"])
 const browserEval = (args: Word[]) => {
   for (let k = 0; k < args.length; k++) {
     const { value } = args[k]
-    if (value === "eval") return true
+    if (value === "eval" || BROWSER_SELECTORS.has(value)) return true
     const [name, attached] = value.split(/=(.*)/s)
     const own = BROWSER_VALUES.has(name) ? (attached ?? args[++k]?.value) : undefined
     if (!BROWSER_FLAGS.has(value) && (own === undefined || /\s/.test(own))) return false
