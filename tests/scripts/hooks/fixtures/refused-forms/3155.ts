@@ -89,6 +89,32 @@ export const groups: Group[] = [
       ["a kill of a pid zsh cuts to a foreign group", "kill -9 4294962062"],
       ["a kill of a pid past 64 bits", "kill -9 18446744073709551615"],
       ["a kill of every process after a signal the hook cannot read", "kill -$SIG -1"],
+      ["a kill behind a delimiter the hook cannot read", 'echo 1234 | xargs -d "$D" kill -9'],
+      [
+        "a kill of every process xargs reads from a file by -a",
+        "echo -1 > /tmp/f; xargs -a /tmp/f kill -9",
+      ],
+      [
+        "a kill of every process xargs reads from a file by --arg-file",
+        "echo -1 > /tmp/f; xargs --arg-file=/tmp/f kill -9",
+      ],
+      [
+        "a kill of every process GNU's xargs reads from a file by -a",
+        "echo -1 > /tmp/f; gxargs -a /tmp/f kill -9",
+      ],
+      [
+        "a kill of a process group xargs reads from a file by -a",
+        "echo -99999999 > /tmp/f; xargs -a /tmp/f kill",
+      ],
+      [
+        "a kill of the caller's own group xargs fills in for -I from a file",
+        "echo 0 > /tmp/f; xargs -a /tmp/f -I{} kill -9 {}",
+      ],
+      [
+        "a kill of every process xargs reads from a process substitution by -a",
+        "xargs -a <(echo -1) kill -9",
+      ],
+      ["a kill from a file by -a the hook cannot read", "xargs -a /nonexistent/pids kill -9"],
       ["a pkill of a user's processes", "pkill -u nobody"],
       ["a pkill of a real user's processes", "pkill -U 501"],
       ["a pkill of a user's processes by name", "pkill --euid nobody node"],
