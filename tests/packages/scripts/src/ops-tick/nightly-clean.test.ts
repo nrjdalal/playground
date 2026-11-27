@@ -39,7 +39,11 @@ import {
 } from "../../../../../packages/scripts/src/ops-tick/nightly-clean"
 import { CWDS } from "../../../../../packages/scripts/src/ops-tick/orphans"
 import { BEATS, type Context } from "../../../../../packages/scripts/src/ops-tick/tick"
-import { cardOf } from "../../../../../packages/scripts/src/ops-tick/unused-card"
+import {
+  APPROVALS,
+  CARD_ID,
+  listLine,
+} from "../../../../../packages/scripts/src/ops-tick/unused-card"
 import type { CleanupDeps } from "../../../../../scripts/ops/optimizer/auto_end"
 import { type Answers, fakeRun, ghErrors } from "./fake-run"
 
@@ -723,8 +727,8 @@ describe("one night's run against a fixture data folder", () => {
   })
 
   // #2539 item 1
-  test("each machine's unused space is the log line's total and the outbox line's items, and nothing removes it", async () => {
-    const { ctx, deps, ops, runs, sent } = night({ "ask new": `${CARD}\n` })
+  test("each machine's unused space is the log line's total and the outbox line's items, its list goes to ops and no ask is run, and nothing removes it", async () => {
+    const { ctx, deps, ops, runs, sent } = night()
     const gguf = "/home/me/probe-local-model/gguf/x.gguf"
     deps.unused = async () => [
       {
@@ -735,11 +739,15 @@ describe("one night's run against a fixture data folder", () => {
     ]
     await nightlyClean(deps)(ctx)
     const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    const card = JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8")).card
     expect(log).toContain(
-      `unused: spark-9dfb unused 38.0 GB (weights 38.0 GB); spark-a566 not read; card ${CARD} posted, 1 items (`,
+      `unused: spark-9dfb unused 38.0 GB (weights 38.0 GB); spark-a566 not read; list ${card.id} sent to Ops, 1 items (`,
     )
-    expect(JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8")).card).toEqual({
-      id: CARD,
+    expect(runs.some((argv) => argv.includes("ask"))).toBe(false)
+    expect(sent.map((m) => m.text)).toContain(listLine(card))
+    expect(card).toEqual({
+      at: ctx.now.toISOString(),
+      id: expect.stringMatching(CARD_ID),
       items: [
         {
           bytes: 38 * 1024 ** 3,
@@ -756,7 +764,7 @@ describe("one night's run against a fixture data folder", () => {
     expect(runs.flat()).not.toContain(gguf)
   })
 
-  test("an answered card's Remove on this machine goes through playground rm --card, a peer's goes to Ops as its command, and the card closes", async () => {
+  test("an approved list's Remove on this machine goes through playground rm --card, a peer's goes to Ops as its command, and no new list holds them", async () => {
     const rehearsal = "/home/me/.playground/scratchpad/ops/rehearse142"
     const items = [
       { bytes: 2 * 1024 ** 3, kind: "rehearsal" as const, machine: "spark-a566", path: rehearsal },
@@ -768,15 +776,24 @@ describe("one night's run against a fixture data folder", () => {
         path: "docker image peer:1",
       },
     ]
-    const answered = {
-      ...cardOf(items),
-      answer: { at: "2026-11-17T09:00:00.000Z", choice: "approve", options: [0, 0] },
-      from: "ops",
-      status: "approved",
-    }
-    const { ctx, deps, ops, runs, sent } = night(
-      { "ask get": JSON.stringify(answered), "tag -l": "v0.0.142\n" },
-      () => ({ card: { at: "2026-11-17T03:00:00.000Z", id: CARD, items } }),
+    const { ctx, deps, ops, runs, sent } = night({ "tag -l": "v0.0.142\n" }, () => ({
+      card: { at: "2026-11-17T03:00:00.000Z", id: CARD, items },
+    }))
+    writeFileSync(
+      join(ops, "tick", APPROVALS),
+      items
+        .map((item) =>
+          JSON.stringify({
+            at: "2026-11-17T09:00:00.000Z",
+            by: "ops",
+            bytes: item.bytes,
+            choice: "remove",
+            list: CARD,
+            machine: item.machine,
+            path: item.path,
+          }),
+        )
+        .join("\n"),
     )
     deps.unused = async () => [
       {
@@ -812,14 +829,9 @@ describe("one night's run against a fixture data folder", () => {
     ])
     expect(runs.some((argv) => argv.join(" ").includes("docker image rm"))).toBe(false)
     expect(sent.map((s) => s.text)).toContain(
-      `card ${CARD} approved on spark-9dfb: docker image rm sha256:ccc`,
+      `list ${CARD} approved on spark-9dfb: docker image rm sha256:ccc`,
     )
-    expect(runs.find((argv) => argv.includes("ack"))?.slice(-4)).toEqual([
-      "ack",
-      CARD,
-      "--no-link",
-      "nightly-clean removed 1 and sent 1 to Ops",
-    ])
+    expect(runs.some((argv) => argv.includes("ask"))).toBe(false)
     expect(
       JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8")).card,
     ).toBeUndefined()

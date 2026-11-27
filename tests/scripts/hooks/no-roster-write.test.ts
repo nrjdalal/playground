@@ -376,6 +376,9 @@ describe("a roster under a temp folder whose name holds rm", () => {
     `python3 -c "print(open('${roster}').read())"`,
     `node -e "console.log(require('fs').readFileSync('${roster}', 'utf8'))"`,
     `python3 -c "print(open('/tmp/no-roster-write/x').read(), open('${roster}').read())"`,
+    // a list's or a form's append is no write: only an appendFile call is
+    `python3 -c "import json; l = list(json.load(open('${roster}'))); l.append(1); print(l)"`,
+    `bun -e "const r = require('fs').readFileSync('${roster}', 'utf8'); const q = new URLSearchParams(); q.append('n', r.length); console.log(q)"`,
   ])("runs %s", async (command) => {
     expect(await under(command)).toBeUndefined()
   })
@@ -400,6 +403,8 @@ describe("a roster under a temp folder whose name holds rm", () => {
     `perl -e 'unlink/**/("${roster}")'`,
     `perl -e 'unlink/1/("${roster}")'`,
     `bun -e "await Bun.write/**/('${roster}', '{}')"`,
+    `node -e "require('fs').appendFileSync('${roster}', 'x')"`,
+    `node -e "require('fs').promises.appendFile('${roster}', 'x')"`,
   ])("refuses %s", async (command) => {
     expect(await under(command)).toContain("scripts/roster.ts")
   })
@@ -420,4 +425,70 @@ test("no-raw-wa's process refuses a factory session's Write of the roster, in th
   })
   expect(await proc.exited).toBe(2)
   expect(await new Response(proc.stderr).text()).toContain("no-roster-write hook refuses")
+})
+
+// The unused-space approvals log is the second file it guards, whose one writer is playground rm --approve
+describe("the unused-space approvals log", () => {
+  const LOG = join(DATA, "ops", "tick", "unused-approvals.jsonl")
+  const LINE = `{"at":"2026-11-27T00:00:00.000Z","by":"ops","bytes":1,"choice":"remove","list":"x","machine":"m","path":"/x"}`
+
+  test.each([
+    `echo '${LINE}' >> ~/.playground/ops/tick/unused-approvals.jsonl`,
+    `printf '%s\\n' '${LINE}' >> ${LOG}`,
+    `echo '${LINE}' | tee -a ${LOG}`,
+    `cp /tmp/approvals.jsonl ${LOG}`,
+    `cp /tmp/unused-approvals.jsonl ~/.playground/ops/tick/`,
+    `sed -i '' 's/keep/remove/' ${LOG}`,
+    `rm ${LOG}`,
+    `bun -e "require('fs').appendFileSync('${LOG}', 'x')"`,
+    // code joining the data folder and the rest of the path apart
+    `bun -e "require('fs').appendFileSync(require('path').join(process.env.HOME, '.playground', 'ops/tick/unused-approvals.jsonl'), 'x')"`,
+    `node -e "const p = require('path'); require('fs').appendFileSync(p.join(process.env.HOME, '.playground', 'ops', 'tick', 'unused-approvals.jsonl'), 'x')"`,
+  ])("refuses %s, naming rm --approve", async (command) => {
+    const reason = await bash(command)
+    expect(reason).toContain("no-roster-write hook refuses")
+    expect(reason).toContain("playground rm --approve")
+  })
+
+  // a copy call onto its name, and its bare name written from its own folder, as for the roster
+  test.each([
+    [
+      `node -e "require('fs').copyFileSync('/tmp/x', 'unused-approvals.jsonl')"`,
+      join(DATA, "ops", "tick"),
+    ],
+    [
+      `node -e "require('fs').appendFileSync('./unused-approvals.jsonl', 'x')"`,
+      join(DATA, "ops", "tick"),
+    ],
+    [`python3 -c "import shutil; shutil.copy('/tmp/x', '${LOG}')"`, root],
+  ])("refuses %s from %s", async (command, cwd) => {
+    const reason = await check(
+      JSON.stringify({
+        cwd,
+        hook_event_name: "PreToolUse",
+        tool_input: { command },
+        tool_name: "Bash",
+      }),
+      environment,
+    )
+    expect(reason).toContain("playground rm --approve")
+  })
+
+  test.each([
+    ["Edit", { file_path: LOG, new_string: "b", old_string: "a" }],
+    ["Write", { content: LINE, file_path: LOG }],
+  ] as const)("refuses a %s of it", async (tool, input) => {
+    expect(await call(tool, input)).toContain("playground rm --approve")
+  })
+
+  test.each([
+    "playground rm --approve 6f1c0e3a-1b2c-4d5e-8f90-a1b2c3d4e5f6 /Users/x/models/old --keep",
+    'bun "${PLAYGROUND_REPO:?}/packages/scripts/src/playground/rm.ts" --approve x /x',
+    `cat ${LOG}`,
+    "jq -c 'select(.choice == \"remove\")' ~/.playground/ops/tick/unused-approvals.jsonl",
+    `tail -5 ${LOG}`,
+    `wc -l ${LOG}`,
+  ])("runs %s", async (command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
 })
