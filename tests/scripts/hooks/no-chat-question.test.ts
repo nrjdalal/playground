@@ -442,6 +442,15 @@ describe("what passes", () => {
     ],
     ["is waiting on you still asks", "The ship is waiting on you.", true],
     ["then <verb> it yourself still asks", "Then merge it yourself.", true],
+    ["an until clause after an order still asks", "Don't merge until you test it yourself.", true],
+    ["hold off until still asks", "Hold off until you check it yourself.", true],
+    ["do nothing until still asks", "Do nothing until you review it yourself.", true],
+    ["wait until still asks", "Wait until you try it yourself.", true],
+    [
+      "an until clause opening a sentence still asks",
+      "Until you merge it yourself, nothing ships.",
+      true,
+    ],
   ])("a status line asks only when it puts work on him: %s", (_name, line, asks) => {
     expect(asksDecision(line)).toBe(asks)
   })
