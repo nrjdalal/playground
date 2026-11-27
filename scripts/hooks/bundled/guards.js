@@ -16819,6 +16819,7 @@ async function check12(raw, environment = process.env) {
 }
 
 // scripts/hooks/no-kill-by-name.ts
+import { basename as basename6 } from "path";
 var BY_NAME = new Set(["killall", "pkill"]);
 var KILLS = ["fuser", "kill", "killall", "pkill"];
 var SEARCHES = new Set(["fuser", "lsof", "pgrep", "pidof", "ps"]);
@@ -16854,7 +16855,66 @@ var probingStop = (words) => {
   return flag < 0 || !/^\d+$/.test(args[flag + 1] ?? "");
 };
 var isSearch = (name, args) => SEARCHES.has(name) && !(name === "ps" && args.some((a) => /^-[A-Za-z]*[pq]$|^-[pq]\d|^--(?:quick-)?pid\b/.test(a.value)));
-async function inspect9(raw) {
+var groupTarget = (words) => {
+  let i = 0;
+  if (words[0] === "-l" || words[0] === "-L")
+    return [];
+  if (words[0] === "-s" || words[0] === "-n")
+    i = 2;
+  else if (words[0] !== "--" && words[0]?.startsWith("-"))
+    i = 1;
+  if (words[i] === "--")
+    i++;
+  const operands = words.slice(i).map((w) => w.trim().replace(/^\+/, ""));
+  const wide = (w) => /^-?\d+$/.test(w) && Math.abs(Number(w)) > 2 ** 31 - 1;
+  if (operands.some((w) => /^(?:-0*1|0+)$/.test(w) || wide(w) || w.startsWith("-") && w.includes(UNKNOWN)))
+    return "all";
+  return operands.filter((w) => /^-\d+$/.test(w)).map((w) => Number(w.slice(1)));
+};
+function readTable() {
+  const procs = new Map;
+  try {
+    const out = Bun.spawnSync(["/bin/ps", "-axo", "pid=,ppid=,pgid=,comm="], { stderr: "ignore" });
+    for (const line of out.stdout.toString().split(`
+`)) {
+      const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/);
+      if (m)
+        procs.set(Number(m[1]), { comm: m[4], pgid: Number(m[3]), ppid: Number(m[2]) });
+    }
+  } catch {}
+  return { procs, self: process.pid };
+}
+var parents = (pid, procs) => {
+  const chain = [];
+  for (let at = pid;at > 1 && chain.length < 64 && procs.has(at); at = procs.get(at).ppid)
+    chain.push(at);
+  return chain;
+};
+var ownGroup = (pgid, { procs, self }) => {
+  const claude = parents(self, procs).find((pid) => basename6(procs.get(pid).comm) === "claude");
+  if (!claude || procs.get(pgid)?.pgid !== pgid)
+    return false;
+  return parents(pgid, procs).slice(1).includes(claude);
+};
+var xargsWords = async (cmd, args, xargs, env) => {
+  const words = args.map((a) => a.value);
+  if (!xargs)
+    return words;
+  const files = (xargs.files ?? []).filter((f) => !stdinPath(f.file.value));
+  const read = await Promise.all(files.map((f) => argFile(f, cmd, env)));
+  const fed = await stdinOf(cmd, env);
+  if (fed.unknown && files.length === 0)
+    return words;
+  const delimiters = xargs.delimiters ?? [];
+  if (read.some((t) => t.unknown) || delimiters.includes(undefined))
+    return [...words, `-${UNKNOWN}`];
+  const texts = [...fed.unknown ? [] : [fed.value], ...read.map((t) => t.value)];
+  const items = delimiters.reduce((parts, d) => parts.flatMap((p) => p.split(d)), texts.flatMap((t) => t.split(/\s+/))).filter(Boolean);
+  const replace = xargs.replace;
+  return replace && words.some((w) => w.includes(replace)) ? words.flatMap((w) => w.includes(replace) ? items.map((item) => w.replaceAll(replace, () => item)) : [w]) : [...words, ...items];
+};
+async function inspect9(raw, readProcs) {
+  let table;
   const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;
@@ -16904,6 +16964,9 @@ async function inspect9(raw) {
       return refuse9(name);
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
       return refuse9("fuser -k");
+    const target = name === "kill" ? groupTarget(await xargsWords(cmd, args, xargs, env)) : [];
+    if (target === "all" || target.some((pgid) => !ownGroup(pgid, table ??= readProcs())))
+      return `no-kill-by-name hook refuses a kill of every process, a process group or its own group: a pid operand of -1, a negative number or 0 signals every process this user may signal, a whole group or the caller's own group, the live dashboard and every session among them. ${WAY_OUT}`;
     if (name !== "kill" || !search)
       return;
     const fed = xargs || args.some((a) => a.value.includes(UNKNOWN) || handed.some((h) => a.value.includes(h)));
@@ -16912,9 +16975,9 @@ async function inspect9(raw) {
   };
   return run2(lexed, { ...fresh(), visitShells: true }, visit);
 }
-async function check13(raw) {
+async function check13(raw, readProcs = readTable) {
   try {
-    return await inspect9(raw);
+    return await inspect9(raw, readProcs);
   } catch {
     return;
   }
@@ -16923,7 +16986,7 @@ if (false) {}
 
 // scripts/hooks/no-linear-ticket.ts
 import { realpath } from "fs/promises";
-import { basename as basename6, dirname as dirname7, isAbsolute as isAbsolute7, join as join15, resolve as resolve9, sep as sep3 } from "path";
+import { basename as basename7, dirname as dirname7, isAbsolute as isAbsolute7, join as join15, resolve as resolve9, sep as sep3 } from "path";
 var CREATE = /\bissue(?:batch)?create\b/i;
 var LINEAR = /linear\.app/i;
 var GITHUB = /^https?:\/\/(?:[\w-]+\.)*github\.com(?:[/:?#]|$)/i;
@@ -16968,7 +17031,7 @@ async function inApprovals(path, environment) {
   const dir = approvalsDir(environment);
   const dirs = [dir, await real2(dir)];
   const target = resolve9(path);
-  const targets = [target, join15(await real2(dirname7(target)), basename6(target))];
+  const targets = [target, join15(await real2(dirname7(target)), basename7(target))];
   return targets.some((t) => dirs.some((d) => within(t, d)));
 }
 function refuseApprovals(what, environment) {
@@ -17223,7 +17286,7 @@ import { join as join17 } from "path";
 // api/hono/src/lib/dev/proxy.ts
 import { existsSync as existsSync9, mkdirSync as mkdirSync3, readFileSync as readFileSync7, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "fs";
 import { homedir as homedir4 } from "os";
-import { basename as basename7, dirname as dirname8, join as join16 } from "path";
+import { basename as basename8, dirname as dirname8, join as join16 } from "path";
 var serving = (dir) => {
   try {
     const pid = Number(readFileSync7(join16(dir, "proxy.pid"), "utf8").trim());
@@ -18023,7 +18086,7 @@ if (false) {}
 
 // scripts/hooks/no-outside-pr-code.ts
 import { existsSync as existsSync10, lstatSync as lstatSync2, mkdirSync as mkdirSync4, readFileSync as readFileSync8, realpathSync as realpathSync5 } from "fs";
-import { basename as basename8, dirname as dirname9, isAbsolute as isAbsolute8, join as join19, resolve as resolve10 } from "path";
+import { basename as basename9, dirname as dirname9, isAbsolute as isAbsolute8, join as join19, resolve as resolve10 } from "path";
 var CHECKERS = new Set(["reviewer", "tester"]);
 var TOOLS2 = new Set(["Bash", "Monitor"]);
 var FILE_TOOLS4 = new Map([
@@ -18149,7 +18212,7 @@ function real3(path) {
 }
 function bareAt(folder, lookup) {
   for (let at = folder;; at = dirname9(at)) {
-    if (basename8(at) === ".git" || lookup.holds(at, ".git"))
+    if (basename9(at) === ".git" || lookup.holds(at, ".git"))
       return false;
     if (lookup.holds(at, "HEAD") && lookup.holds(at, "objects") && lookup.holds(at, "refs"))
       return true;
@@ -18480,8 +18543,8 @@ var runnerOf = (line) => {
   const [interpreter, ...rest] = line.slice(2).trim().split(/\s+/);
   if (!interpreter)
     return;
-  if (basename8(interpreter) !== "env")
-    return basename8(interpreter);
+  if (basename9(interpreter) !== "env")
+    return basename9(interpreter);
   for (let i = 0;i < rest.length; i++) {
     const word = rest[i];
     if (ENV_VALUED.has(word))
@@ -18491,11 +18554,11 @@ var runnerOf = (line) => {
     else if (/^(?:--(?:chdir|unset)=|-[CPu].)/.test(word) || word === "--ignore-environment")
       continue;
     else if (word.startsWith("-S"))
-      return /[$\\]/.test(word) ? "" : basename8(word.slice(2));
+      return /[$\\]/.test(word) ? "" : basename9(word.slice(2));
     else if (word.startsWith("-"))
       return "";
     else if (!word.includes("="))
-      return /[$\\]/.test(word) ? "" : basename8(word);
+      return /[$\\]/.test(word) ? "" : basename9(word);
   }
   return "";
 };
@@ -18794,7 +18857,7 @@ if (false) {}
 
 // scripts/hooks/no-raw-delete.ts
 import { realpathSync as realpathSync6 } from "fs";
-import { basename as basename9, dirname as dirname10, resolve as resolve11, sep as sep4 } from "path";
+import { basename as basename10, dirname as dirname10, resolve as resolve11, sep as sep4 } from "path";
 var INSTEAD4 = "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
 var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it (a clean worktree, detached at a commit canary already has, counts as held by none), it holds no uncommitted change and its work has landed on canary or on a branch origin still holds.";
 var refuse13 = (what, why = "a recursive delete is final, and one aimed wrong takes a whole tree", instead = INSTEAD4) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`;
@@ -18889,7 +18952,7 @@ function real4(path) {
     return realpathSync6(path);
   } catch {
     const parent = dirname10(path);
-    return parent === path ? path : resolve11(real4(parent), basename9(path));
+    return parent === path ? path : resolve11(real4(parent), basename10(path));
   }
 }
 function rootsOf(cwd, session) {
@@ -19395,7 +19458,7 @@ async function check23(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-raw-vercel.ts
-import { basename as basename10, isAbsolute as isAbsolute9, resolve as resolve13 } from "path";
+import { basename as basename11, isAbsolute as isAbsolute9, resolve as resolve13 } from "path";
 var NAMES2 = ["vc", "vercel"];
 var words = (text) => new Set(text.split(" "));
 var GLOBAL = {
@@ -19635,7 +19698,7 @@ function yardStep(name, args, shell) {
   if (file === undefined)
     return false;
   const path = isAbsolute9(file) ? file : chained ? resolve13(chained, file) : undefined;
-  const step = file === "ship:yard" || (path ? STEP_FILE.test(path) : basename10(file) === "yard.ts");
+  const step = file === "ship:yard" || (path ? STEP_FILE.test(path) : basename11(file) === "yard.ts");
   const end = args.findIndex((a, k) => k > at && a.value === "--");
   return step && !args.slice(at + 1, end === -1 ? undefined : end).some((a) => STEP_HELP.has(a.value));
 }
@@ -19792,7 +19855,7 @@ import { resolve as resolve15 } from "path";
 // scripts/hooks/no-roster-write.ts
 import { realpathSync as realpathSync7 } from "fs";
 import { homedir as homedir5 } from "os";
-import { basename as basename11, dirname as dirname11, resolve as resolve14 } from "path";
+import { basename as basename12, dirname as dirname11, resolve as resolve14 } from "path";
 var refuse15 = (what) => `no-roster-write hook refuses ${what}: the live roster changes only through scripts/roster.ts (the roster rule), so every reader sees it whole. Write it with bun scripts/roster.ts set <name> <key>=<value>, and read it with cat, jq or grep.`;
 var READERS4 = new Set([
   "[",
@@ -20171,7 +20234,7 @@ async function judgeBash(command, cwd, environment) {
         return refuse15(`${tool} onto ${shown4(dest)}`);
       const into = dest ? pathsOf(dest, at) ?? [] : [];
       const sources = args.filter((a) => a !== dest && !a.value.startsWith("-"));
-      if (sources.some((s) => basename11(s.value).toLowerCase() === "roster.json") && into.some(({ path }) => isRoster(resolve14(path, "roster.json"), targets)))
+      if (sources.some((s) => basename12(s.value).toLowerCase() === "roster.json") && into.some(({ path }) => isRoster(resolve14(path, "roster.json"), targets)))
         return refuse15(`${tool} of a roster.json into ${dest && shown4(dest)}`);
       if (COPIERS2.has(tool))
         return;
