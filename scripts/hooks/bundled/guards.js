@@ -16898,9 +16898,12 @@ var xargsWords = async (cmd, args, xargs, env) => {
   const fed = await stdinOf(cmd, env);
   if (fed.unknown)
     return words;
-  const items = fed.value.split(/\s+/).filter(Boolean);
+  const delimiters = xargs.delimiters ?? [];
+  if (delimiters.includes(undefined))
+    return [...words, `-${UNKNOWN}`];
+  const items = delimiters.reduce((parts, d) => parts.flatMap((p) => p.split(d)), fed.value.split(/\s+/)).filter(Boolean);
   const replace = xargs.replace;
-  return replace && words.some((w) => w.includes(replace)) ? words.flatMap((w) => w.includes(replace) ? items.map((item) => w.replaceAll(replace, item)) : [w]) : [...words, ...items];
+  return replace && words.some((w) => w.includes(replace)) ? words.flatMap((w) => w.includes(replace) ? items.map((item) => w.replaceAll(replace, () => item)) : [w]) : [...words, ...items];
 };
 async function inspect9(raw, readProcs) {
   let table;

@@ -136,17 +136,21 @@ const ownGroup = (pgid: number, { procs, self }: Table) => {
   return parents(pgid, procs).slice(1).includes(claude)
 }
 
-// The words a kill xargs runs gets: its own, the -I string filled with what xargs reads, else that input appended; its own alone when the hook cannot read the input
+// The words a kill xargs runs gets: its own, the -I string filled with what xargs reads, else that input appended; its own alone when the hook cannot read the input. The input splits at blanks and at each -0 or -d delimiter too, so no item hides a pid behind a NUL or a comma, and a delimiter the reader cannot decode reads as an unread pid
 const xargsWords = async (cmd: Command, args: Word[], xargs: Xargs, env: Env) => {
   const words = args.map((a) => a.value)
   if (!xargs) return words
   const fed = await stdinOf(cmd, env)
   if (fed.unknown) return words
-  const items = fed.value.split(/\s+/).filter(Boolean)
+  const delimiters = xargs.delimiters ?? []
+  if (delimiters.includes(undefined)) return [...words, `-${UNKNOWN}`]
+  const items = delimiters
+    .reduce((parts, d) => parts.flatMap((p) => p.split(d!)), fed.value.split(/\s+/))
+    .filter(Boolean)
   const replace = xargs.replace
   return replace && words.some((w) => w.includes(replace))
     ? words.flatMap((w) =>
-        w.includes(replace) ? items.map((item) => w.replaceAll(replace, item)) : [w],
+        w.includes(replace) ? items.map((item) => w.replaceAll(replace, () => item)) : [w],
       )
     : [...words, ...items]
 }
