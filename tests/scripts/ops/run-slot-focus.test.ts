@@ -186,7 +186,12 @@ describe("run-slot.sh preempt", () => {
 
   test("leaves the run of the focused session's checker with an id of its own, which its roster row names", async () => {
     const m = machine({
-      roster: { agents: [{ kind: "reviewer", name: "k3m9px-reviewer", worker: "worker-f" }] },
+      roster: {
+        agents: [
+          { kind: "reviewer", name: "k3m9px-reviewer", worker: "worker-f" },
+          { name: "worker-f", status: "working" },
+        ],
+      },
     })
     hang(m)
     const checker = m.start("k3m9px-reviewer", { RUN_SLOT_SIZE: "small" }, SCRIPT, ["hang"])

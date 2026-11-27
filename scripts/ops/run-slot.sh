@@ -108,6 +108,30 @@ row = next((a for a in agents if isinstance(a, dict) and a.get("name") == sys.ar
 sys.exit(0 if row.get("worker") == sys.argv[2] else 1)
 PY
 }
+# the session run-slot.focus names while it stands (playground focus); nothing, exit 1, when it does not, goes between the check and the read (issue 1491) or names no live session (focus_live)
+focus_holder() {
+  switch_on run-slot.focus || return 1
+  local h= why=
+  read -r h _ _ why 2>/dev/null < "$OPS/run-slot.focus"
+  [ -n "$h" ] && focus_live "$h" "$why" && printf '%s\n' "$h"
+}
+# whether focus on session $1, set with reason $2, names a live session, so a focus no session holds leaves the lanes to the queue (issue 3184): firefighting while the urgent guard's own hold reason stands, as the owner's stand-in, else a roster row by that name at a status roster-statuses.json lists as live; a roster or list that does not read keeps the hold
+focus_live() {
+  case "$1 $2" in "firefighting Ops firefighting hold: "*) return 0 ;; esac
+  python3 -I - "$1" "$SELF" <<'PY'
+import json, os, sys
+
+data = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
+try:
+    with open(os.path.join(os.path.dirname(os.path.realpath(sys.argv[2])), "..", "roster-statuses.json")) as f:
+        live = json.load(f)["live"]
+    with open(os.path.join(data, "roster.json")) as f:
+        rows = [a for a in json.load(f)["agents"] if isinstance(a, dict) and a.get("name") == sys.argv[1]]
+except (OSError, ValueError, KeyError, TypeError):
+    sys.exit(0)
+sys.exit(0 if any(a.get("status") in live for a in rows) else 1)
+PY
+}
 # whether slot directory $1, whose holder line is $2, is stale: its pid has died, or a line with no pid (or no line, read by the directory's
 # own mtime) has aged 2 hours; a run killed between free()'s rm of its holder and its rmdir leaves a directory with no line
 stale() {
@@ -343,9 +367,7 @@ fi
 # run-slot.sh preempt: while run-slot.focus stands, TERM the process group of each <slot>.child that focus does not spare, only while it is still its holder's child leading its own group, so an urgent ticket's fix goes first (scripts/ops/README.md)
 if [ "${1:-}" = preempt ]; then
   [ $# -eq 1 ] || { echo "usage: run-slot.sh preempt" >&2; exit 2; }
-  h=
-  switch_on run-slot.focus && read -r h _ 2>/dev/null < "$OPS/run-slot.focus"
-  [ -n "$h" ] || { echo "run-slot.sh: no focus stands (run-slot.focus), so preempt stops nothing" >&2; exit 2; }
+  h=$(focus_holder) || { echo "run-slot.sh: no focus stands (run-slot.focus) for a live session, so preempt stops nothing" >&2; exit 2; }
   for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-commit run-slot-clone run-slot-quick $(ls "$OPS" 2>/dev/null | sed -n 's/^\(run-slot-model-[0-9]*\)\.holder$/\1/p' | sort -u); do
     [ -f "$OPS/$s.holder" ] && read -r who pid _ < "$OPS/$s.holder" || continue
     child=$(cat "$OPS/$s.child" 2>/dev/null)
@@ -1850,13 +1872,6 @@ window_holder() {
     session_waiting "$WIN_SESSION" && best=$WIN_SESSION bs=$WIN_SINCE
   done
   [ -n "$best" ] && printf '%s\n' "$best"
-}
-# the session run-slot.focus names while it stands (playground focus); nothing, exit 1, when it does not or goes between the check and the read (issue 1491)
-focus_holder() {
-  switch_on run-slot.focus || return 1
-  local h=
-  read -r h _ 2>/dev/null < "$OPS/run-slot.focus"
-  [ -n "$h" ] && printf '%s\n' "$h"
 }
 # true while focus holds this run: a heavy lane waits for every session but the focus one and ops' upkeep (ops-tick's beats, the dashboard), which keep running (dispatcher, 5 Nov); FOCUS_HOLDER keeps the name it read, so can-take prints the holder that held (issue 1647)
 focus_holds() {
