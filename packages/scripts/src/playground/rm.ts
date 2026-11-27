@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -9,7 +10,7 @@ import {
 import { homedir, hostname } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path"
 
-import { managerOf } from "@packages/config/kinds"
+import { dispatcherOf, managerOf } from "@packages/config/kinds"
 import { cloneOf } from "@packages/config/org"
 import { dataDir } from "@packages/env/data-dir"
 import {
@@ -36,20 +37,23 @@ import { dropPaths, peerArgv, readRecord } from "../machine-record/record"
 import { mainCheckout } from "../main-checkout"
 import { peersOf } from "../ops-tick/peers"
 import {
+  type Approval,
+  APPROVALS,
+  approvalPicks,
+  approvalsOf,
   CARD_ID,
   type CardPick,
   type CardState,
-  readCard,
-  savedPicks,
 } from "../ops-tick/unused-card"
 import { sessionName } from "../trash"
 import { liveBranch } from "./probe"
 import { removeSet, shardSet } from "./shards"
 
 export const RM_USAGE =
-  'usage: playground rm <path> [--card <id> [--peer <machine>]] [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --stray <path> [--reason "<why>"] | --list | --restore <id>'
+  'usage: playground rm <path> [--card <id> [--peer <machine>]] [--reason "<why>"] | --approve <id> <path> [--peer <machine>] [--keep] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --stray <path> [--reason "<why>"] | --list | --restore <id>'
 
 export type RmArgs =
+  | { approve: string; keep: boolean; path: string; peer?: string }
   | { list: true }
   | { restore: string }
   | {
@@ -63,8 +67,24 @@ export type RmArgs =
       worktree: boolean
     }
 
-// playground rm's words: one path with an optional --card, --worktree's with an optional --discard and an optional --pr, or --stray's, each with an optional --reason; --list or --restore <id> alone.
+// playground rm's words: one path with an optional --card, --worktree's with an optional --discard and an optional --pr, or --stray's, each with an optional --reason; --approve's list id and path with an optional --peer and --keep; --list or --restore <id> alone.
 export const rmArgs = (words: string[]): RmArgs | { error: string } => {
+  if (words[0] === "--approve") {
+    const [, approve, path, ...rest] = words
+    let keep = false
+    let peer: string | undefined
+    for (let i = 0; i < rest.length; i++)
+      if (rest[i] === "--keep" && !keep) keep = true
+      else if (rest[i] === "--peer" && rest[i + 1] !== undefined && peer === undefined)
+        peer = rest[++i]!
+      else return { error: RM_USAGE }
+    return approve === undefined ||
+      path === undefined ||
+      approve.startsWith("--") ||
+      path.startsWith("--")
+      ? { error: RM_USAGE }
+      : { approve, keep, path, ...(peer === undefined ? {} : { peer }) }
+  }
   const stray = words[0] === "--stray"
   if (stray) {
     const rest = words.slice(2)
@@ -139,7 +159,7 @@ export const freedOf = (
 
 // What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, the default branch gh names for a worktree's repo, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR read by its --pr or else its branch (PrRead), and the session's name.
 export type RmDeps = {
-  // Each Remove the owner picked on a nightly-clean card, read from the Inbox by its id, or why it did not read; absent where no Inbox is read, which refuses every --card.
+  // Each Remove approved on a nightly-clean list, read from the approvals file against the list nightly-clean saved, or why none counts; absent where none is read, which refuses every --card.
   approvals?: (card: string) => Promise<CardPick[] | string>
   clones: () => Clone[]
   data: string
@@ -147,7 +167,7 @@ export type RmDeps = {
   home: string
   // The live.branch setting, whose worktree rm never removes; it throws when the policy does not parse.
   liveBranch: () => string
-  // this machine's short name, the one a card's question names
+  // this machine's short name, the one a list's item names
   machine?: string
   main: string
   merged: (sha: string, at: string) => boolean | null
@@ -361,31 +381,19 @@ export const rmDeps = (repo: string): RmDeps => ({
   prState,
   procs: processes,
   session: sessionName,
-  // the card's picks, counted only on the card as nightly-clean saved it in its state file
+  // the list's approved Removes, counted only against the list as nightly-clean saved it in its state file
   approvals: async (id) => {
-    const item = await readCard(async (args) => {
-      const read = Bun.spawnSync(
-        ["bun", "run", "--silent", "--cwd", mainCheckout(repo), "ask", ...args],
-        {
-          stderr: "pipe",
-          stdout: "pipe",
-        },
-      )
-      // stdout is the card, stderr only on a failure, so --card's stdout parses whole
-      return {
-        code: read.exitCode,
-        out: read.exitCode === 0 ? read.stdout.toString() : `${read.stderr}${read.stdout}`,
-      }
-    }, id)
-    if (typeof item === "string") return item
     try {
-      const roster = JSON.parse(readFileSync(join(dataDir(), "roster.json"), "utf8")) as {
-        agents?: unknown
-      }
-      const state = JSON.parse(
-        readFileSync(join(dataDir(), "ops", "tick", "nightly-clean.json"), "utf8"),
-      ) as { card?: CardState }
-      return savedPicks(item, managerOf(roster.agents, "ops"), state.card, id)
+      const counted = approvalPicks(
+        approvalsOf(
+          await Bun.file(join(dataDir(), "ops", "tick", APPROVALS))
+            .text()
+            .catch(() => ""),
+        ),
+        savedList(dataDir()),
+        id,
+      )
+      return typeof counted === "string" ? counted : counted.remove
     } catch (error) {
       return (error as Error).message
     }
@@ -497,10 +505,11 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   const folders = (await readRecord(deps.data).catch(() => ({ entries: [] }))).entries
     .filter((e) => e.kind === "folder")
     .map((e) => e.path)
+  if ("approve" in args) return approveItem(args, deps)
   if (args.stray) return removeStray(args, roots, deps)
   if (args.card !== undefined) {
     if (!CARD_ID.test(args.card)) {
-      console.error(`playground: ${args.card} is not an Inbox card id`)
+      console.error(`playground: ${args.card} is not a nightly-clean card id`)
       return 2
     }
     return removeApproved(args, args.card, folders, roots, deps)
@@ -568,7 +577,7 @@ const approvedWeights = (
   return { paths: done.paths, size: done.size, shards: set.length }
 }
 
-// playground rm --card: the path removed only as the owner's Remove on that nightly-clean card names it, on this machine at the size it showed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
+// playground rm --card: the path removed only as an approved Remove on that nightly-clean list names it, on this machine at the size it listed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
 async function removeApproved(
   args: { path: string; peer?: string; reason: string },
   card: string,
@@ -576,7 +585,7 @@ async function removeApproved(
   roots: Roots,
   deps: RmDeps,
 ): Promise<number> {
-  const picks = deps.approvals ? await deps.approvals(card) : "no Inbox is read here"
+  const picks = deps.approvals ? await deps.approvals(card) : "no approvals are read here"
   if (typeof picks === "string") {
     console.error(`playground: card ${card} did not read: ${picks}`)
     return 1
@@ -585,7 +594,7 @@ async function removeApproved(
   const pick = picks.find((p) => p.path === args.path && p.machine === machine)
   if (!pick) {
     console.error(
-      `playground: card ${card} holds no Remove answer from the owner for ${args.path} on ${args.peer ?? deps.machine ?? "this machine"}, so it stays`,
+      `playground: card ${card} holds no approved Remove for ${args.path} on ${args.peer ?? deps.machine ?? "this machine"}, so it stays`,
     )
     return 1
   }
@@ -673,6 +682,64 @@ export const strayRefusal = (path: string, main: string): string | null => {
   if (!ignored.ok || ignored.out.split("\n").some((line) => line.startsWith("!!")))
     return `${path} holds a file git ignores`
   return null
+}
+
+// The unused list nightly-clean saved in its state file, under data; it throws when the file does not read.
+const savedList = (data: string): CardState | undefined =>
+  (
+    JSON.parse(readFileSync(join(data, "ops", "tick", "nightly-clean.json"), "utf8")) as {
+      card?: CardState
+    }
+  ).card
+
+// playground rm --approve: one item of the saved unused list approved for removal, or with --keep kept, from the roster's ops seat or a seated dispatcher alone, as one line in the approvals file naming who approved it, at the bytes the list holds; the next nightly-clean carries it out under its own checks.
+async function approveItem(
+  args: { approve: string; keep: boolean; path: string; peer?: string },
+  deps: RmDeps,
+): Promise<number> {
+  const refuse = (why: string) => (console.error(`playground: ${why}`), 1)
+  if (!CARD_ID.test(args.approve)) {
+    console.error(`playground: ${args.approve} is not a nightly-clean card id`)
+    return 2
+  }
+  const session = await deps.session()
+  let agents: unknown
+  let list: CardState | undefined
+  try {
+    agents = (
+      JSON.parse(readFileSync(join(deps.data, "roster.json"), "utf8")) as { agents?: unknown }
+    ).agents
+    list = savedList(deps.data)
+  } catch (error) {
+    return refuse(`${(error as Error).message}, so nothing is approved`)
+  }
+  const seats = [managerOf(agents, "ops"), dispatcherOf(agents, 1), dispatcherOf(agents, 2)]
+  if (!seats.includes(session))
+    return refuse(
+      `--approve is for ${seats.join(", ")}, the Ops lead and the dispatchers, alone, and this session is ${session}`,
+    )
+  if (list?.id !== args.approve)
+    return refuse(
+      `list ${args.approve} is not the list nightly-clean saved, so nothing is approved`,
+    )
+  const machine = args.peer ?? deps.machine
+  const item = list.items.find((i) => i.path === args.path && i.machine === machine)
+  if (!item) return refuse(`list ${list.id} names no ${args.path} on ${machine ?? "this machine"}`)
+  const line: Approval = {
+    at: new Date().toISOString(),
+    by: session,
+    bytes: item.bytes,
+    choice: args.keep ? "keep" : "remove",
+    list: list.id,
+    machine: item.machine,
+    path: item.path,
+  }
+  mkdirSync(join(deps.data, "ops", "tick"), { recursive: true })
+  appendFileSync(join(deps.data, "ops", "tick", APPROVALS), `${JSON.stringify(line)}\n`)
+  console.log(
+    `${args.keep ? "Kept" : "Approved the removal of"} ${item.path} on ${item.machine} (${item.bytes} bytes) on list ${list.id}, as ${session}; the next nightly-clean carries it out`,
+  )
+  return 0
 }
 
 // The session, when it holds the roster's ops seat, which --stray and a stray's restore take (issue 3083); else the refusal, done naming what no stray is.

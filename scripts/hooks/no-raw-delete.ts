@@ -76,10 +76,19 @@ const scriptStaysText = (cmd: Command, args: Word[], browserOnly: Set<Command>) 
   browserOnly.has(cmd) && browserEval(args)
 const BROWSER_FLAGS = new Set(["--ignore-https-errors", "--json"])
 const BROWSER_VALUES = new Set(["--args", "--session"])
+// the commands that take a CSS selector, a quoted one holding blanks and brackets (`'[a] [b]'`) no shell command line, read by the same rule as eval's script (PG-3221)
+const BROWSER_SELECTORS = new Set(["click", "dblclick", "fill", "focus", "hover", "scrollintoview"])
+// an --args or --session after the command reads by the rule of the ones before it: a value holding a blank, attached by = or the next word, takes the call out of the literal form (PG-3221)
+const optionsAfterAreText = (rest: Word[]) =>
+  rest.find(({ value }, i) => {
+    const [name, attached] = value.split(/=(.*)/s)
+    return BROWSER_VALUES.has(name) && /\s/.test(attached ?? rest[i + 1]?.value ?? "")
+  })
 const browserEval = (args: Word[]) => {
   for (let k = 0; k < args.length; k++) {
     const { value } = args[k]
-    if (value === "eval") return true
+    if (value === "eval" || BROWSER_SELECTORS.has(value))
+      return optionsAfterAreText(args.slice(k + 1)) === undefined
     const [name, attached] = value.split(/=(.*)/s)
     const own = BROWSER_VALUES.has(name) ? (attached ?? args[++k]?.value) : undefined
     if (!BROWSER_FLAGS.has(value) && (own === undefined || /\s/.test(own))) return false
