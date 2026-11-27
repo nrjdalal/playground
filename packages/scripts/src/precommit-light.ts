@@ -15,7 +15,7 @@ export const CHECKS = [
     argv: [
       "bash",
       "-c",
-      'TURBO_CACHE_DIR="${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" bunx turbo run build --filter=@packages/env --output-logs=errors-only && bun packages/scripts/src/env-keys.ts POSTGRES_URL',
+      'TURBO_CACHE_DIR="${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" bun --no-env-file packages/scripts/src/commit-slot.ts bunx turbo run build --filter=@packages/env --output-logs=errors-only && bun packages/scripts/src/env-keys.ts POSTGRES_URL',
     ],
     name: "env-keys",
   },
