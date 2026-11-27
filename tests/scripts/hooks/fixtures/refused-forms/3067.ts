@@ -311,4 +311,15 @@ export const groups: Group[] = [
     guards: ["no-extensions-write"],
     rows: (paths) => [...linked(paths), ...linkControls(paths)],
   },
+  // every guard that walks a line reads a script the line writes and runs, so no-extension-repo-write judges a push in one as typed, on 1354.ts's made-up repository
+  {
+    folders: ["checkout"],
+    guards: ["no-extension-repo-write"],
+    rows: () => [
+      [
+        "a push by --repo, in a script the line writes and runs",
+        "echo 'git push --repo=https://github.com/quillco/acme-skills.git HEAD:feature' > run.sh; sh run.sh",
+      ],
+    ],
+  },
 ]
