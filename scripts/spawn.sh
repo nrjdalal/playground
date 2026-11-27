@@ -309,6 +309,7 @@ gates = json.loads(gates)
 now = dt.datetime.now(dt.timezone.utc)
 readings = {}
 on_seat = False  # an --account start on the own login that seat_start moves onto its seat token
+bare_seat = False  # a start with no --account that lands on the own login's seat token while its Claude Code login has ended
 if host:
     readings["host"] = host
     try:
@@ -966,6 +967,10 @@ try:
             if own_pick and stored_detail and not stored_seen:
                 stored_name, stored_seen, stored_detail, on_seat = seat_start(runs_on, stored_detail)
             logins = [(runs_on, stored_name, None, stored_seen, stored_detail), (own, "usage.json", own, seen, detail)]
+        # a start with no --account, a resume's included, judges the own login it would land on by its seat token while loginEnded stands, since the config login stops at /login; with no seat it is refused and the split takes another login
+        if not own_pick and login_ended and isinstance(runs_on, str) and runs_on:
+            seat_name, seat_seen, seat_detail, seated = seat_start(runs_on, f"its Claude Code login has ended (loginEnded: {login_ended})")
+            logins[0] = (runs_on, seat_name, runs_on if seated else None, seat_seen, seat_detail)
         known = {login[0].lower() for login in logins}
         for path in sorted(glob.glob(os.path.join(data_dir, "usage-*.json"))):
             name = os.path.basename(path)
@@ -1054,6 +1059,7 @@ try:
         else:
             chosen = min(passing, key=lambda login: login[3].get("week", 0))
         readings.update(chosen[3])
+        bare_seat = not own_pick and bool(login_ended) and isinstance(chosen[2], str) and chosen[2].lower() == str(runs_on).lower()
         if len(logins) > 1:
             readings["logins"] = {f"{email} ({name})": detail or (f"week {fmt(seen['week'])}%" if "week" in seen else seen["usage"]) for email, name, _, seen, detail in logins}
         if chosen[2]:
@@ -1082,6 +1088,8 @@ elif own_pick and on_seat:
 elif own_pick:
     week = f"its week is at {fmt(readings['week'])}%" if "week" in readings else f"its usage {readings.get('usage', 'unread')}"
     print(f"ok - --account {own_pick} is this machine's own login, so it starts there, the split skipped: {week} ({chosen[1]})")
+elif bare_seat:
+    print(f"ok {readings['account']} no --account, so it starts on {readings['account']}, this machine's own login, whose Claude Code login has ended (loginEnded: {login_ended}), so it starts on its seat token, {why}: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif readings.get("account"):
     print(f"ok {readings['account']} no --account, so it starts on {readings['account']}, {why}: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif "logins" in readings:
@@ -1102,7 +1110,7 @@ PY
       pick=${verdict#ok }
       pick=${pick%% *}
       # the own login on its seat token: seat_start checked its item, and check_account refuses the own login by name
-      [ "$pick" = - ] || { ACCOUNT=$pick; PICKED=1; if [ "$pick" = "$OWN_LOGIN" ]; then plain_account; else check_account; fi; }
+      [ "$pick" = - ] || { ACCOUNT=$pick; PICKED=1; if [ "$pick" = "$OWN_LOGIN" ] || [[ $verdict == "ok $pick no --account, so it starts on $pick, this machine's own login, "* ]]; then plain_account; else check_account; fi; }
       echo "spawn.sh: ${verdict#ok "$pick" }"
       ;;
     *) refuse "$verdict" ;;

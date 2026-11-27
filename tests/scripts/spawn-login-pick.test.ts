@@ -712,6 +712,64 @@ describe("the capacity gate refuses and spawns nothing", () => {
     },
   )
 
+  // #3182: a start or resume with no --account that lands on the own login takes its seat token while loginEnded stands, as an --account start on it does
+  const bareSeatLine =
+    "no --account, so it starts on own@example.com, this machine's own login, whose Claude Code login has ended (loginEnded: time_limit), so it starts on its seat token, the login with the most room this week: its week is at 76% (login-flip.json seen)"
+  const sid = "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"
+  test.each<[string, string[], object]>([
+    [
+      "a start, usage.json naming the own login",
+      ["worker", "worker-brave-otter", "b.md"],
+      ownUsage,
+    ],
+    [
+      "a start the split places on the own login over the factory at 90%",
+      ["worker", "worker-brave-otter", "b.md"],
+      { USAGE_JSON: factoryUsage(90) },
+    ],
+    ["a resume", ["resume", "worker-brave-otter", root, sid], ownUsage],
+  ])(
+    "%s with no --account takes the own login's seat token while its Claude Code login has ended",
+    async (_, args, env) => {
+      const r = await spawn(
+        args,
+        [],
+        ownEnv(env),
+        script,
+        args[0] === "resume" ? { backend: "claude", name: "worker-brave-otter" } : undefined,
+        ownFiles({ ended: "time_limit", seat: { five: 30, week: 76 }, stored: 0 }),
+      )
+      expect(r.code).toBe(0)
+      expect(r.out).toContain(bareSeatLine)
+      expect(r.security).toContain(
+        "find-generic-password -s playground-claude-oauth -a own@example.com",
+      )
+      expect(launchOf(r)).toContain("-a own@example.com -w")
+      expect(launchOf(r)).toContain("CLAUDE_CODE_OAUTH_TOKEN")
+      expect(execLine(r, "worker-brave-otter")).not.toContain("--account")
+      expect(capacityLog(r)).toEqual([
+        expect.objectContaining({
+          readings: expect.objectContaining({ account: "own@example.com", week: 76 }),
+          verdict: "pass",
+        }),
+      ])
+    },
+  )
+
+  test("a start with no --account whose own login has ended and keeps no seat token starts on another login", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [],
+      ownEnv({ FAKE_NO_ITEM: "own@example.com", USAGE_JSON: factoryUsage(50) }),
+      script,
+      undefined,
+      ownFiles({ ended: "time_limit", seat: { week: 20 }, stored: 0 }),
+    )
+    expect(r.code).toBe(0)
+    expect(r.out).toContain("no --account, so it starts on factory@example.com")
+    expect(launchOf(r)).toContain("-a factory@example.com -w")
+  })
+
   test.each<[string, Parameters<typeof ownFiles>[0], object, string]>([
     ["usage.json names it", {}, ownUsage, "its week is at 20% (usage.json)"],
     ["its stored reading is fresh", { stored: 0 }, {}, "its week is at 20% (stored-login.json)"],
