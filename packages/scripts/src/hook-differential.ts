@@ -11,7 +11,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs"
-import { homedir, tmpdir } from "node:os"
+import { homedir, loadavg, tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 
 import { dataDirOf } from "@packages/env/data-dir"
@@ -32,12 +32,32 @@ type Env = Record<string, string | undefined>
 type Tally = { inClass: number; outClass: number }
 
 const USAGE =
-  "usage: bun run hooks:differential <sweep --forms <module> | replay [--hours <n>] [--role session] [--glm]> --canary <sha> --hook <name> [--hook <name> ...] [--role <role>] [--all] [--fresh]"
+  "usage: bun run hooks:differential <sweep --forms <module> | replay [--hours <n>] [--role session] [--glm]> --canary <sha> --hook <name> [--hook <name> ...] [--role <role>] [--all] [--fresh]\n  --hook guards replays every guard on each call, so run it in a call of its own"
 
 const DAY = 24 * 3600 * 1000
 
 // The hooks whose check() takes the main checkout third: canary's tree is unpacked by git archive and is no checkout of the repository, so on its own default each would read that folder as main, and both sides get the head's main checkout
 export const TAKES_MAIN = ["no-main-checkout", "no-unslotted-run"]
+
+// The guards whose GUARDS entry starts a Worker per call only to time it out, judged by the check() that Worker runs, in this thread: a Worker's start costs about 50 ms a call, most of a guards replay's time (issue 3165)
+export const IN_THREAD = ["no-extensions-write"]
+
+// The hooks whose check() takes the 5-minute load third, and whose refusal(), the one guards runs, takes it too: each reads the live load by a named import of node:os, which no swap of os.loadavg reaches under Bun, so the differential hands both sides one load (issue 3165)
+export const TAKES_LOAD = ["no-glm-heavy-path"]
+
+// The load both sides of the call or form being judged read, set by underOneLoad, else the live one
+let pinnedLoad5: number | undefined
+const load5 = (): number => pinnedLoad5 ?? loadavg()[1]!
+
+// Both sides of one call or form judged under one 5-minute load, read once, since a hook that reads the live load (no-glm-heavy-path refuses a push above glm.readOnlyLoad5) would otherwise see it cross its limit between the two reads (issue 3165)
+async function underOneLoad<T>(run: () => Promise<T>): Promise<T> {
+  pinnedLoad5 = loadavg()[1]
+  try {
+    return await run()
+  } finally {
+    pinnedLoad5 = undefined
+  }
+}
 
 // Every file in the hooks' import graph that finds a path from its own copy's folder (import.meta's dir, path or url), and why each reads the same on both sides: canary's copy sits in an unpacked tree that is no checkout of the repository
 export const ROOT_READS: Record<string, string> = {
@@ -217,10 +237,10 @@ export async function sweep(
     for (const cwd of cwdsOf(home)) {
       counts.cases++
       const own = env({ command, cwd })
-      const [was, now] = [
+      const [was, now] = await underOneLoad(async () => [
         await allows(canary, { command, cwd }, own, main, repo),
         await allows(head, { command, cwd }, own, main, repo),
-      ]
+      ])
       if (was === now) {
         counts.same++
         continue
@@ -337,10 +357,10 @@ export async function replay(
   const changed: string[] = []
   const judge = async (call: Call) => {
     const own = env(call)
-    const [was, now] = [
+    const [was, now] = await underOneLoad(async () => [
       await allows(canary, call, own, main, repo),
       await allows(head, call, own, main, repo),
-    ]
+    ])
     if (was === now) counts.same++
     else {
       counts[now ? "newly allowed" : "newly refused"]++
@@ -444,14 +464,19 @@ export async function loadedTree(build: () => string, hooks: string[]): Promise<
 
 type Guard = { name: string; run: (raw: string, env: Env) => Promise<string | undefined> }
 
-// A hook's check(), but guards' runs each TAKES_MAIN guard with the head's main checkout, since guards gives them none and each would read its own tree as main, canary's unpacked one on canary's side; a guards with no GUARDS export keeps its own
+// A hook's check(), but a TAKES_LOAD hook's takes the pinned load, and guards' runs each TAKES_MAIN guard with the head's main checkout, since guards gives them none and each would read its own tree as main, canary's unpacked one on canary's side, each IN_THREAD guard by its check() and each TAKES_LOAD guard by its refusal() with the pinned load; a guards with no GUARDS export keeps its own
 export async function checkOf(file: string, hook: string, main: string): Promise<Check> {
   const own = await import(file)
+  if (TAKES_LOAD.includes(hook)) return (raw, env) => own.check(raw, env, load5())
   if (hook !== "guards" || !Array.isArray(own.GUARDS)) return own.check
   const guards = await Promise.all(
     (own.GUARDS as Guard[]).map(async (guard) => {
-      if (!TAKES_MAIN.includes(guard.name)) return guard
-      const { check } = await import(join(dirname(file), `${guard.name}.ts`))
+      const inThread = IN_THREAD.includes(guard.name)
+      const takesLoad = TAKES_LOAD.includes(guard.name)
+      if (!TAKES_MAIN.includes(guard.name) && !inThread && !takesLoad) return guard
+      const { check, refusal } = await import(join(dirname(file), `${guard.name}.ts`))
+      if (inThread) return { ...guard, run: (raw: string, env: Env) => check(raw, env) }
+      if (takesLoad) return { ...guard, run: (raw: string, env: Env) => refusal(raw, env, load5()) }
       return { ...guard, run: (raw: string, env: Env) => check(raw, env, main) }
     }),
   )

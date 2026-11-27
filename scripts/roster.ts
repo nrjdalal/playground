@@ -484,6 +484,13 @@ function checkTarget(pairs: [string, string][]): void {
     )
 }
 
+// a starting row's first report, a report or a set of eta= or lastReport=, shows its session has begun, so it reads working with no separate assign; a status the call gives wins
+function begun(entry: Agent, pairs: [string, string][], reported: boolean): void {
+  if (entry.status !== "starting" || pairs.some(([k]) => k === "status")) return
+  if (reported || pairs.some(([k, v]) => (k === "eta" || k === "lastReport") && v !== ""))
+    entry.status = "working"
+}
+
 // a call that parks a row, or clears a parked row's hold, leaves it holding one, so the sweep can tell its lead once the wait ends; a call that moves it off parked drops its hold, so a later park names a fresh one, and a hold named on a row the call leaves not parked is refused, so the caller sees why it would not stay. A row parked before this check keeps taking writes that leave its park alone.
 function parkHold(entry: Agent, pairs: [string, string][], moved: boolean): void {
   const touched = moved || pairs.some(([k]) => k === "status" || k === "hold")
@@ -641,6 +648,7 @@ async function main(argv: string[]): Promise<void> {
           1,
         )
       apply(entry, pairs, factoryRepo)
+      begun(entry, pairs, false)
       // a prs+= of the same PR later in the call puts it back on purpose, so only what the call left removed is read back
       withdrawn = withdrawn.filter(
         (pr) => entry.pr !== pr && !((entry.prs as string[] | undefined) ?? []).includes(pr),
@@ -656,6 +664,7 @@ async function main(argv: string[]): Promise<void> {
       entry.lastReport = text
       entry.lastReportAt = now()
       apply(entry, pairs, factoryRepo)
+      begun(entry, pairs, true)
       parkHold(entry, pairs, false)
     } else if (cmd === "assign") {
       const [title, task, ...more] = rest

@@ -2272,6 +2272,7 @@ describe("the focus card", () => {
       "/repo",
       "ask",
       "open",
+      "--awake",
       "--since",
       "2026-10-19T08:00:00.000Z",
       "--until",
@@ -2298,12 +2299,52 @@ describe("the focus card", () => {
         "--by",
         OLD.ops,
         "--note",
-        "Everything that came in while focus stood is answered",
+        "Everything that came in while focus stood is answered or put away",
       ],
     ])
     const after = fake(ops, new Date("2026-10-19T09:15:00.000Z"))
     await beat("focus-card").run(after.ctx)
     expect(after.runs).toEqual([])
+  })
+
+  // PG-3174: an item the owner archived or put off with Later still printed in ask open, so the card never resolved while one stood in its window
+  test("resolves once the only items left in its window are archived or put off, and stays while one there is awake (PG-3174)", async () => {
+    const ops = scratch()
+    writeFileSync(
+      join(ops, "..", "roster.json"),
+      JSON.stringify({ agents: [{ kind: "ops", name: OLD.ops, role: "manager" }] }),
+    )
+    writeFileSync(
+      join(ops, "..", "focus.json"),
+      JSON.stringify({
+        reason: "a timed demo",
+        session: "worker-f",
+        since: "2026-10-19T08:00:00.000Z",
+        until: "2026-10-19T09:00:00.000Z",
+      }),
+    )
+    await beat("focus-card").run(fake(ops, new Date("2026-10-19T09:00:30.000Z"), ASKED).ctx)
+    // plain ask open still prints the put-away items, with their view; --awake prints only an awake one
+    const putAway =
+      "#i602 decision from worker-q · Archive the made-up note? · archived 2026-10-19T08:30:00.000Z\n#i603 decision from worker-q · Snooze the made-up check? · later until 2026-10-20T08:00:00.000Z\n"
+    const awake = fake(ops, new Date("2026-10-19T09:05:00.000Z"), {
+      "ask open --awake": "#i604 decision from worker-q · Ship the made-up fix?\n",
+      "ask open": `${putAway}#i604 decision from worker-q · Ship the made-up fix?\n`,
+    })
+    await beat("focus-card").run(awake.ctx)
+    expect(awake.runs.map((argv) => argv.slice(5, 8))).toEqual([["ask", "open", "--awake"]])
+    const putAwayOnly = fake(ops, new Date("2026-10-19T09:10:00.000Z"), {
+      "ask open --awake": "",
+      "ask open": putAway,
+    })
+    await beat("focus-card").run(putAwayOnly.ctx)
+    expect(putAwayOnly.runs.map((argv) => argv.slice(5, 7))).toEqual([
+      ["ask", "open"],
+      ["ask", "resolve"],
+    ])
+    expect(putAwayOnly.runs[1]!.at(-1)).toBe(
+      "Everything that came in while focus stood is answered or put away",
+    )
   })
 
   // PG-1349 round 1: a kept card that had resolved stayed after a later card failed, and every beat after threw on it, so no new card posted

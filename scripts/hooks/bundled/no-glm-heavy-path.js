@@ -72,7 +72,7 @@ var dataDir = (env = process.env) => dataDirOf(env);
 import { AsyncLocalStorage } from "async_hooks";
 var budget = new AsyncLocalStorage;
 function withLiveBudget(body, ms = 6000) {
-  return budget.getStore() ? body() : budget.run({ reads: new Map, until: performance.now() + ms }, body);
+  return budget.getStore() ? body() : budget.run({ heads: new Map, reads: new Map, until: performance.now() + ms }, body);
 }
 var run = (at, args, env, timeout) => {
   const proc = Bun.spawnSync(["git", "-C", at, ...args], {
@@ -85,11 +85,7 @@ var run = (at, args, env, timeout) => {
   return { ok: proc.exitCode === 0, out: proc.stdout.toString() };
 };
 function liveHeads(at, remote, timeout) {
-  const command = process.env.GIT_SSH_COMMAND || run(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
-  const env = { GIT_TERMINAL_PROMPT: "0" };
-  if (command)
-    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
-  const live = run(at, ["ls-remote", "--heads", "--", remote], env, timeout);
+  const live = run(at, ["ls-remote", "--heads", "--", remote], quiet(at), timeout);
   if (!live.ok)
     return null;
   const tips = [];
@@ -100,6 +96,13 @@ function liveHeads(at, remote, timeout) {
       tips.push({ ref: `${remote}/${name.slice("refs/heads/".length)}`, sha });
   }
   return tips;
+}
+function quiet(at) {
+  const command = process.env.GIT_SSH_COMMAND || run(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
+  const env = { GIT_TERMINAL_PROMPT: "0" };
+  if (command)
+    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
+  return env;
 }
 function present(at, tips) {
   if (!tips.length)
@@ -8088,13 +8091,7 @@ var itemsOf = (fed, split) => {
 `), ...fed.value.split(/\s+/)];
   return [fed.value, ...fed.value.split(split)];
 };
-async function xargsFilled(cmd, xargs, env) {
-  const filled = new Map;
-  for (const [word, replace] of xargs.flatMap((x) => x?.filled ?? []))
-    filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
-  const wrapped = xargs.some((x) => x?.wrapped);
-  if (filled.size === 0 && !wrapped)
-    return [];
+async function xargsTexts(cmd, xargs, env) {
   const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !stdinPath(f.file.value));
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))];
   const inputs = [
@@ -8112,6 +8109,16 @@ async function xargsFilled(cmd, xargs, env) {
     if (raw?.some((text) => /["'\\]/.test(text)))
       texts.add(undefined);
   }
+  return texts;
+}
+async function xargsFilled(cmd, xargs, env) {
+  const filled = new Map;
+  for (const [word, replace] of xargs.flatMap((x) => x?.filled ?? []))
+    filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
+  const wrapped = xargs.some((x) => x?.wrapped);
+  if (filled.size === 0 && !wrapped)
+    return [];
+  const texts = await xargsTexts(cmd, xargs, env);
   const wordsOf = (value) => value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
   const fill = (text) => ({
     ...cmd,
@@ -8680,17 +8687,7 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     const script = operand.value;
     if (!xargs?.replace || !script.includes(xargs.replace))
       return run2(lexScript(script, env), subshell(env), visit, builtins);
-    const fed = await stdinOf(cmd, env);
-    const texts = new Set;
-    for (const split of [null, ...xargs.delimiters ?? []]) {
-      const items = itemsOf(fed, split);
-      if (!items || items.length > READINGS)
-        texts.add(UNKNOWN);
-      else
-        for (const text of items)
-          if (text.trim())
-            texts.add(text.trim());
-    }
+    const texts = new Set([...await xargsTexts(cmd, [xargs], env)].map((text) => text ?? UNKNOWN));
     for (const text of texts.size > 0 ? texts : [""]) {
       const lexed = lexScript(filled(script, xargs.replace, text), env);
       const verdict = await run2(lexed, subshell(env), visit, builtins);
