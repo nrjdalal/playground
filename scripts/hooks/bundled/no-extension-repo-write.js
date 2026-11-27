@@ -9524,17 +9524,7 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     const script = operand.value;
     if (!xargs?.replace || !script.includes(xargs.replace))
       return run2(lexScript(script, env), subshell(env), visit, builtins);
-    const fed = await stdinOf(cmd, env);
-    const texts = new Set;
-    for (const split of [null, ...xargs.delimiters ?? []]) {
-      const items = itemsOf(fed, split);
-      if (!items || items.length > READINGS)
-        texts.add(UNKNOWN);
-      else
-        for (const text of items)
-          if (text.trim())
-            texts.add(text.trim());
-    }
+    const texts = new Set([...await xargsTexts(cmd, [xargs], env)].map((text) => text ?? UNKNOWN));
     for (const text of texts.size > 0 ? texts : [""]) {
       const lexed = lexScript(filled(script, xargs.replace, text), env);
       const verdict = await run2(lexed, subshell(env), visit, builtins);

@@ -218,6 +218,7 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "xargs -0 nohup < <(printf 'x\\0kill 1234')",
     "xargs -0 sh -c < <(printf 'x\\0kill 1234')",
     "xargs -0 -I{} sh -c {} < <(printf 'x\\0kill 1234')",
+    "xargs -0 -a <(printf 'x\\0kill 1234') -I{} sh -c {}",
     "xargs nohup <<< $'x\\nkill 1234'",
     "xargs -L1 ~/.playground/ops/run-slot.sh w -- <<< $'x\\nkill 1234'",
     "echo -e 'x\\nkill 1234' | xargs -L1 ~/.playground/ops/run-slot.sh w --",

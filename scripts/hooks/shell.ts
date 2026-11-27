@@ -4205,14 +4205,8 @@ async function shell(
     const script = operand.value
     if (!xargs?.replace || !script.includes(xargs.replace))
       return run(lexScript(script, env), subshell(env), visit, builtins)
-    // the script is filled with each text itemsOf reads from stdin, so an item -0 or -d splits off runs as xargs runs it (`printf 'x\0pkill node'`)
-    const fed = await stdinOf(cmd, env)
-    const texts = new Set<string>()
-    for (const split of [null, ...(xargs.delimiters ?? [])]) {
-      const items = itemsOf(fed, split)
-      if (!items || items.length > READINGS) texts.add(UNKNOWN)
-      else for (const text of items) if (text.trim()) texts.add(text.trim())
-    }
+    // the script is filled with each text xargsTexts reads from stdin and -a's files, so an item -0 or -d splits off runs as xargs runs it (`printf 'x\0pkill node'`), and one it cannot read as unknown
+    const texts = new Set([...(await xargsTexts(cmd, [xargs], env))].map((text) => text ?? UNKNOWN))
     for (const text of texts.size > 0 ? texts : [""]) {
       const lexed = lexScript(filled(script, xargs.replace, text), env)
       const verdict = await run(lexed, subshell(env), visit, builtins)
