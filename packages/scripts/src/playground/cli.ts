@@ -474,6 +474,13 @@ const sendTo = async ([to, ...words]: string[]): Promise<number> => {
   return 0
 }
 
+// playground hosts: a worktree's own stack URLs by its path, from any folder (hosts.ts), loaded only for this command.
+const hostsFor = async (words: string[]): Promise<number> => {
+  const { code, out } = (await import("./hosts")).hostsCli(words)
+  ;(code === 0 ? console.log : console.error)(out)
+  return code
+}
+
 // playground ci-wait: blocks until the PR's required checks exist at its head and conclude (ci-wait.ts), loaded only for this command.
 const ciWaitFor = async (words: string[]): Promise<number> => {
   const { machineGh, runCiWait } = await import("./ci-wait")
@@ -630,11 +637,13 @@ const code =
                                                         ? await verb(command, rest)
                                                         : command === "ci-wait"
                                                           ? await ciWaitFor(rest)
-                                                          : command === "model"
-                                                            ? await (
-                                                                await import("../local-model/live")
-                                                              ).runModel(rest)
-                                                            : fail(
-                                                                `no command ${command}; playground --help lists them`,
-                                                              )
+                                                          : command === "hosts"
+                                                            ? await hostsFor(rest)
+                                                            : command === "model"
+                                                              ? await (
+                                                                  await import("../local-model/live")
+                                                                ).runModel(rest)
+                                                              : fail(
+                                                                  `no command ${command}; playground --help lists them`,
+                                                                )
 process.exit(code)

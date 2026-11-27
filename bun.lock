@@ -189,6 +189,7 @@
         "fontkit": "catalog:",
         "globby": "catalog:",
         "nanoid": "catalog:",
+        "portless": "catalog:",
         "remark-gfm": "catalog:",
         "remark-mdx": "catalog:",
         "remark-parse": "catalog:",

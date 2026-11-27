@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parseArgs } from "node:util"
 
+import { hostsOf, worktreeOf } from "../playground/hosts"
 import { portlessDir, withPortlessCa } from "../portless-ca"
 import { asideBar, asideDrift } from "./aside-bar"
 import { changelogEntry } from "./changelog-entry"
@@ -287,9 +288,18 @@ const target = (): Target => {
     process.exit(1)
   }
   const strip = (url: string) => url.replace(/\/+$/, "")
-  return values.web && values.api
-    ? { api: strip(values.api), web: strip(values.web) }
-    : { api: strip(portless("api.playground")), web: strip(portless("playground")) }
+  if (values.web && values.api) return { api: strip(values.api), web: strip(values.web) }
+  // In a linked worktree on a prefixed branch, its own hosts, refusing any other; anywhere else, the main checkout the live roll runs verify in included, portless get's own answer
+  const own = worktreeOf(process.cwd())
+  if (!own) return { api: strip(portless("api.playground")), web: strip(portless("playground")) }
+  const hosts = hostsOf(own.top)
+  if ("error" in hosts) {
+    console.error(
+      `No stack for this worktree: ${hosts.error}; start it (dev skill), or pass --web and --api`,
+    )
+    process.exit(1)
+  }
+  return { api: strip(hosts.api), web: strip(hosts.web) }
 }
 
 // A check that throws (a stack that is down, agent-browser missing) fails as itself rather than ending the run.
