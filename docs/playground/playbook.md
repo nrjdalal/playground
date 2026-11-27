@@ -50,6 +50,7 @@ then to the Builder, whose workers build, review and merge it; then to Ops, whic
 The Optimizer runs retros over everything the factory did and routes each lesson to the dispatcher as a fix, parking later ideas in its icebox, and never builds.
 The Assistant runs the owner's personal errands and the dispatcher's tracker, and reports to the dispatcher.
 The Builder and Ops send merges, ETA moves, new PRs, staffing and plan updates to the Planner directly, and the dispatcher only what the owner must see or decide: the status of the owner's own asks, any org work, a blocker or slip on something the owner waits for, a decision only the owner can make, and a finding for the playbook.
+While a card on a PR's merge is open, its lead has Ops list the PR in the held list, and lifts it once the owner's answer arrives, since a draft or ready PR at its gates merges on its own and races his reply.
 Each manager is found by what it does, its kind (the builder, ops, the planner and the optimizer), not by a fixed name, so a manager started again under a new name gets its reports, its alerts and the Dashboard's place for it at once:
 `roster.ts who builder` prints whoever holds the builder's seat, and every script, hook and Dashboard read that looks for a manager follows the same rule, falling back to today's names.
 Four routes skip the planner, which hears after: two fast lanes (a live break or a tiny fix the owner points at, straight to the Builder; a machine or ops incident, straight to Ops), a backlog fix a free slot takes, and a task the owner calls priority.
@@ -144,6 +145,7 @@ While it stands, every merge waits, every other session's heavy run waits in the
 For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
 A priority start (spawn.sh's `--priority`) passes the gates `SPAWN.md` names for it while a priority file that passes it stands, its roster row marked so it counts against no later start.
 It passes focus too on any of them: `priority.json`, an org's own `priority-<name>.json`, a session's own window for that session's own start or a job's own `priority-start.json`.
+A start in an org's checkout while an org job's window stands passes the same gates with no flag, though not focus.
 A session's window opens only with `playground priority on <session> --reason "<why>"`, and a lead opens one only on the owner's or the dispatcher's word; `playground priority off <session> --reason "<why>"` lifts it, ops-tick lifts one left standing after a set age, and each opening and lift is a line in `ops/priority.log`.
 While a window stands, run-slot's queue runs that session's heavy work first, after focus and a lead's hand-written pick.
 A resume within 15 minutes of `spawn.sh close` ending a row that read live passes the gates `SPAWN.md` names for it as well, as a Claude Code update's close and resume do.
@@ -151,7 +153,7 @@ What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
 Once focus ends, either way, one Inbox card says the same, and the quiet items count again.
-The card moves to Done by itself once everything that came in while focus stood is answered.
+The card moves to Done by itself once everything that came in while focus stood is answered or put away with Archive or Later.
 
 ## Tickets
 

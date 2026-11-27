@@ -17,6 +17,7 @@ import {
   knownVariables,
   lex,
   marked,
+  parse,
   type Parsed,
   parseFlags,
   pathOf,
@@ -24,10 +25,12 @@ import {
   PRINTERS,
   program,
   run,
+  slotWords,
   type Text,
   unreadable,
   type Visit,
   type Word,
+  xargsTexts,
 } from "./shell"
 
 type Environment = Record<string, string | undefined>
@@ -389,6 +392,7 @@ async function judgeMerge(
   factory: string,
   builder: () => Promise<boolean>,
   command: string,
+  xargsUnread?: string,
 ): Promise<string | undefined> {
   const { flags, positionals } = parseFlags(rest, MERGE_TAKES)
   if (flags.some((f) => f.name === "--help" || f.name === "-h")) return
@@ -408,7 +412,7 @@ async function judgeMerge(
     : given.length > 0
       ? [repoOf(given.at(-1)!)]
       : GH_DEFAULT(env, parsed.local)
-  if (target && unreadable(target)) candidates.push(undefined)
+  if ((target && unreadable(target)) || xargsUnread) candidates.push(undefined)
   if (!mayBe(candidates, factory)) return
   const head = flags.findLast((f) => f.name === "--match-head-commit")?.value
   const squash = flags.some((f) => f.name === "--squash" || f.name === "-s")
@@ -420,10 +424,87 @@ async function judgeMerge(
   const unread = [
     ...(repoWord && unreadable(repoWord) ? [`the repository ${shown(repoWord)}`] : []),
     ...(target && unreadable(target) ? [`the pull request ${shown(target)}`] : []),
+    ...(xargsUnread ? [xargsUnread] : []),
   ]
   if (unread.length > 0 && !mayBe(candidates.filter(Boolean), factory))
     return `no-protected-push hook refuses this gh pr merge: ${unread.join(" and ")} ${unread.length > 1 ? "are values" : "is a value"} the hook cannot read, so it cannot tell this merge from one of ${place}, whose base is main or canary (gh takes a pull request URL in the number's place over -R). Write the repository and the pull request number literally, one gh pr merge per pull request, as gh pr merge 5 -R <owner>/<repo>. For a pull request of ${place}: ${MERGE_FIX}`
   return `no-protected-push hook refuses this gh pr merge: it merges a pull request of ${place}, whose base is main or canary. ${ROUTE} ${MERGE_FIX} ${BUILDER_FORM}`
+}
+
+type Fed = { args: Word[]; open?: boolean; unread?: string }
+
+// gh's words once xargs gives them its input, beside the typed ones: each text xargs may read appended (no replace string, or a -J one no word is) or put in place of its -I or -J string and an outer xargs' one in the words holding them, split at blanks, so a pull request URL or a -R there places the merge; a text the hook cannot read keeps the typed words and names what xargs adds, which leaves the repository open, and the subcommand too (`open`) when gh is the program itself or the command run-slot.sh runs, given no --help or --version, and the typed words stop before it or a word of it holds the string.
+async function xargsFed(
+  cmd: Command,
+  parsed: Parsed,
+  args: Word[],
+  env: Env,
+  direct: boolean,
+): Promise<Fed[]> {
+  const { xargs } = parsed
+  if (!xargs) return []
+  const strings = [xargs.replace, ...(xargs.outer ?? [])].filter((s): s is string => !!s)
+  const holds = (w: Word) => strings.some((s) => w.value.includes(s))
+  const appends =
+    !xargs.replace || (!!xargs.appends && !args.some((w) => w.value === xargs.replace))
+  if (!appends && !args.some(holds)) return []
+  const { head } = ghCommand(args)
+  const wordsOf = (value: string): Word[] =>
+    value
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((value) => ({ quoted: false, value }))
+  const texts = [
+    ...(await xargsTexts(
+      cmd,
+      [parsed, ...parsed.also].map((p) => p.xargs),
+      env,
+    )),
+  ]
+  const help = args.some((w) => ["--help", "-h", "--version"].includes(w.value))
+  return texts.flatMap((text): Fed[] => {
+    if (text === undefined)
+      return [
+        {
+          args,
+          open:
+            direct &&
+            !help &&
+            (head.length === 0 ||
+              (head.length === 1 && head[0] === "pr") ||
+              head.some((h) => strings.some((s) => h.includes(s)))),
+          unread: appends
+            ? "what xargs appends from its input"
+            : `what xargs puts in place of ${strings.join(" or ")}`,
+        },
+      ]
+    const filled = args.flatMap((w) =>
+      holds(w) ? wordsOf(strings.reduce((v, s) => v.replaceAll(s, () => text), w.value)) : [w],
+    )
+    const fed = appends ? [...filled, ...wordsOf(text)] : filled
+    const [sub, verb] = ghCommand(fed).head
+    if (sub !== "pr" || verb !== "merge") return [{ args: fed }]
+    // xargs may cut its input into batches (-n, -L, -s), so a repository any -R or pull request URL in it names may be the one a batch merges
+    const merge = wordsOf("pr merge -R")
+    return [{ args: fed }, ...namedRepos(wordsOf(text)).map((repo) => ({ args: [...merge, repo] }))]
+  })
+}
+
+// Each of a parse's readings whose program is gh, past every wrapper it unwraps.
+const ghReadings = (parsed: Parsed): Parsed[] => [
+  ...(parsed.name === "gh" ? [parsed] : []),
+  ...parsed.also.flatMap(ghReadings),
+]
+
+// Each repository a -R or --repo value or a pull request URL among words names, as a word -R reads.
+function namedRepos(words: Word[]): Word[] {
+  return words.flatMap((w, k): Word[] => {
+    const url = /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\//i.exec(w.value)
+    if (url) return [{ quoted: false, value: `${url[1]}/${url[2]}` }]
+    if ((w.value === "-R" || w.value === "--repo") && words[k + 1]) return [words[k + 1]!]
+    const attached = /^(?:--repo=|-R)(.+)$/.exec(w.value)
+    return attached ? [{ quoted: false, value: attached[1]! }] : []
+  })
 }
 
 // A word as the call typed it, for a refusal to name.
@@ -557,26 +638,44 @@ async function inspect(
   let settled = true
   const visit: Visit = async (cmd, parsed, at) => {
     const { args, first, name } = parsed
-    let ghArgs: Word[] | undefined
-    if (name === "gh") ghArgs = args
-    else if (!PRINTERS.has(name)) {
-      // gh behind a wrapper the reader does not know
-      const nested = args.findIndex((a) => program(a.value) === "gh")
-      if (nested !== -1) ghArgs = args.slice(nested + 1)
+    // gh's words: as the program itself, as each reading of the command run-slot.sh runs after its -- whose program is gh past its wrappers (`-- env -u gh gh`), and after the first word naming gh behind a wrapper the reader does not know; only the first two run gh, rather than name it as another program's word (`grep gh`, `grep -- gh`), a wrapper's value or run-slot's <who>
+    const ghCalls: { args: Word[]; runs: boolean }[] = []
+    if (name === "gh") ghCalls.push({ args, runs: true })
+    else {
+      const slotted = slotWords(parsed)
+      if (slotted?.length)
+        for (const reading of ghReadings(parse({ ...cmd, words: slotted })))
+          ghCalls.push({ args: reading.args, runs: true })
+      const nested = PRINTERS.has(name) ? -1 : args.findIndex((a) => program(a.value) === "gh")
+      if (nested !== -1) ghCalls.push({ args: args.slice(nested + 1), runs: false })
     }
-    if (ghArgs) {
-      const { head, repos, rest } = ghCommand(ghArgs)
+    for (const { args: ghArgs, runs } of ghCalls) {
       const folders = places(at)
       if (at.cwdUnread || at.cwdAnywhere)
         folders.push({ ...at, cwd: undefined, cwdSure: undefined })
-      for (const place of folders) {
-        const verdict =
-          head[0] === "pr" && head[1] === "merge"
-            ? await judgeMerge(rest, repos, parsed, place, factory, builder, command)
-            : head[0] === "api"
-              ? await judgeApi(rest, cmd, parsed, place, factory)
-              : undefined
-        if (verdict) return verdict
+      const readings: Fed[] = [{ args: ghArgs }, ...(await xargsFed(cmd, parsed, ghArgs, at, runs))]
+      for (const [k, reading] of readings.entries()) {
+        const { head, repos, rest } = ghCommand(reading.args)
+        const merge = head[0] === "pr" && head[1] === "merge"
+        if (k > 0 && !merge && !reading.open) continue
+        for (const place of folders) {
+          const verdict =
+            merge || reading.open
+              ? await judgeMerge(
+                  rest,
+                  repos,
+                  parsed,
+                  place,
+                  factory,
+                  builder,
+                  command,
+                  reading.unread,
+                )
+              : head[0] === "api"
+                ? await judgeApi(rest, cmd, parsed, place, factory)
+                : undefined
+          if (verdict) return verdict
+        }
       }
     }
     let gitArgs: Word[] | undefined

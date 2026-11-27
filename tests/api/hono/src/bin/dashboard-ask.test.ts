@@ -106,6 +106,7 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
   let answerRelayed: (id: string) => Promise<{ delivery: unknown }>
   let reply: (tag: string) => Promise<void>
   let snooze: (id: string) => Promise<void>
+  let archive: (id: string) => Promise<void>
 
   beforeAll(async () => {
     container = Bun.spawnSync([
@@ -179,6 +180,10 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     snooze = async (id) => {
       const snoozed = await scheduleItem(db, id, new Date(Date.now() + DAY).toISOString())
       if (!snoozed.ok) throw new Error(snoozed.message)
+    }
+    archive = async (id) => {
+      const archived = await answerItem(db, id, { action: "archive" }, { actor: { label: "test" } })
+      if (!archived.ok) throw new Error(archived.message)
     }
     dismiss = async (id) => {
       if ((await dismissItems(db, [id])) !== 1) throw new Error(`${id} was not dismissed`)
@@ -697,6 +702,36 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect((await cli(["open", "--until", "later"])).stderr).toContain("--until takes an ISO time")
   })
 
+  // PG-3174: ops-tick's focus card reads open --awake with its window, so both filters hold at once
+  test("open --awake with --since and --until keeps only an awake item posted in the window", async () => {
+    const postedAt = async (id: string) =>
+      Date.parse(JSON.parse((await cli(["get", id])).stdout).createdAt)
+    const before = await post({ ...DECISION, from: "worker-open-u", title: "Ship the one before?" })
+    const since = new Date((await postedAt(before.id)) + 1).toISOString()
+    await Bun.sleep(5)
+    const awake = await post({ ...DECISION, from: "worker-open-u", title: "Ship the awake one?" })
+    const archived = await post({
+      ...DECISION,
+      from: "worker-open-u",
+      title: "Ship the archived one?",
+    })
+    const later = await post({ ...DECISION, from: "worker-open-u", title: "Ship the later one?" })
+    const until = new Date((await postedAt(later.id)) + 1).toISOString()
+    await Bun.sleep(5)
+    const after = await post({ ...DECISION, from: "worker-open-u", title: "Ship the one after?" })
+    await archive(archived.id)
+    await snooze(later.id)
+    const window = ["--from", "worker-open-u", "--since", since, "--until", until]
+    const all = await cli(["open", ...window])
+    expect(all.code).toBe(0)
+    for (const item of [awake, archived, later]) expect(all.stdout).toContain(`${item.tag} `)
+    const listed = await cli(["open", "--awake", ...window])
+    expect(listed.code).toBe(0)
+    expect(listed.stdout).toContain(`${awake.tag} decision from worker-open-u`)
+    for (const item of [before, archived, later, after])
+      expect(listed.stdout).not.toContain(`${item.tag} `)
+  })
+
   // a chat-replied item the owner had moved to Done kept its open status, so it still listed as open
   test("open lists an item put away with Later and one replied to in chat until it moves to Done, and never an update", async () => {
     const snoozed = await post({
@@ -726,6 +761,64 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     const after = await listed()
     expect(after).toContain(`${snoozed.tag} decision from worker-open-c`)
     expect(after).not.toContain(`${replied.tag} `)
+  })
+
+  // PG-3171: an item the owner archived or put off read as waiting on him, so sessions named it as waiting after he had put it away
+  test("open and get show the owner's Archive and Later beside an awake item, and open --awake leaves them out", async () => {
+    const titled = (title: string) => post({ ...DECISION, from: "worker-open-v", title })
+    const archived = await titled("Ship the archived one?")
+    const later = await titled("Ship the later one?")
+    const awake = await titled("Ship the awake one?")
+    await archive(archived.id)
+    await snooze(later.id)
+    const answerOf = async (id: string) => JSON.parse((await cli(["get", id])).stdout).answer
+    const archivedAt: string = (await answerOf(archived.id)).archivedAt
+    const laterUntil: string = (await answerOf(later.id)).snoozedUntil
+    const plain = (await cli(["open", "--from", "worker-open-v"])).stdout
+    expect(plain).toContain(
+      `${archived.tag} decision from worker-open-v · Ship the archived one? · archived ${archivedAt}\n`,
+    )
+    expect(plain).toContain(
+      `${later.tag} decision from worker-open-v · Ship the later one? · later until ${laterUntil}\n`,
+    )
+    expect(plain).toContain(`${awake.tag} decision from worker-open-v · Ship the awake one?\n`)
+    const json = (await cli(["open", "--from", "worker-open-v", "--json"])).stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+    expect(json.map(({ id, view, viewAt }) => ({ id, view, viewAt }))).toEqual([
+      { id: archived.id, view: "archived", viewAt: archivedAt },
+      { id: later.id, view: "later", viewAt: laterUntil },
+      { id: awake.id, view: "awake", viewAt: undefined },
+    ])
+    const awakeOnly = await cli(["open", "--from", "worker-open-v", "--awake"])
+    expect(awakeOnly.code).toBe(0)
+    expect(awakeOnly.stdout).toBe(
+      `${awake.tag} decision from worker-open-v · Ship the awake one?\n`,
+    )
+    const awakeJson = (await cli(["open", "--awake", "--json", "--from", "worker-open-v"])).stdout
+    expect(
+      awakeJson
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line).id),
+    ).toEqual([awake.id])
+    for (const [item, view, viewAt, line] of [
+      [archived, "archived", archivedAt, `ask: archived ${archivedAt}`],
+      [later, "later", laterUntil, `ask: later until ${laterUntil}`],
+      [awake, "awake", undefined, null],
+    ] as const) {
+      const got = await cli(["get", item.tag])
+      expect(got.code).toBe(0)
+      expect(JSON.parse(got.stdout)).toMatchObject({ status: "open", view })
+      expect(JSON.parse(got.stdout).viewAt).toBe(viewAt)
+      if (line) expect(got.stderr).toContain(`${line}\n`)
+      else expect(got.stderr).not.toMatch(/ask: (archived|later until) /)
+    }
+    const usage = (await cli(["open", "--asleep"])).stderr.replace(/\s+/g, " ")
+    expect(usage).toContain("[--awake] [--json]")
+    expect(usage).toContain('"archived <iso>" or "later until <iso>"')
+    expect(usage).toContain('"ask: archived <iso>" or "ask: later until <iso>" on stderr')
   })
 
   test("resolve closes the poster's own alert update; another session, a decision and an unknown id are refused (#658)", async () => {

@@ -7497,13 +7497,7 @@ var itemsOf = (fed, split) => {
 `), ...fed.value.split(/\s+/)];
   return [fed.value, ...fed.value.split(split)];
 };
-async function xargsFilled(cmd, xargs, env) {
-  const filled = new Map;
-  for (const [word, replace] of xargs.flatMap((x) => x?.filled ?? []))
-    filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
-  const wrapped = xargs.some((x) => x?.wrapped);
-  if (filled.size === 0 && !wrapped)
-    return [];
+async function xargsTexts(cmd, xargs, env) {
   const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !stdinPath(f.file.value));
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))];
   const inputs = [
@@ -7521,6 +7515,16 @@ async function xargsFilled(cmd, xargs, env) {
     if (raw?.some((text) => /["'\\]/.test(text)))
       texts.add(undefined);
   }
+  return texts;
+}
+async function xargsFilled(cmd, xargs, env) {
+  const filled = new Map;
+  for (const [word, replace] of xargs.flatMap((x) => x?.filled ?? []))
+    filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
+  const wrapped = xargs.some((x) => x?.wrapped);
+  if (filled.size === 0 && !wrapped)
+    return [];
+  const texts = await xargsTexts(cmd, xargs, env);
   const wordsOf = (value) => value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
   const fill = (text) => ({
     ...cmd,
@@ -8093,17 +8097,7 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     const script = operand.value;
     if (!xargs?.replace || !script.includes(xargs.replace))
       return run(lexScript(script, env), subshell(env), visit, builtins);
-    const fed = await stdinOf(cmd, env);
-    const texts = new Set;
-    for (const split of [null, ...xargs.delimiters ?? []]) {
-      const items = itemsOf(fed, split);
-      if (!items || items.length > READINGS)
-        texts.add(UNKNOWN);
-      else
-        for (const text of items)
-          if (text.trim())
-            texts.add(text.trim());
-    }
+    const texts = new Set([...await xargsTexts(cmd, [xargs], env)].map((text) => text ?? UNKNOWN));
     for (const text of texts.size > 0 ? texts : [""]) {
       const lexed = lexScript(filled(script, xargs.replace, text), env);
       const verdict = await run(lexed, subshell(env), visit, builtins);

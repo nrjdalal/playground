@@ -125,6 +125,13 @@ trusted_root() {
 guard_list() { (cd / && env $UNSET "$BUN" --no-env-file "$REPO/packages/scripts/src/playground/guard-list.ts" spawn.sh "$1"); }
 # A folder in the home folder for each org ext.links guards.
 org_roots() { setting --guarded-orgs | python3 -I -c 'import json, os, sys; [print(os.path.join(os.path.expanduser("~"), org)) for org in json.load(sys.stdin)]' 2>/dev/null; }
+# The guarded org whose checkout $DIR is, as a folder on its path or as the owner of its GitHub origin, in any case, empty for none; exit 1, with why when it says, while the orgs ext.links guards do not read.
+checkout_org() {
+  local orgs origin
+  orgs=$( (cd / && env $UNSET "$BUN" --no-env-file "$REPO/packages/scripts/src/playground/setting.ts" --guarded-orgs) 2>&1) || { echo "$orgs"; return 1; }
+  origin=$(git -C "${DIR:-/}" remote get-url origin 2>/dev/null) || origin=
+  python3 -I -c 'import json, re, sys; parts = sys.argv[1].lower().split("/"); m = re.search(r"github\.com[:/]([\w.-]+)/", sys.argv[3]); owner = m.group(1).lower() if m else ""; print(next((o for o in json.loads(sys.argv[2]) if o in parts or o == owner), ""))' "${DIR:-}" "$orgs" "$origin" 2>/dev/null
+}
 # Claude Code keeps a folder's transcripts in the project folder named from its real path, each character outside [A-Za-z0-9] a hyphen.
 PROJECTS="$(dirname "$REGISTRY")/projects"
 project_of() { echo "$PROJECTS/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$1")"; }
@@ -201,10 +208,10 @@ session_name() { local n k; while read -r n k; do [ "$k" != "$1" ] || { echo "$n
 second_dispatcher() { [ "${1%-2}" != "$1" ] && [ "$(session_kind "${1%-2}")" = dispatcher ]; }
 # The first dispatcher, a dispatcher (its caller reads KIND) that holds slot 1 or is sessions.names' own and not the second, starts past every gate, by manager and by resume alike, so a restore brings the owner's dispatcher back at once.
 first_dispatcher() { [ "$1" = "$(dispatcher_of 1)" ] || { [ "$(session_kind "$1")" = dispatcher ] && ! second_dispatcher "$1"; }; }
-# A resume's refusal that a later restore clears with no change: a gate holding it over a reading that falls, or focus standing for another session. A gate that cannot read its input or reads a bad setting is a fault, which waiting never ends.
+# A resume's refusal that a later restore clears with no change: a gate holding it over a reading that falls, or focus standing for another session. A gate that cannot read its input or reads a bad setting is a fault, which waiting never ends. Focus's refusal ends in its free-text reason, so both patterns read the line before it.
 restore_waits() {
-  local wait_re='the [a-z]+ gate holds it:|focus stands for' fault_re='cannot read|PLAYGROUND_LOAD_MULT is|holds no'
-  [[ $1 =~ $wait_re ]] && ! [[ $1 =~ $fault_re ]]
+  local wait_re='the [a-z]+ gate holds it:|focus stands for' fault_re='cannot read|PLAYGROUND_LOAD_MULT is|holds no' line=${1%%, its reason \"*}
+  [[ $line =~ $wait_re ]] && ! [[ $line =~ $fault_re ]]
 }
 
 # The live sessions: a registry file whose pid is alive with the start time the file records, in the form it records it, as the Dashboard reads them, but for a `claude -p` run (entrypoint sdk-cli), which holds no name. It prints a line, tab-separated pid, session id, folder and process start ("-" for a field the file lacks), for each live session named $1, the lowest pid first.
@@ -302,6 +309,7 @@ gates = json.loads(gates)
 now = dt.datetime.now(dt.timezone.utc)
 readings = {}
 on_seat = False  # an --account start on the own login that seat_start moves onto its seat token
+bare_seat = False  # a start with no --account that lands on the own login's seat token while its Claude Code login has ended
 if host:
     readings["host"] = host
     try:
@@ -959,6 +967,10 @@ try:
             if own_pick and stored_detail and not stored_seen:
                 stored_name, stored_seen, stored_detail, on_seat = seat_start(runs_on, stored_detail)
             logins = [(runs_on, stored_name, None, stored_seen, stored_detail), (own, "usage.json", own, seen, detail)]
+        # a start with no --account, a resume's included, judges the own login it would land on by its seat token while loginEnded stands, since the config login stops at /login; with no seat it is refused and the split takes another login
+        if not own_pick and login_ended and isinstance(runs_on, str) and runs_on:
+            seat_name, seat_seen, seat_detail, seated = seat_start(runs_on, f"its Claude Code login has ended (loginEnded: {login_ended})")
+            logins[0] = (runs_on, seat_name, runs_on if seated else None, seat_seen, seat_detail)
         known = {login[0].lower() for login in logins}
         for path in sorted(glob.glob(os.path.join(data_dir, "usage-*.json"))):
             name = os.path.basename(path)
@@ -1047,6 +1059,7 @@ try:
         else:
             chosen = min(passing, key=lambda login: login[3].get("week", 0))
         readings.update(chosen[3])
+        bare_seat = not own_pick and bool(login_ended) and isinstance(chosen[2], str) and chosen[2].lower() == str(runs_on).lower()
         if len(logins) > 1:
             readings["logins"] = {f"{email} ({name})": detail or (f"week {fmt(seen['week'])}%" if "week" in seen else seen["usage"]) for email, name, _, seen, detail in logins}
         if chosen[2]:
@@ -1075,6 +1088,8 @@ elif own_pick and on_seat:
 elif own_pick:
     week = f"its week is at {fmt(readings['week'])}%" if "week" in readings else f"its usage {readings.get('usage', 'unread')}"
     print(f"ok - --account {own_pick} is this machine's own login, so it starts there, the split skipped: {week} ({chosen[1]})")
+elif bare_seat:
+    print(f"ok {readings['account']} no --account, so it starts on {readings['account']}, this machine's own login, whose Claude Code login has ended (loginEnded: {login_ended}), so it starts on its seat token, {why}: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif readings.get("account"):
     print(f"ok {readings['account']} no --account, so it starts on {readings['account']}, {why}: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif "logins" in readings:
@@ -1095,7 +1110,7 @@ PY
       pick=${verdict#ok }
       pick=${pick%% *}
       # the own login on its seat token: seat_start checked its item, and check_account refuses the own login by name
-      [ "$pick" = - ] || { ACCOUNT=$pick; PICKED=1; if [ "$pick" = "$OWN_LOGIN" ]; then plain_account; else check_account; fi; }
+      [ "$pick" = - ] || { ACCOUNT=$pick; PICKED=1; if [ "$pick" = "$OWN_LOGIN" ] || [[ $verdict == "ok $pick no --account, so it starts on $pick, this machine's own login, "* ]]; then plain_account; else check_account; fi; }
       echo "spawn.sh: ${verdict#ok "$pick" }"
       ;;
     *) refuse "$verdict" ;;
@@ -1918,11 +1933,7 @@ if [ -n "$OFF_CLAUDE" ]; then
   [ "$BACKEND" != local ] || [ -z "$CLAUDE_MODEL" ] || refuse "a session on a local model takes no --model: the launch maps every model to the served name"
   # No guarded org's data reaches GLM or the local model: a session in a folder named for an org ext.links guards, or on a brief naming a word glm-refused-sources lists, runs on Claude.
   # A failed read of the guarded orgs refuses.
-  orgs=$( (cd / && env $UNSET "$BUN" --no-env-file "$REPO/packages/scripts/src/playground/setting.ts" --guarded-orgs) 2>&1) ||
-    refuse "it cannot read the orgs ext.links guards, so it cannot tell a guarded org's checkout: $orgs"
-  origin=$(git -C "${DIR:-/}" remote get-url origin 2>/dev/null) || origin=
-  # A guarded org, as a folder on the session's path or as the owner of that folder's GitHub origin, in any case.
-  org=$(python3 -I -c 'import json, re, sys; parts = sys.argv[1].lower().split("/"); m = re.search(r"github\.com[:/]([\w.-]+)/", sys.argv[3]); owner = m.group(1).lower() if m else ""; print(next((o for o in json.loads(sys.argv[2]) if o in parts or o == owner), ""))' "${DIR:-}" "$orgs" "$origin") || refuse "it cannot read the orgs ext.links guards"
+  org=$(checkout_org) || refuse "it cannot read the orgs ext.links guards, so it cannot tell a guarded org's checkout${org:+: $org}"
   [ -z "$org" ] || refuse "$NAME runs in a checkout of $org, an org ext.links guards, so it runs on Claude: start it with --backend claude, closing a $BACKEND-pinned session first"
   if [ -n "${BRIEF:-}" ]; then
     words=$(guard_list glm-refused-sources 2>&1) || refuse "$words"
@@ -2018,13 +2029,16 @@ case "$SIZE" in
   *) ITEM=$(bash "$REPO/scripts/ops/run-slot.sh" size "$NAME" 2>/dev/null) || ITEM= ;;
 esac
 case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
-PRIORITY_FILE=
+PRIORITY_FILE= ORG_START=
 if [ -n "$PRIORITY" ]; then
   priority_file || if [ -n "$PRIORITY_KEPT" ]; then
     refuse "--priority starts only on a priority file that passes it, and none in $DATA does: $PRIORITY_KEPT; a session's own window passes only its own start, and playground priority on $NAME --reason \"<why>\" opens one, on the owner's or the dispatcher's word"
   else
     refuse "--priority starts only while a priority file stands in $DATA (priority.json, priority-start.json or another priority-<name>.json), and none does: playground priority on <session> --reason \"<why>\" opens one, on the owner's or the dispatcher's word"
   fi
+# A start in a guarded org's checkout while an org job's window stands (run-slot.sh org-window, which the lanes read too) takes the path a job's own --priority start takes, with no flag: it passes the load and slots gates and marks its row, but never focus (the dispatcher, 27 Nov: firefighting goes first in its hours)
+elif org=$(checkout_org) && [ -n "$org" ] && PLAYGROUND_DATA_DIR="$DATA" bash "$REPO/scripts/ops/run-slot.sh" org-window 2>/dev/null; then
+  PRIORITY_FILE="$DATA/ops/jobs.json" ORG_START=$org
 fi
 # JUST_CLOSED names a just-closed resume, whose pass playbook's SPAWN.md, Capacity gate, holds: a resume within 15 minutes of spawn.sh closing its row while it read live, as a Claude Code update's close and resume are.
 JUST_CLOSED=
@@ -2044,11 +2058,12 @@ except Exception:
     sys.exit(1)
 if until <= datetime.datetime.now(datetime.timezone.utc):
     sys.exit(1)
-print(f"{f.get('session')} until {f['until']}")
+why = " ".join(str(f.get("reason") or "").split())
+print(f"{f.get('session')} until {f['until']}" + (f', its reason "{why}"' if why else ""))
 PY
 ); then
   # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --priority start goes on while a priority file passes it, a job's own start file included, since no gate but the machine's own delays a job's ticket start
-  [ -n "$PRIORITY_FILE" ] || case "$ROLE" in reviewer | tester) [ "${TO:-${serves:-}}" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
+  { [ -n "$PRIORITY_FILE" ] && [ -z "$ORG_START" ]; } || case "$ROLE" in reviewer | tester) [ "${TO:-${serves:-}}" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
     refuse "focus stands for $FOCUS, so no new session starts until it ends but its own reviewer and tester (playground focus off ends it)"
 fi
 # With no id, Claude's resume picker looks the name up only in the transcripts of the folder it starts in (its project folder, named from the folder's real path), so in a folder the session never ran in it finds nothing and the launch waits out its timeout; that check reads every transcript there, so the gate reads first as --check does, logging no start, and the gate proper runs after it.

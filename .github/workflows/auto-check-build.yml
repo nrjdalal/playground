@@ -152,7 +152,7 @@ jobs:
         run: |
           for image in postgres:18-alpine redis:alpine; do
             start=$(date +%s)
-            docker pull -q "$image"
+            docker pull -q "$image" || { sleep 5; docker pull -q "$image"; } || { sleep 15; docker pull -q "$image"; }
             echo "$image pulled in $(( $(date +%s) - start ))s"
           done
 

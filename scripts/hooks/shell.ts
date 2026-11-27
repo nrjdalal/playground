@@ -991,7 +991,7 @@ const plainPath = (value: string) =>
         .join("/")}`
     : value
 // Whether a word names stdin, spelled plainly or through ./ hops and doubled slashes, a relative path read from each folder the command may run in, both as a logical cd folds its `..` and by its real path (a link or a hop to the root is the root), or from the root where the reader can place none
-const stdinPath = (value: string, env?: Env): boolean => {
+export const stdinPath = (value: string, env?: Env): boolean => {
   if (STDIN_PATHS.has(plainPath(value))) return true
   if (!env || value.startsWith("/") || marked(value)) return false
   const folders = places(env).flatMap((e) => (e.cwd === undefined ? [] : [e.cwd]))
@@ -3363,7 +3363,7 @@ function stdinScript({ args, name }: Parsed): boolean {
 }
 
 // The text GNU xargs' -a reads in place of stdin: a process substitution's output, else the file, which readPath reads only when it is a regular file within MAX_BYTES, so any other reads as unread; a relative path from env -C's folder before xargs, as examineReading's `here` reads it, and any file as unread after a privilege wrapper, which may move the folder or the root
-async function argFile(
+export async function argFile(
   { chdir, file, moved }: NonNullable<NonNullable<Xargs>["files"]>[number],
   cmd: Command,
   env: Env,
@@ -3384,13 +3384,12 @@ const itemsOf = (fed: Text, split: string | null | undefined): string[] | undefi
   return [fed.value, ...fed.value.split(split)]
 }
 
-// The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J) or an outer xargs' one, or whose wrapper after xargs is given no program word (`xargs nohup`, its input words appended as that program), which xargs fills from its input, so it runs a program no typed word names: each such word filled with each text itemsOf reads from stdin and from each file GNU's -a names (stdin's name aside, which stdin's reading covers), split by default and at each -d or -0 delimiter, a text holding a quote or a backslash with them stripped, as xargs strips them, and split at blanks into the words xargs runs; or unread when the hook cannot read an input or decode a delimiter, one input's split holds more texts than READINGS, or a text holds a quote or a backslash, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
-async function xargsFilled(cmd: Command, xargs: Xargs[], env: Env): Promise<Command[]> {
-  const filled = new Map<Word, string[]>()
-  for (const [word, replace] of xargs.flatMap((x) => x?.filled ?? []))
-    filled.set(word, [...new Set([...(filled.get(word) ?? []), replace])])
-  const wrapped = xargs.some((x) => x?.wrapped)
-  if (filled.size === 0 && !wrapped) return []
+// Each text xargs may hand its program from one input: what itemsOf reads from stdin and from each file GNU's -a names (stdin's name aside, which stdin's reading covers), split by default and at each -d or -0 delimiter, with a quote or a backslash stripped as xargs strips them; undefined among them when the hook cannot read an input or decode a delimiter, one input's split holds more texts than READINGS, or a text holds a quote or a backslash.
+export async function xargsTexts(
+  cmd: Command,
+  xargs: Xargs[],
+  env: Env,
+): Promise<Set<string | undefined>> {
   const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !stdinPath(f.file.value))
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))]
   const inputs = [
@@ -3406,6 +3405,17 @@ async function xargsFilled(cmd: Command, xargs: Xargs[], env: Env): Promise<Comm
     else for (const text of items) texts.add(text)
     if (raw?.some((text) => /["'\\]/.test(text))) texts.add(undefined)
   }
+  return texts
+}
+
+// The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J) or an outer xargs' one, or whose wrapper after xargs is given no program word (`xargs nohup`, its input words appended as that program), which xargs fills from its input, so it runs a program no typed word names: each such word filled with each text itemsOf reads from stdin and from each file GNU's -a names (stdin's name aside, which stdin's reading covers), split by default and at each -d or -0 delimiter, a text holding a quote or a backslash with them stripped, as xargs strips them, and split at blanks into the words xargs runs; or unread when the hook cannot read an input or decode a delimiter, one input's split holds more texts than READINGS, or a text holds a quote or a backslash, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
+async function xargsFilled(cmd: Command, xargs: Xargs[], env: Env): Promise<Command[]> {
+  const filled = new Map<Word, string[]>()
+  for (const [word, replace] of xargs.flatMap((x) => x?.filled ?? []))
+    filled.set(word, [...new Set([...(filled.get(word) ?? []), replace])])
+  const wrapped = xargs.some((x) => x?.wrapped)
+  if (filled.size === 0 && !wrapped) return []
+  const texts = await xargsTexts(cmd, xargs, env)
   const wordsOf = (value: string): Word[] =>
     value
       .split(/\s+/)
@@ -4205,14 +4215,8 @@ async function shell(
     const script = operand.value
     if (!xargs?.replace || !script.includes(xargs.replace))
       return run(lexScript(script, env), subshell(env), visit, builtins)
-    // the script is filled with each text itemsOf reads from stdin, so an item -0 or -d splits off runs as xargs runs it (`printf 'x\0pkill node'`)
-    const fed = await stdinOf(cmd, env)
-    const texts = new Set<string>()
-    for (const split of [null, ...(xargs.delimiters ?? [])]) {
-      const items = itemsOf(fed, split)
-      if (!items || items.length > READINGS) texts.add(UNKNOWN)
-      else for (const text of items) if (text.trim()) texts.add(text.trim())
-    }
+    // the script is filled with each text xargsTexts reads from stdin and -a's files, so an item -0 or -d splits off runs as xargs runs it (`printf 'x\0pkill node'`), and one it cannot read as unknown
+    const texts = new Set([...(await xargsTexts(cmd, [xargs], env))].map((text) => text ?? UNKNOWN))
     for (const text of texts.size > 0 ? texts : [""]) {
       const lexed = lexScript(filled(script, xargs.replace, text), env)
       const verdict = await run(lexed, subshell(env), visit, builtins)

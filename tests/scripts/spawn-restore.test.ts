@@ -110,6 +110,33 @@ describe("restore resumes every manager its records name, or says which it left 
     expect(placing(r).filter((c) => c[1] === "run")).toEqual([])
   })
 
+  // PG-3189 round 1: the refusal now ends in focus's free-text reason, which can hold a fault's words
+  test("a manager focus holds under a reason holding a fault's words is printed as waiting, and the run exits 0", async () => {
+    const until = new Date(Date.now() + 3_600_000).toISOString()
+    const reason = "the box cannot read its queue and holds no lane"
+    const r = await spawn(
+      ["restore"],
+      [],
+      { ROSTER_JSON: JSON.stringify({ agents: managers.map((name) => row(name, "starting")) }) },
+      undefined,
+      undefined,
+      (home: string) => {
+        recorded(home)
+        writeFileSync(
+          lw(home, "focus.json"),
+          JSON.stringify({ reason, session: "other-worker", until }),
+        )
+      },
+    )
+    const lines = r.out.split("\n").filter(Boolean)
+    expect(lines).toHaveLength(3)
+    for (const [i, name] of managers.entries())
+      expect(lines[i]).toStartWith(
+        `waiting ${name}: focus stands for other-worker until ${until}, its reason "${reason}"`,
+      )
+    expect(r.code).toBe(0)
+  })
+
   // #1682 round 1: a bad setting never clears by waiting, so it is a failure, not a wait.
   test("a gate that reads a bad setting is not restored, and the run exits 1", async () => {
     const r = await spawn(

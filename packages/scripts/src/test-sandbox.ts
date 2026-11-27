@@ -14,7 +14,7 @@ import { basename, isAbsolute, join, relative } from "node:path"
 import { removeScratch } from "@packages/safe-delete"
 
 import { CLOCK_EXEMPT, clockExempt } from "./clock-exempt"
-import { sandbox } from "./sandbox"
+import { sandbox, TEST_DEADLINE_MS } from "./sandbox"
 import { py } from "./test-skills"
 import { isMainCheckout, prebuildTests } from "./verify/prebuild"
 
@@ -38,7 +38,7 @@ const dropScratch = () => {
 const ahead = Boolean(process.env.CLOCK_AHEAD_DAYS)
 const clock = ahead ? [`--preload=${join(import.meta.dir, "../../../tests/clock-ahead.ts")}`] : []
 // bun's own test timeout cannot stop a test blocked in sync code (a spawnSync that never returns held a worker 29 minutes once), so the parallel pass has a deadline: each worker marks the file it holds through a preload that runs once per test file, and a pass past the deadline is killed as a group and fails naming the files still marked
-const DEADLINE_MS = Number(process.env.TEST_PARALLEL_DEADLINE_MS) || 20 * 60_000
+const DEADLINE_MS = Number(process.env.TEST_PARALLEL_DEADLINE_MS) || TEST_DEADLINE_MS
 const running = join(scratch, "running")
 mkdirSync(running)
 const preload = join(scratch, "running.ts")
