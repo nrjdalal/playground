@@ -9734,7 +9734,7 @@ async function toolWrites(cmd, name, args, env) {
   const tool = TOOL_WRITERS.exec(name)?.[1];
   if (!tool)
     return [];
-  const at = (value) => pathOf({ value }, env);
+  const at = (value) => marked(value) ? undefined : pathOf({ value }, env);
   const unread = unknown2(`what ${name} writes`);
   if (tool === "dd") {
     const of = args.find((a) => a.value.startsWith("of="));

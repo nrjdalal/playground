@@ -4290,7 +4290,8 @@ async function toolWrites(
 ): Promise<[string, Text, string?][]> {
   const tool = TOOL_WRITERS.exec(name)?.[1]
   if (!tool) return []
-  const at = (value: string) => pathOf({ value }, env)
+  // a value holding a part the hook cannot read names no path it can read, so its file reads as unread
+  const at = (value: string) => (marked(value) ? undefined : pathOf({ value }, env))
   const unread = unknown(`what ${name} writes`)
   if (tool === "dd") {
     const of = args.find((a) => a.value.startsWith("of="))
