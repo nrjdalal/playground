@@ -299,7 +299,7 @@ export const runSlotHold = async (ctx: Context) => {
   if (JSON.stringify(told) !== before) await writeAtomic(toldPath, JSON.stringify(told))
 }
 
-// One kept focus card resolved, true, once no ask posted in its window is open; false while one is
+// One kept focus card resolved, true, once no ask posted in its window is open and awake (ask open --awake leaves out what the owner archived or put off with Later); false while one is
 const settleFocusCard = async (ctx: Context, card: FocusCardKept): Promise<boolean> => {
   const open = await ctx.run([
     "bun",
@@ -309,6 +309,7 @@ const settleFocusCard = async (ctx: Context, card: FocusCardKept): Promise<boole
     ctx.repo,
     "ask",
     "open",
+    "--awake",
     "--since",
     card.since,
     "--until",
@@ -316,7 +317,12 @@ const settleFocusCard = async (ctx: Context, card: FocusCardKept): Promise<boole
   ])
   if (open.code !== 0) throw new Error(`bun run ask open: ${lines(open.out).at(-1)}`)
   if (lines(open.out).some((line) => /^#i\d+ /.test(line.trim()))) return false
-  await resolveOwn(ctx, card.id, card.by, "Everything that came in while focus stood is answered")
+  await resolveOwn(
+    ctx,
+    card.id,
+    card.by,
+    "Everything that came in while focus stood is answered or put away",
+  )
   return true
 }
 
