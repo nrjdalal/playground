@@ -248,6 +248,18 @@ export const groups: Group[] = [
         `ruby -e "system 'cp /tmp/x $HOME/.playground/roster.json'"`,
       ],
       [
+        "python3 code running cp onto the roster through subprocess.getoutput",
+        `python3 -c "import subprocess; subprocess.getoutput('cp /tmp/x $HOME/.playground/roster.json')"`,
+      ],
+      [
+        "python3 code running mv onto the roster through subprocess.getstatusoutput",
+        `python3 -c "import subprocess; subprocess.getstatusoutput('mv /tmp/x $HOME/.playground/roster.json')"`,
+      ],
+      [
+        "php code running cp onto the roster through shell_exec",
+        `php -r "shell_exec('cp /tmp/x $HOME/.playground/roster.json');"`,
+      ],
+      [
         "chmod -R on the data folder printed by a substitution",
         'chmod -R 000 "$(echo ~/.playground)"',
       ],

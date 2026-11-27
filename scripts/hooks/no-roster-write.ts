@@ -131,9 +131,9 @@ const PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g
 // cp, mv or install as a shell word: a quoted list item, or a string (a quote, a backtick, perl's qx or ruby's %x) it opens with two operands, or one and a string joined on with +, % or the dot.
 const SHELL_WORDS =
   /(?<![\w.$-])(?:cp|mv|install)["']\s*,|(?:["'`]|\bqx\s*[{(\[<|/!]|%x[{(\[<|!])(?:cp|mv|install)\s+[^\s"'`)]+\s+(?:[^\s"'`)]|["'`]\s*[+%.])/i
-// A call that runs a command: a system, exec, spawn, popen, check_output, check_call, call, run or capture call (a name followed by its parenthesis, so a variable or function named run, call or exec is no run), a system or exec before a quoted string, Open3, qx, %x, or Bun's $`.
+// A call that runs a command: a system, exec, spawn, popen, check_output, check_call, call, run, capture, getoutput, getstatusoutput, passthru, proc_open or command call, after no letter or digit (shell_exec, create_subprocess_exec), a name followed by its parenthesis, so a variable or function named run, call or exec is no run, a system or exec before a quoted string, Open3, qx, %x, Bun's $`, or perl's pipe open.
 const RUNS =
-  /\b(?:system|exec\w*|spawn\w*|popen\w*|check_output|check_call|call|run|capture\w*)\s*\(|\b(?:system|exec)\s+["']|\bOpen3\b|\bqx\s*[{(\[<|/!]|%x[{(\[<|!]|\$`/i
+  /(?<![a-z0-9])(?:system|exec\w*|spawn\w*|popen\w*|check_output|check_call|call|run|capture\w*|get(?:status)?output|passthru|proc_open|command)\s*\(|\b(?:system|exec)\s+["']|\bOpen3\b|\bqx\s*[{(\[<|/!]|%x[{(\[<|!]|\$`|["']\|-["']/i
 // A backtick that opens a cp, mv or install runs it in perl, php and ruby, where it is a command, and nowhere else, where it is a template string.
 const BACKTICK_RUNNERS = new Set(["perl", "php", "ruby"])
 const BACKTICK_RUN = /`(?:cp|mv|install)\s/i
