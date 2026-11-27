@@ -4370,22 +4370,32 @@ async function toolWrites(
   const last = folder ? undefined : operands.at(-1)
   const base = at(folder ?? last?.value ?? "")
   if (!base || sources.length === 0) return []
-  let into = !!folder
+  let into = !!folder || (folder ?? last?.value ?? "").endsWith("/")
   if (!into)
     try {
       into = statSync(base).isDirectory()
     } catch {}
   const writes: [string, Text, string?][] = []
   for (const source of sources) {
-    const dest = into ? resolve(base, basename(source.value)) : base
+    const inside = resolve(base, basename(source.value))
+    // a target that may be a folder the line made holds the source at both names, its own text in each
+    const dests = into ? [inside] : [base, inside]
     const stdin = /^\/dev\/(?:stdin|fd\/0)$/.test(source.value)
-    const from = stdin
-      ? undefined
-      : tool === "ln" && symbolic && !isAbsolute(source.value) && !marked(source.value)
-        ? resolve(dirname(dest), source.value)
-        : at(source.value)
-    const text = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread
-    writes.push([dest, text, tool === "mv" && from ? from : undefined])
+    for (const dest of dests) {
+      const from = stdin
+        ? undefined
+        : tool === "ln" && symbolic && !isAbsolute(source.value) && !marked(source.value)
+          ? resolve(dirname(dest), source.value)
+          : at(source.value)
+      const text = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread
+      const moved = tool === "mv" && from ? from : undefined
+      writes.push([dest, text, moved])
+      // a folder copied or moved carries each file the line wrote under it
+      if (from)
+        for (const [path, written] of env.files)
+          if (path.startsWith(`${from}/`))
+            writes.push([dest + path.slice(from.length), written, moved ? path : undefined])
+    }
   }
   return writes
 }

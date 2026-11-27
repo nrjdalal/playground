@@ -212,7 +212,7 @@ const runsRoot = (): Row[] => [
     "command printf 'touch ~/.playground/ext\\x65nsions/login/x\\n' > run.sh; sh run.sh",
   ],
 ]
-// a script the line writes by a form other than a redirect or tee (another case, >&, dd, sort -o, a copy, move or link to its run name), then runs, is walked as written, or refused as unread
+// a script the line writes by a form other than a redirect or tee (another case, >&, dd, sort -o, a copy, move or link to its run name or into a folder, a folder copied or moved), then runs, is walked as written, or refused as unread
 const writesRun = (): Row[] => [
   ["a script written in another case, then run", `echo 'touch ${SCRIPT}' > Run.sh; sh run.sh`],
   [
@@ -246,6 +246,30 @@ const writesRun = (): Row[] => [
     "a script sort -o writes, run by its own path",
     `echo 'touch ${SCRIPT}' | sort -o run.sh; chmod +x run.sh; ./run.sh`,
   ],
+  [
+    "a script copied into a folder the line made, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > a.sh; cp a.sh d; sh d/a.sh`,
+  ],
+  [
+    "a script copied into a folder named with a /, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > a.sh; cp a.sh d/; sh d/a.sh`,
+  ],
+  [
+    "a script moved into a folder the line made, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > a.sh; mv a.sh d; sh d/a.sh`,
+  ],
+  [
+    "a script in a folder copied by -r, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > d/run.sh; cp -r d e; sh e/run.sh`,
+  ],
+  [
+    "a script in a folder copied by -r into a folder, then run",
+    `mkdir d e; echo 'touch ${SCRIPT}' > d/run.sh; cp -r d e/; sh e/d/run.sh`,
+  ],
+  [
+    "a script in a folder moved, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > d/run.sh; mv d e; sh e/run.sh`,
+  ],
 ]
 const writeControls = (): Row[] => [
   ["a plain script written in another case, then run", `echo 'touch out.log' > Run.sh; sh run.sh`],
@@ -267,6 +291,27 @@ const writeControls = (): Row[] => [
     "a plain script linked to its run name, then run",
     `echo 'touch out.log' > a.sh; ln -s a.sh run.sh; sh run.sh`,
   ],
+  [
+    "a plain script copied into a folder the line made, then run",
+    `mkdir d; echo 'touch out.log' > a.sh; cp a.sh d; sh d/a.sh`,
+  ],
+  [
+    "a plain script copied into a folder named with a /, then run",
+    `mkdir d; echo 'touch out.log' > a.sh; cp a.sh d/; sh d/a.sh`,
+  ],
+  [
+    "a plain script moved into a folder the line made, then run",
+    `mkdir d; echo 'touch out.log' > a.sh; mv a.sh d; sh d/a.sh`,
+  ],
+  [
+    "a plain script in a folder copied by -r, then run",
+    `mkdir d; echo 'touch out.log' > d/run.sh; cp -r d e; sh e/run.sh`,
+  ],
+  [
+    "a plain script in a folder moved, then run",
+    `mkdir d; echo 'touch out.log' > d/run.sh; mv d e; sh e/run.sh`,
+  ],
+  ["a plain copy to a file, then run", `echo 'touch out.log' > a.sh; cp a.sh d; sh d`],
 ]
 // shell.ts reads a script's ~ as the process's homedir() while this test sets the root's home by env HOME, so the ~ glob row is judged in the process worktree alone, where the two are one home
 const worktreeRuns = (): Row[] => [

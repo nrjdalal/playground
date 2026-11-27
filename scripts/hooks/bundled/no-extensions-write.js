@@ -9818,18 +9818,27 @@ async function toolWrites(cmd, name, args, env) {
   const base = at(folder ?? last?.value ?? "");
   if (!base || sources.length === 0)
     return [];
-  let into = !!folder;
+  let into = !!folder || (folder ?? last?.value ?? "").endsWith("/");
   if (!into)
     try {
       into = statSync2(base).isDirectory();
     } catch {}
   const writes = [];
   for (const source of sources) {
-    const dest = into ? resolve3(base, basename2(source.value)) : base;
+    const inside = resolve3(base, basename2(source.value));
+    const dests = into ? [inside] : [base, inside];
     const stdin = /^\/dev\/(?:stdin|fd\/0)$/.test(source.value);
-    const from = stdin ? undefined : tool === "ln" && symbolic && !isAbsolute3(source.value) && !marked(source.value) ? resolve3(dirname2(dest), source.value) : at(source.value);
-    const text = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread;
-    writes.push([dest, text, tool === "mv" && from ? from : undefined]);
+    for (const dest of dests) {
+      const from = stdin ? undefined : tool === "ln" && symbolic && !isAbsolute3(source.value) && !marked(source.value) ? resolve3(dirname2(dest), source.value) : at(source.value);
+      const text = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread;
+      const moved = tool === "mv" && from ? from : undefined;
+      writes.push([dest, text, moved]);
+      if (from) {
+        for (const [path, written] of env.files)
+          if (path.startsWith(`${from}/`))
+            writes.push([dest + path.slice(from.length), written, moved ? path : undefined]);
+      }
+    }
   }
   return writes;
 }
