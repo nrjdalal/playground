@@ -63,6 +63,7 @@ export const testsArgv = (
         "-o",
         "junit_family=xunit1",
         `--junitxml=${report}`,
+        ...(timeoutPlugin(clone) ? [`--session-timeout=${DEADLINE_SECONDS}`] : []),
       ]
     : [
         "bun",
@@ -102,6 +103,18 @@ export const staleVenv = (clone: string): string | undefined => {
     ))
       for (const line of readFileSync(join(site, pth), "utf8").split("\n"))
         if (isAbsolute(line.trim()) && !inside(line.trim())) return line.trim()
+}
+
+// The test sandbox's deadline in seconds, sandbox.ts's TEST_DEADLINE_MS, which a test holds equal, since a skill's script imports nothing outside its folder.
+export const DEADLINE_SECONDS = 1200
+
+// Whether the clone's .venv holds pytest-timeout: a pytest run then takes --session-timeout at the sandbox's deadline, after the repo's own addopts and over its session_timeout, so a 200-file chunk is cut only where a bun one is; pytest refuses the flag (exit 4) without the plugin, and -o session_timeout does not override the repo's setting (both measured on pytest-timeout 2.4.0).
+export const timeoutPlugin = (clone: string): boolean => {
+  const lib = join(clone, ".venv", "lib")
+  return (
+    existsSync(lib) &&
+    readdirSync(lib).some((py) => existsSync(join(lib, py, "site-packages", "pytest_timeout.py")))
+  )
 }
 
 // The skill's whole-suite chunk: one call on more files misses the test sandbox's 1200 s deadline.
@@ -1465,7 +1478,7 @@ const USAGE = `A PR's review state, read from GitHub and git each time, with no 
   state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment, thread reply or review since pr's read line, else FRESH; chain it before the verdict's post
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
   state.ts checks <owner/repo> <n> <sha> [<check>...]  as wait, and also return once each gate check concludes at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run. The gate checks are the names given after <sha>, else Audit, Lint, and Build and test
-  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, kept on this machine, the reds their junit report names run again on the merge, at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red only beside the others, naming the issue to open or link for each in place of a second rerun, or CLEAN, then HEAD-RED (the PR's own), BASE-RED (canary's own, a red the head shares counted there when the head's failed cases are read and all fail at <base>) and NO-REPORT (a red run that named no file, all its files counted red); each run goes in chunks of at most 200 files, and a chunk the sandbox's deadline (exit 124) or pytest's session timeout (its session-timeout line) cut prints TIMEOUT <where>, chunk <i> of <n> (exit 1), its files reading red only for a failed case its report names; a clone with no test:file script runs pytest through <clone>/.venv/bin/python when it holds a pyproject.toml, else prints NO-RUNNER (exit 1) and runs none, and prints STALE-VENV (exit 1) and runs none when a .pth in that .venv names a folder outside the clone, as a moved clone's old .venv does, naming the fix, uv sync in the clone through run-slot (--frozen when it holds a uv.lock); the clone ends at <head>
+  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, kept on this machine, the reds their junit report names run again on the merge, at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red only beside the others, naming the issue to open or link for each in place of a second rerun, or CLEAN, then HEAD-RED (the PR's own), BASE-RED (canary's own, a red the head shares counted there when the head's failed cases are read and all fail at <base>) and NO-REPORT (a red run that named no file, all its files counted red); each run goes in chunks of at most 200 files, and a chunk the sandbox's deadline (exit 124) or pytest's session timeout (its session-timeout line) cut prints TIMEOUT <where>, chunk <i> of <n> (exit 1), its files reading red only for a failed case its report names; a clone with no test:file script runs pytest through <clone>/.venv/bin/python when it holds a pyproject.toml, its session timeout set to the sandbox's 1200 s deadline when that .venv holds pytest-timeout, else prints NO-RUNNER (exit 1) and runs none, and prints STALE-VENV (exit 1) and runs none when a .pth in that .venv names a folder outside the clone, as a moved clone's old .venv does, naming the fix, uv sync in the clone through run-slot (--frozen when it holds a uv.lock); the clone ends at <head>
   state.ts merge --conflict-only <clone> <head> <base>  the head's merge with <base> by merge-tree alone, running none of the PR's code (an outside author's PR): CONFLICT <files> (exit 1), else CLEAN
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules
 

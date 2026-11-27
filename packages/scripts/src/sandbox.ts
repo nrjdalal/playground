@@ -18,6 +18,9 @@ import { MARKER, makeScratch } from "@packages/safe-delete"
 import { BOX_ENV_KEYS, boxEnv } from "./box-env"
 
 // The caller's variables a test or check still reads: the suite's own switches, Docker's socket and the URLs `test:e2e` passes; every other one, the live state an absolute path names included, stays out
+// The test sandbox's parallel pass deadline, which test-sandbox.ts takes unless TEST_PARALLEL_DEADLINE_MS sets its own, and code-review-loop's state.ts holds in seconds for a pytest run's session timeout.
+export const TEST_DEADLINE_MS = 20 * 60_000
+
 export const SANDBOX_KEYS: readonly string[] = [
   ...BOX_ENV_KEYS,
   "CI",

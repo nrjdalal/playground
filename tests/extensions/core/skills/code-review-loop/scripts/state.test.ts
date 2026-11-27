@@ -14,6 +14,7 @@ import { join } from "node:path"
 import * as state from "../../../../../../extensions/core/skills/code-review-loop/scripts/state"
 import { GH_STALE_MS } from "../../../../../../packages/scripts/src/gh-read"
 import { REQUIRED_CHECKS } from "../../../../../../packages/scripts/src/pr-merge/gates"
+import { TEST_DEADLINE_MS } from "../../../../../../packages/scripts/src/sandbox"
 
 const ROOT = join(import.meta.dir, "..", "..", "..", "..", "..", "..")
 const STATE_TS = join(ROOT, "extensions/core/skills/code-review-loop/scripts/state.ts")
@@ -2728,6 +2729,56 @@ test("13s io.tests pipes a pytest run's output for cutOf and prints it, and leav
     { stderr: "pipe", stdout: "pipe" },
     { stderr: "inherit", stdout: "inherit" },
   ])
+})
+
+test("13t a pytest run takes --session-timeout at the sandbox's deadline when the clone's .venv holds pytest-timeout, and no flag without it, which pytest refuses there (#3169)", () => {
+  expect(state.DEADLINE_SECONDS * 1000).toBe(TEST_DEADLINE_MS)
+  const clone = scratch()
+  writeFiles(clone, { ".venv/bin/python": "" })
+  const argv = () =>
+    state.testsArgv("probe-worker", clone, ["tests/test_a.py"], "/t/r.xml", "pytest")
+  expect(state.timeoutPlugin(clone)).toBe(false)
+  expect(argv().filter((a) => a.startsWith("--session-timeout"))).toEqual([])
+  writeFiles(clone, { ".venv/lib/python3.13/site-packages/pytest_timeout.py": "" })
+  expect(state.timeoutPlugin(clone)).toBe(true)
+  expect(argv().slice(-3)).toEqual([
+    "--junitxml=/t/r.xml",
+    "--session-timeout=1200",
+    "tests/test_a.py",
+  ])
+  expect(state.testsArgv("probe-worker", clone, ["t.test.ts"], "/t/r.xml", "bun")).not.toContain(
+    "--session-timeout=1200",
+  )
+})
+
+test("13u merge on a Python clone whose own session_timeout is shorter than the deadline passes the deadline to pytest and reads its run clean (#3169)", () => {
+  const [repo, head] = venvRepo((repo) => join(repo, "src"))
+  writeFiles(repo, {
+    ".venv/lib/python3.13/site-packages/pytest_timeout.py": "",
+    "pyproject.toml": "[project]\n\n[tool.pytest.ini_options]\nsession_timeout = 600\n",
+  })
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const real = { ...state.io }
+  const runs: string[][] = []
+  state.io.tests = (session, clone, files, report, runner) => {
+    runs.push(state.testsArgv(session, clone, files, report, runner))
+    writeFileSync(report, junit(files, []))
+    return { code: 0, out: "1 passed\n" }
+  }
+  const lines: string[] = []
+  const realLog = console.log
+  console.log = (line?: unknown) => {
+    lines.push(String(line))
+  }
+  try {
+    state.cmdMerge(repo, head, "canary", "probe-worker")
+  } finally {
+    console.log = realLog
+    Object.assign(state.io, real)
+  }
+  expect(lines).toEqual([`CLEAN on ${canary}: 1 touched tests`])
+  expect(runs).toHaveLength(1)
+  expect(runs[0]).toContain("--session-timeout=1200")
 })
 
 test("13o staleVenv reads each .pth file's absolute path lines alone: an import line, a relative line, the clone's own folder, a folder named .pth, a dangling .pth link and no .venv name none, and a linked .pth is read through (#3124)", () => {
