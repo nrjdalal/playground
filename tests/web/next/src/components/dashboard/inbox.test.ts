@@ -2173,6 +2173,84 @@ describe("an ask card's answer in progress (PG-1345)", () => {
   })
 })
 
+// The primitive shows Next on every question but the last and Send on the last alone, so Next and Send take turns in one slot only when both follow Previous, which shows on every question, off on the first (PG-3178).
+describe("a multi-question ask's footer order (PG-3178)", () => {
+  const real = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+  const store = new Map<string, string>()
+  beforeAll(() =>
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => store.get(key) ?? null,
+        removeItem: (key: string) => void store.delete(key),
+        setItem: (key: string, value: string) => void store.set(key, value),
+      } as Storage,
+    }),
+  )
+  afterEach(() => {
+    for (const id of Object.keys(readPicks())) savePicks(id, EMPTY_PICKS)
+  })
+  afterAll(() => {
+    if (real) Object.defineProperty(globalThis, "localStorage", real)
+    else delete (globalThis as { localStorage?: Storage }).localStorage
+  })
+
+  const preview = {
+    questions: ["Which base?", "When?", "Who?"].map((question) => ({
+      options: [{ label: "one" }, { label: "two" }],
+      question,
+    })),
+    type: "ask" as const,
+  }
+  const three = {
+    ...decision,
+    id: "id-3178",
+    preview: { ...preview, text: "Pick for each." },
+    ref: 3178,
+    title: "Three questions",
+  } as InboxItem
+  // each stepper button in the footer's actions row, in the order it renders, with its hidden and disabled state
+  const steppers = (html: string) =>
+    [
+      ...(html.match(/data-slot="questionnaire-actions"[\s\S]*$/)?.[0] ?? "").matchAll(
+        /<button[^>]*data-slot="questionnaire-(previous|next|submit)"[^>]*>/g,
+      ),
+    ].map(([tag, slot]) => ({
+      disabled: /aria-disabled="true"|\sdisabled=""/.test(tag),
+      hidden: /\shidden=""/.test(tag),
+      slot,
+    }))
+
+  for (const [step, name] of [
+    [0, "first"],
+    [1, "middle"],
+    [2, "last"],
+  ] as const)
+    test(`on its ${name} question, Previous leads, then Next and Send in the one slot after it`, () => {
+      savePicks("id-3178", {
+        ...EMPTY_PICKS,
+        picks: [0, 0, 0],
+        sig: picksKey(questionsOf(preview)),
+        step,
+      })
+      const buttons = steppers(opened(three))
+      expect(buttons.map((b) => b.slot)).toEqual(["previous", "next", "submit"])
+      expect(buttons[0]!.hidden).toBe(false)
+      expect(buttons[0]!.disabled).toBe(step === 0)
+    })
+
+  test("a single-question ask keeps Send first, with no Previous or Next", () => {
+    const single = {
+      ...decision,
+      id: "id-3179",
+      preview: { options: [{ label: "one" }, { label: "two" }], text: "Pick one.", type: "ask" },
+      ref: 3179,
+      title: "One question",
+    } as InboxItem
+    expect(steppers(opened(single)).map((b) => b.slot)).toEqual(["submit"])
+  })
+})
+
 describe("a clone card (PG-2205)", () => {
   const FOLDER = "/made/up/data/extensions"
   const clone = {
