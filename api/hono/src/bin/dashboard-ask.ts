@@ -21,9 +21,11 @@ import { deleteRefusal } from "@/lib/dashboard/delete-targets"
 import { branchOf, checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
 import {
   ackItem,
+  archivedAt,
   editItem,
   getItem,
   getPickLine,
+  type InboxItem,
   inflightCard,
   itemTag,
   openItems,
@@ -31,6 +33,7 @@ import {
   readAnswer,
   resolveItem,
   settleItem,
+  snoozedUntil,
   staleItems,
 } from "@/lib/dashboard/inbox"
 import { keepAttachments } from "@/lib/dashboard/inbox-attachments"
@@ -42,7 +45,7 @@ import { org } from "@/lib/org"
 import { checkoutMismatch, locate, prove } from "@/lib/sessions/guard"
 import { dataDir } from "@/lib/sessions/paths"
 
-// The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr), an update titled as one of its poster's an edit still takes editing that card in place (postOrEdit); `edit <id|#iN> < item.json` replaces the poster's own item's title and preview in place until it closes, checked as new checks it; both fill `{now}` with the time they post at and refuse a measured or now time ahead of the clock, and a draft with no link, a public post's, whose text holds a work figure or an internal name (the public rule); `open [--from <session>] [--since <iso time>] [--until <iso time>] [--json]` lists the open items, oldest first, those posted in that window alone when given, each whole as one JSON line with --json, so a poster names one on the same thing rather than posting it twice; `get <id|#iN>` prints the item, the owner's answer included once given, and the option the owner picked on stderr, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear, a discard or a provided secret; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own update once it has settled; `stale` lists the answers no poster has closed, for ops-sweep; `whatsapp <file>` records the owner's answer from WhatsApp, a file ops-wa wrote in its own folder (whatsapp-answer.ts); `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose, labels no options, names a PR, a tracker ID or a commit with no link on its line, or holds a code line too wide for the card, and both refuse a progress block whose line does not read (progressRefusal). See `.agents/dashboard/asks.md` for the fields.
+// The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr), an update titled as one of its poster's an edit still takes editing that card in place (postOrEdit); `edit <id|#iN> < item.json` replaces the poster's own item's title and preview in place until it closes, checked as new checks it; both fill `{now}` with the time they post at and refuse a measured or now time ahead of the clock, and a draft with no link, a public post's, whose text holds a work figure or an internal name (the public rule); `open [--from <session>] [--since <iso time>] [--until <iso time>] [--awake] [--json]` lists the open items, oldest first, those posted in that window alone when given, each marked when the owner archived it or put it off with Later, which --awake leaves out, each whole with its view as one JSON line with --json, so a poster names one on the same thing rather than posting it twice; `get <id|#iN>` prints the item, the owner's answer and Archive or Later view included, and the option the owner picked and that view on stderr, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear, a discard or a provided secret; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own update once it has settled; `stale` lists the answers no poster has closed, for ops-sweep; `whatsapp <file>` records the owner's answer from WhatsApp, a file ops-wa wrote in its own folder (whatsapp-answer.ts); `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose, labels no options, names a PR, a tracker ID or a commit with no link on its line, or holds a code line too wide for the card, and both refuse a progress block whose line does not read (progressRefusal). See `.agents/dashboard/asks.md` for the fields.
 const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 posts an inbox item from JSON on stdin, prints its id
                                                 options and approve/deny labels go in plain words (the plain-words skill)
@@ -99,15 +102,21 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 then what Approve does (.agents/dashboard/asks.md, The ask's shape),
                                                 a delete decision naming its worktree by its full path,
                                                 or a Slack message led by its thread so far
-       bun run ask open [--from <session>] [--since <iso time>] [--until <iso time>] [--json]
-                                                lists each open item, oldest first: its #iN, kind, sender and title;
+       bun run ask open [--from <session>] [--since <iso time>] [--until <iso time>] [--awake] [--json]
+                                                lists each open item, oldest first: its #iN, kind, sender and title,
+                                                then "archived <iso>" or "later until <iso>" on one the owner put
+                                                away with Archive or Later, still open and unanswered;
+                                                --awake leaves those out, so it lists what asks the owner now;
                                                 run it before new, and name an open item on the same thing
                                                 rather than posting it again; --from keeps one sender's,
                                                 --since and --until those posted in that window,
-                                                --json each item whole, one JSON line each, as ops-wa reads them
+                                                --json each item whole, with its view (archived, later or awake)
+                                                and viewAt, one JSON line each, as ops-wa reads them
        bun run ask get <id|#iN> [--ack]    prints the item, answer included; --ack marks an answer read
                                                 a picked option's letter and label print on stderr, each question's pick for a multi-question answer
                                                 (and closes a deny, a clear, a discard or a provided secret, which reading carries out)
+                                                its view and viewAt beside status, as open --json prints them, and
+                                                "ask: archived <iso>" or "ask: later until <iso>" on stderr
        bun run ask ack <id|#iN> [--link <https url> [--label "Filed ABC-123"] | --no-link "<why>"]
                                                 closes the answer once carried out; a go (approve, draft, edit, send)
                                                 needs --link, where it landed (the Slack message, PR, issue or
@@ -129,6 +138,19 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
 const STDIN_TIMEOUT_MS = 5000
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+// Pure: the owner's view of an item, by the Inbox's own Archive and Later: archived since viewAt, later until viewAt, else awake; line is what open and get print for a put-away one.
+const viewOf = (
+  item: InboxItem,
+  now: Date,
+): { line?: string; view: "archived" | "awake" | "later"; viewAt?: string } => {
+  const archived = archivedAt(item)
+  if (archived !== null) return { line: `archived ${archived}`, view: "archived", viewAt: archived }
+  const later = snoozedUntil(item, now)
+  return later === null
+    ? { view: "awake" }
+    : { line: `later until ${later}`, view: "later", viewAt: later }
+}
 
 const fail = (message: string, code = 1): never => {
   console.error(`ask: ${message}`)
@@ -152,10 +174,11 @@ if (!readsLive()) {
 }
 
 const acking = rest.length === 1 && rest[0] === "--ack"
-// --json, open's one flag that takes no value, read apart from the paired flags
+// --awake and --json, open's flags that take no value, read apart from the paired flags
+const awakeOnly = command === "open" && [key, ...rest].includes("--awake")
 const json = command === "open" && [key, ...rest].includes("--json")
 const openArgs = [key, ...rest].filter(
-  (arg): arg is string => arg !== undefined && arg !== "--json",
+  (arg): arg is string => arg !== undefined && arg !== "--awake" && arg !== "--json",
 )
 
 // Pure: `--name value` pairs, each named at most once and only from allowed; null for anything else.
@@ -331,9 +354,13 @@ if (command === "new" || command === "edit") {
   if (!item) fail(`no inbox item ${key}`)
   // An open item is printed as it is, so a poll with --ack only marks the answer once there is one; an update takes none, though a dismissed one records when in its answer.
   if (acking && item) item = await readAnswer(db, item)
-  console.log(JSON.stringify(item, null, 2))
-  const picked = item && getPickLine(item)
-  if (picked) console.error(`ask: picked ${picked}`)
+  if (item) {
+    const { line, ...view } = viewOf(item, new Date())
+    console.log(JSON.stringify({ ...item, ...view }, null, 2))
+    const picked = getPickLine(item)
+    if (picked) console.error(`ask: picked ${picked}`)
+    if (line) console.error(`ask: ${line}`)
+  }
 } else if (command === "open") {
   const at = (flag: "since" | "until") => {
     const value = flags?.[flag]
@@ -342,16 +369,20 @@ if (command === "new" || command === "edit") {
     if (Number.isNaN(date.getTime())) fail(`--${flag} takes an ISO time`)
     return date
   }
+  const now = new Date()
   for (const item of await openItems(db, {
     from: flags?.from,
     since: at("since"),
     until: at("until"),
-  }))
+  })) {
+    const { line, ...view } = viewOf(item, now)
+    if (awakeOnly && view.view !== "awake") continue
     console.log(
       json
-        ? JSON.stringify(item)
-        : `${itemTag(item.ref)} ${item.kind} from ${item.from} · ${item.title}`,
+        ? JSON.stringify({ ...item, ...view })
+        : `${itemTag(item.ref)} ${item.kind} from ${item.from} · ${item.title}${line ? ` · ${line}` : ""}`,
     )
+  }
 } else if (command === "whatsapp") {
   // deliver() types the answer into its poster as the Inbox's own Approve does; imported here alone, since no other verb types into a session
   const { deliver } = await import("@/lib/dashboard/deliver")

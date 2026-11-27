@@ -2,6 +2,7 @@ A usage pause stops only the jobs that call a model; read this file in full befo
 Forecast an account's week from its own readings alone: its pace from the first reading after the last move of sessions onto it, set against that account's own week reset.
 A start before the move counts hours the account sat idle and reads slow, and another account's reset puts the deadline at the wrong time.
 Every Claude account's week is used to about 100% by its reset: the account runs out early when the time its pace reaches 100% comes before that reset, and leaves points unused when it comes after.
+Put new starts on the account whose week resets first, naming it with `--account`, and move them to the next only once it measures 93%.
 Enough Claude work stays queued that no reset finds points unused, and spawn.sh's usage gate is the only usage stop on a Claude start.
 That gate judges an `--account X` start at the same pace as a bare start, on X's own `usage-<local part>.json`, which ops-tick's `other-logins` beat writes every 30 minutes for each login but the stored one; it skips only while no such file is under 60 minutes old, and two failed reads of a login in a row tell ops.
 A usage report lists every account the factory holds, the stored login included, and keeps an account with no fresh reading as stale with its age, so no account drops out of view.

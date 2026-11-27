@@ -991,7 +991,7 @@ const plainPath = (value: string) =>
         .join("/")}`
     : value
 // Whether a word names stdin, spelled plainly or through ./ hops and doubled slashes, a relative path read from each folder the command may run in, both as a logical cd folds its `..` and by its real path (a link or a hop to the root is the root), or from the root where the reader can place none
-const stdinPath = (value: string, env?: Env): boolean => {
+export const stdinPath = (value: string, env?: Env): boolean => {
   if (STDIN_PATHS.has(plainPath(value))) return true
   if (!env || value.startsWith("/") || marked(value)) return false
   const folders = places(env).flatMap((e) => (e.cwd === undefined ? [] : [e.cwd]))
@@ -3363,7 +3363,7 @@ function stdinScript({ args, name }: Parsed): boolean {
 }
 
 // The text GNU xargs' -a reads in place of stdin: a process substitution's output, else the file, which readPath reads only when it is a regular file within MAX_BYTES, so any other reads as unread; a relative path from env -C's folder before xargs, as examineReading's `here` reads it, and any file as unread after a privilege wrapper, which may move the folder or the root
-async function argFile(
+export async function argFile(
   { chdir, file, moved }: NonNullable<NonNullable<Xargs>["files"]>[number],
   cmd: Command,
   env: Env,

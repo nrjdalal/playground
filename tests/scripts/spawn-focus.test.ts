@@ -29,6 +29,16 @@ describe("focus holds every new session", () => {
     expect(r.err).toContain(`focus stands for owner-desk until ${until.toISOString()}`)
   })
 
+  // PG-3189: the refusal says why focus stands, from focus.json's reason
+  test("on, the refusal names focus's reason", async () => {
+    const until = new Date(Date.now() + 3_600_000)
+    const r = await spawn(lead, [], {}, script, undefined, focus(until))
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(
+      `focus stands for owner-desk until ${until.toISOString()}, its reason "demo", so no new session starts`,
+    )
+  })
+
   // for an urgent ticket the focused session still gets its checkers, so its fix is reviewed
   test("on, the focused session's own reviewer and tester start, and a checker of another session is refused", async () => {
     const until = new Date(Date.now() + 3_600_000)
