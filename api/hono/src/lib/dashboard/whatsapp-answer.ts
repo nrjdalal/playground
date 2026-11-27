@@ -15,6 +15,8 @@ const answerFile = z.union([
     action: z.enum(["approve", "deny"]),
     id: z.uuid(),
     option: z.number().int().min(0).optional(),
+    // a multiSelect ask's every ticked option, from a vote or a reply of several numbers
+    options: z.array(z.number().int().min(0)).min(1).optional(),
   }),
   // a draft's Send from the owner's own chat, with the owner's words in place of the draft's when given, and seen, the draft's updatedAt as it went there, so changed words are refused
   z.strictObject({
@@ -69,7 +71,7 @@ export async function whatsappAnswer(
     item.id,
     parsed.action === "send"
       ? { action: "send", seen: parsed.seen, text: parsed.text }
-      : { action: parsed.action, option: parsed.option },
+      : { action: parsed.action, option: parsed.option, options: parsed.options },
     { actor: { label: "WhatsApp" }, deliver, dispatcher, via: "whatsapp" },
   )
   return result.ok

@@ -28,7 +28,7 @@ export type OwnKey = { fromMe: true; id: string; remoteJid: string }
 // A kept message a reply quotes: its id, its sender's chat and its words.
 export type Quoted = { id: string; jid: string; text: string }
 
-// What ops-wa sends, each shape one Baileys takes (Fits checks it): text, a quoted reply, a location, an edit or a delete of our own message, an image, a video or a document with its caption, an audio file as a voice note, which takes none, a poll of one choice, whose secret ops-wa makes itself so it can read the owner's vote, a reaction on a kept message, or a pin of our own message, or its removal.
+// What ops-wa sends, each shape one Baileys takes (Fits checks it): text, a quoted reply, a location, an edit or a delete of our own message, an image, a video or a document with its caption, an audio file as a voice note, which takes none, a poll of one choice or, at selectableCount 0, any number of them, whose secret ops-wa makes itself so it can read the owner's vote, a reaction on a kept message, or a pin of our own message, or its removal.
 type Fits<T extends AnyMessageContent> = T
 export type Content = Fits<
   | { linkPreview: null; text: string }
@@ -48,7 +48,7 @@ export type Content = Fits<
   | { caption?: string; mimetype: string; video: Buffer }
   | { caption?: string; document: Buffer; fileName: string; mimetype: string }
   | { audio: Buffer; mimetype: string; ptt: true }
-  | { poll: { messageSecret: Uint8Array; name: string; selectableCount: 1; values: string[] } }
+  | { poll: { messageSecret: Uint8Array; name: string; selectableCount: 0 | 1; values: string[] } }
   | { react: { key: { fromMe: false; id: string; remoteJid: string }; text: string } }
   | { pin: OwnKey; time?: typeof PIN_SECONDS; type: proto.PinInChat.Type }
 >

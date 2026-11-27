@@ -2462,14 +2462,15 @@ describe("a multiSelect ask's card (PG-3177)", () => {
     const html = opened(ticking)
     expect(inputs(html)).toHaveLength(4)
     for (const tag of inputs(html)) expect(tag).toContain('type="checkbox"')
-    expect(named(html, "Send")).toContain("disabled")
+    expect(named(html, "Send")).toContain('aria-disabled="true"')
+    expect(named(html, "Send")).toContain('aria-description="Pick an option first"')
   })
 
   test("gives back every tick on remount, and Send takes them", () => {
     savePicks("id-72", { ...EMPTY_PICKS, sig, ticks: [0, 2] })
     const html = opened(ticking)
     expect(checked(html)).toEqual(["A: Nudge Ana", "C: Nudge Cy"])
-    expect(named(html, "Send")).not.toContain("disabled")
+    expect(named(html, "Send")).toContain('aria-disabled="false"')
   })
 
   test("a one-pick ask's kept pick never reads as its ticks", () => {
