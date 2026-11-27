@@ -1,6 +1,6 @@
 import { type Group } from "./_shared"
 
-// The forms #3130 names: the data folder held in a shell variable, an sh -c script or inline code run from the data folder, write calls outside the guard's write words, and recursive writers on the folder; the names file is never made, and rows are data, as refused-forms.ts says.
+// The forms #3130 names: the data folder held in a shell variable, an sh -c script or inline code run from the data folder, write calls outside the guard's write words, recursive writers on the folder, an xargs sh -c script handed the data folder through its positional parameters, and a cd into the data folder through a variable; the names file is never made, and rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
   {
     // from a folder that holds no roster, so only the call's own words reach toward it
@@ -266,6 +266,54 @@ export const groups: Group[] = [
       [
         "rm -rf on a folder under the data folder printed by a substitution",
         'rm -rf "$(echo ~/.playground)/extensions/.no-such-folder"',
+      ],
+      [
+        "a name into an xargs -I sh -c script that removes its first positional parameter, the data folder's item",
+        `echo roster.json | xargs -I{} sh -c 'rm -f "$1"' _ ~/.playground/{}`,
+      ],
+      [
+        "a names file into an xargs -I sh -c script that removes its first positional parameter, the data folder's item",
+        `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'rm -f "$1"' _ ~/.playground/{}`,
+      ],
+      [
+        "a names file into an xargs -I sh -c script that removes $0, the data folder's item",
+        `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'rm -f "$0"' ~/.playground/{}`,
+      ],
+      [
+        "a names file into an xargs -I sh -c script that removes its quoted positional parameters, the data folder's item",
+        `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'rm -f "$@"' _ ~/.playground/{}`,
+      ],
+      [
+        "a names file into an xargs -I sh -c script that removes its unquoted positional parameters, the data folder's item",
+        `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'rm -f $*' _ ~/.playground/{}`,
+      ],
+      [
+        "a names file into an xargs -I bash -c script that removes its second positional parameter, the data folder's item",
+        `cat /tmp/no-such-names.txt | xargs -I{} bash -c 'rm -f "$2"' _ /tmp/a ~/.playground/{}`,
+      ],
+      [
+        "a names file into an xargs -I sh -c script that redirects onto its first positional parameter, the data folder's item",
+        `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'echo x > "$1"' _ ~/.playground/{}`,
+      ],
+      [
+        "a cd into the data folder held in a variable, then a removal of roster.json",
+        "D=~/.playground; cd $D && rm roster.json",
+      ],
+      [
+        "a cd into the data folder held in a quoted variable, then a forced removal of roster.json",
+        'D=~/.playground; cd "$D"; rm -f roster.json',
+      ],
+      [
+        "a cd into the data folder held in a variable, then python3 code removing roster.json",
+        `D=~/.playground; cd $D && python3 -c "import os; os.remove('roster.json')"`,
+      ],
+      [
+        "a cd into the data folder held in a braced variable, then a redirect onto roster.json",
+        "D=~/.playground; cd ${D} && echo x > roster.json",
+      ],
+      [
+        "a cd into the data folder held in an exported variable, then a move onto roster.json",
+        "export D=~/.playground; cd $D && mv /tmp/x roster.json",
       ],
     ],
   },
