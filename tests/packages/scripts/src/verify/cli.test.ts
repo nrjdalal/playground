@@ -13,6 +13,7 @@ import { join } from "node:path"
 
 import { readCheck, strayRoutes } from "../../../../../packages/scripts/src/verify/checks"
 import { scratchEnv } from "../../../../scratch-env"
+import { scratchWorktree } from "../../../../scratch-worktree"
 
 const CLI = join(import.meta.dir, "../../../../../packages/scripts/src/verify/cli.ts")
 
@@ -164,11 +165,34 @@ test("verify asks portless get in the folder portlessDir() names, the 1355 proxy
     )
     chmodSync(join(home, "bunx"), 0o755)
     const env = scratchEnv(home, { PATH: `${home}:${process.env.PATH}` })
-    Bun.spawnSync(["bun", CLI, "health"], { env, stdin: "ignore" })
+    Bun.spawnSync(["bun", CLI, "health"], { cwd: home, env, stdin: "ignore" })
     expect(readFileSync(log, "utf8")).toBe(
       `portless get api.playground|${fallback}\nportless get playground|${fallback}\n`,
     )
   } finally {
     rmSync(home, { force: true, recursive: true })
+  }
+})
+
+// In a linked worktree on a prefixed branch verify reads that worktree's own hosts (hostsOf), and anywhere else, the main checkout the live roll runs it in included, it keeps portless get's bare names
+test("verify reads a prefixed worktree's own hosts there, and keeps the bare names in the main checkout", () => {
+  const { linked, main, root } = scratchWorktree()
+  const log = join(root, "bunx.log")
+  try {
+    writeFileSync(join(root, "bunx"), `#!/bin/sh\necho "$*" >> "${log}"\necho http://127.0.0.1:9\n`)
+    chmodSync(join(root, "bunx"), 0o755)
+    const env = scratchEnv(root, {
+      PATH: `${root}:${process.env.PATH}`,
+      PORTLESS_STATE_DIR: join(root, "portless"),
+    })
+    const own = Bun.spawnSync(["bun", CLI, "health"], { cwd: linked, env, stdin: "ignore" })
+    expect([existsSync(log), own.stdout.toString() + own.stderr.toString()]).toEqual([
+      false,
+      expect.stringContaining("pg-1-made-up-hosts.api.playground.localhost"),
+    ])
+    Bun.spawnSync(["bun", CLI, "health"], { cwd: main, env, stdin: "ignore" })
+    expect(readFileSync(log, "utf8")).toBe("portless get api.playground\nportless get playground\n")
+  } finally {
+    rmSync(root, { force: true, recursive: true })
   }
 })
