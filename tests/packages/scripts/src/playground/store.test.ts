@@ -513,6 +513,55 @@ describe("playground ext", () => {
     expect((await ext(at, ["which"])).code).toBe(2)
   })
 
+  // PG-3172: a bare which of a skill only an org's extension holds exited 2, so a hook that ran it never ran the skill's script
+  test("which with no flag finds a skill exactly one org scope holds, names each scope when two do, and keeps the home set's copy first", async () => {
+    const at = folder("which-holder")
+    const skills = (scope: string, names: string[]) =>
+      writeFiles(
+        at,
+        scope,
+        new Map(names.map((name) => [`skills/${name}/SKILL.md`, `# ${scope}'s ${name}\n`])),
+        { author: "owner", reason: `${scope}'s skills` },
+      )
+    skills("acme", ["acme-only", "code-review-loop", "shared"])
+    skills("beta", ["shared"])
+    const io: Io = { data: at, out: () => {}, stdin: async () => "", write: Bun.write }
+    for (const [key, value] of [
+      ["ext.order", ["acme", "beta"]],
+      ["ext.links", { acme: ["acme-inc"], beta: ["beta-co"] }],
+    ] as const) {
+      const set = ["set", key, JSON.stringify(value), "--reason", "two org scopes"]
+      expect(await runStore("settings", set, io, () => {})).toBe(0)
+    }
+    const folderOf = (scope: string, name: string) => join(scopeDir(at, scope), "skills", name)
+    expect(await ext(at, ["which", "acme-only"])).toMatchObject({
+      code: 0,
+      out: folderOf("acme", "acme-only"),
+    })
+    const none = await ext(at, ["which", "no-such-skill"])
+    expect(none.code).toBe(2)
+    expect(none.err).toContain("no scope holds the skill no-such-skill")
+    const two = await ext(at, ["which", "shared"])
+    expect(two.code).toBe(2)
+    expect(two.err).toContain("acme (--org acme-inc)")
+    expect(two.err).toContain("beta (--org beta-co)")
+    expect(two.err).not.toContain("no scope holds the skill")
+    expect(await ext(at, ["which", "shared", "--org", "beta-co"])).toMatchObject({
+      code: 0,
+      out: folderOf("beta", "shared"),
+    })
+    const core = await ext(at, ["which", "code-review-loop"])
+    expect(core.code).toBe(0)
+    expect(core.out).toEndWith(join("extensions", "core", "skills", "code-review-loop"))
+    expect(await ext(at, ["which", "code-review-loop", "--org", "acme-inc"])).toMatchObject({
+      code: 0,
+      out: folderOf("acme", "code-review-loop"),
+    })
+    const why = await ext(at, ["why", "acme-only"])
+    expect(why.code).not.toBe(0)
+    expect(why.err).toContain("no scope holds the skill acme-only")
+  })
+
   test("show --rev of a proposal beside an accepted copy prints the proposal's body and its state", async () => {
     const at = folder("show-rev")
     const put = async (body: string, role?: string) =>
