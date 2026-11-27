@@ -4,14 +4,19 @@ import { AsyncLocalStorage } from "node:async_hooks"
 export type Tip = { ref: string; sha: string }
 
 // A hook call's budget: the time every live read inside it may take in all, and each remote's read, so several scans in one call read a remote once and a hung remote holds the call for the budget alone.
-type Budget = { reads: Map<string, Tip[] | null>; until: number }
+type Budget = {
+  heads: Map<string, string | null>
+  headsUntil?: number
+  reads: Map<string, Tip[] | null>
+  until: number
+}
 const budget = new AsyncLocalStorage<Budget>()
 
 // Runs body under one budget of ms for every heldBy read inside it, held in its async context so overlapping calls in one process never share it; a body already under one keeps that one.
 export function withLiveBudget<T>(body: () => T, ms = 6_000): T {
   return budget.getStore()
     ? body()
-    : budget.run({ reads: new Map(), until: performance.now() + ms }, body)
+    : budget.run({ heads: new Map(), reads: new Map(), until: performance.now() + ms }, body)
 }
 
 const run = (at: string, args: string[], env?: Record<string, string>, timeout?: number) => {
@@ -27,14 +32,7 @@ const run = (at: string, args: string[], env?: Record<string, string>, timeout?:
 
 // Each branch tip git ls-remote reads from remote (a configured name or a URL) itself, as <remote>/<branch> at its sha, since a remote-tracking ref is only the remote's last fetch; null when it cannot read the remote in timeout ms, with ssh and credentials never prompting.
 export function liveHeads(at: string, remote: string, timeout: number): Tip[] | null {
-  // ssh's options go on the command git would run (GIT_SSH_COMMAND, else core.sshCommand, else ssh), and none under GIT_SSH alone, whose program may take no -o
-  const command =
-    process.env.GIT_SSH_COMMAND ||
-    run(at, ["config", "--get", "core.sshCommand"]).out.trim() ||
-    (process.env.GIT_SSH ? "" : "ssh")
-  const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0" }
-  if (command) env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`
-  const live = run(at, ["ls-remote", "--heads", "--", remote], env, timeout)
+  const live = run(at, ["ls-remote", "--heads", "--", remote], quiet(at), timeout)
   if (!live.ok) return null
   const tips: Tip[] = []
   for (const line of live.out.split("\n")) {
@@ -43,6 +41,32 @@ export function liveHeads(at: string, remote: string, timeout: number): Tip[] | 
       tips.push({ ref: `${remote}/${name.slice("refs/heads/".length)}`, sha: sha! })
   }
   return tips
+}
+
+// The environment that keeps a live read from prompting: ssh's options go on the command git would run (GIT_SSH_COMMAND, else core.sshCommand, else ssh), and none under GIT_SSH alone, whose program may take no -o.
+function quiet(at: string): Record<string, string> {
+  const command =
+    process.env.GIT_SSH_COMMAND ||
+    run(at, ["config", "--get", "core.sshCommand"]).out.trim() ||
+    (process.env.GIT_SSH ? "" : "ssh")
+  const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0" }
+  if (command) env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`
+  return env
+}
+
+// The branch remote's own HEAD names, read live once per remote in a call, every such read in a call sharing timeout ms and what is left of the call's budget (withLiveBudget); null when it cannot be read.
+export function liveDefault(at: string, remote: string, timeout = 5_000): string | null {
+  const call = budget.getStore()
+  const key = `${at}\0${remote}`
+  const had = call?.heads.get(key)
+  if (had !== undefined) return had
+  if (call) call.headsUntil ??= Math.min(call.until, performance.now() + timeout)
+  const left = call ? Math.floor(call.headsUntil! - performance.now()) : timeout
+  const live =
+    left > 0 ? run(at, ["ls-remote", "--symref", "--", remote, "HEAD"], quiet(at), left) : undefined
+  const head = (live?.ok && /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(live.out)?.[1]) || null
+  call?.heads.set(key, head)
+  return head
 }
 
 // The tips this repo has, or null when git cannot read them.
