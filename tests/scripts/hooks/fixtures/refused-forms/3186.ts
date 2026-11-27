@@ -22,6 +22,18 @@ const bodies: Row[] = [
   ["a shell's parameter through the loop's variable", `sh -c 'echo x > "$1"/x' _ "$d"`],
   ["a cd and a write through the loop's variable", 'cd "$d" && echo x > f'],
   ["git -C through the loop's variable", 'git -C "$d" commit -m x'],
+  ["a mv through the loop's variable", 'mv /tmp/f "$d/x"'],
+  ["an ln through the loop's variable", 'ln -s /tmp/f "$d/x"'],
+  ["an install through the loop's variable", 'install /tmp/f "$d/x"'],
+  ["a touch through the loop's variable", 'touch "$d/x"'],
+  ["a mkdir through the loop's variable", 'mkdir "$d/x"'],
+  ["a dd through the loop's variable", 'dd if=/dev/zero of="$d/x" count=1'],
+  ["inline code through the loop's variable", `python3 -c "open('$d/x','w')"`],
+  ["env -C through the loop's variable", 'env -C "$d" touch x'],
+  ["tar -C through the loop's variable", 'tar -C "$d" -xf /tmp/a.tar'],
+  ["an rsync through the loop's variable", 'rsync /tmp/f "$d/"'],
+  ["a curl -o through the loop's variable", 'curl -o "$d/x" https://example.com'],
+  ["a nested loop through the loop's variable", 'for e in x y; do cp /dev/null "$d/$e"; done'],
 ]
 
 const root = (): Row[] => [
@@ -48,10 +60,29 @@ const root = (): Row[] => [
     `for d in ${A}; do d=${ROOT}; cp /dev/null "$d/.env"; done`,
   ],
   ["a cp through a bare export", `export X=${ROOT}; cp /dev/null "$X/.env"`],
+  [
+    "a cp after a read into the variable",
+    `for d in ${A} ${B}; do read d; cp /dev/null "$d/.env"; done`,
+  ],
+  [
+    "a cp after a printf -v into the variable",
+    `for d in ${A} ${B}; do printf -v d %s ${ROOT}; cp /dev/null "$d/.env"; done`,
+  ],
+  [
+    "a cp through an inner loop with the root among its words",
+    `for d in ${A} ${B}; do for e in x ${ROOT}; do cp /dev/null "$e/.env"; done; done`,
+  ],
+  ["the twin of an env prefix", `P=${ROOT} mytool`],
+  ["the twin of an export", `export d=${ROOT}; mytool`],
+  ["the twin of a shell's script", `D=${ROOT}; bash -c "echo x > $D/x"`],
 ]
 
 const controls = (): Row[] => [
   ...writes(`${A} ${B}`).map(([what, call]): Row => [`${what}, two scratch folders`, call]),
+  [
+    "a nested loop, two scratch folders",
+    `for d in ${A} ${B}; do for e in x y; do cp /dev/null "$d/$e"; done; done`,
+  ],
 ]
 
 export const allowed: string[] = controls().map(([what]) => what)
