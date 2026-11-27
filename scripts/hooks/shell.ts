@@ -4406,13 +4406,18 @@ async function toolWrites(
           : at(source.value)
       const written = from === undefined ? undefined : writtenFile(from, env)
       const disk = from === undefined || written ? undefined : await readFile(from)
-      // a source the line did not write and the hook cannot read from disk (a binary) leaves its target as canary read it
-      if (from !== undefined && !written && disk && (disk.unknown || marked(disk.value))) continue
+      let file = false
+      try {
+        file = from !== undefined && statSync(from).isFile()
+      } catch {}
+      // a regular file the line did not write and the hook cannot read from disk (a binary) leaves its target as canary read it, while a folder still carries the files the line wrote in it
+      if (file && disk && (disk.unknown || marked(disk.value))) continue
       const copied = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread
-      // a write that may not land (no clobber, a link not forced, a source not there) keeps the target's old text beside the new
+      // a write that may not land (no clobber, a link not forced, a source not there) keeps the target's old text beside the new, unread when the target's name cannot be read
       const mayKeep =
         keeps || (tool === "ln" && !forced) || (from !== undefined && !written && !disk)
-      const text = mayKeep ? join([await existing(dest, env), copied]) : copied
+      const before = mayKeep ? await existing(dest, env).catch(() => unread) : undefined
+      const text = before ? join([before, copied]) : copied
       // a move that may not land leaves its source in place too
       const moved = tool === "mv" && from && !mayKeep ? from : undefined
       writes.push([dest, text, moved])

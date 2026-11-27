@@ -9825,11 +9825,16 @@ async function toolWrites(cmd, name, args, env) {
       const from = stdin ? undefined : tool === "ln" && symbolic && !isAbsolute3(source.value) && !marked(source.value) ? resolve3(dirname2(dest), source.value) : at(source.value);
       const written = from === undefined ? undefined : writtenFile(from, env);
       const disk = from === undefined || written ? undefined : await readFile(from);
-      if (from !== undefined && !written && disk && (disk.unknown || marked(disk.value)))
+      let file = false;
+      try {
+        file = from !== undefined && statSync2(from).isFile();
+      } catch {}
+      if (file && disk && (disk.unknown || marked(disk.value)))
         continue;
       const copied = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread;
       const mayKeep = keeps || tool === "ln" && !forced || from !== undefined && !written && !disk;
-      const text = mayKeep ? join5([await existing(dest, env), copied]) : copied;
+      const before = mayKeep ? await existing(dest, env).catch(() => unread) : undefined;
+      const text = before ? join5([before, copied]) : copied;
       const moved = tool === "mv" && from && !mayKeep ? from : undefined;
       writes.push([dest, text, moved]);
       if (from) {

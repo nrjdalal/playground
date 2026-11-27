@@ -161,6 +161,8 @@ writeFileSync(join(HOME, "hooked", ".git", "hooks", "pre-commit"), "#!/bin/sh\n"
 git(SCRATCH, "init", "-q", join(HOME, "hookspath"))
 git(join(HOME, "hookspath"), "config", "core.hooksPath", "hk")
 for (const dir of ["hk", "logs"]) mkdirSync(join(HOME, "hookspath", dir))
+// a folder already on disk, which a line writes a script into and then copies or moves
+mkdirSync(join(HOME, "ondisk"))
 // the main checkout's worktree a, by its .git file, holding a link into the main checkout, and a plain folder beside it that no worktree holds, for #1663's rows
 writeFileSync(join(PATHS.MAIN, ".claude", "worktrees", "a", ".git"), "gitdir: x\n")
 symlinkSync(join(PATHS.MAIN, ".claude"), PATHS.TREE_LINK)

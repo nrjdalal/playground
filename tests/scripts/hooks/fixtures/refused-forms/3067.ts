@@ -479,6 +479,18 @@ const linked = ({ DATA, HOME }: Paths): Row[] => [
     `cat payload > ${HOME}/hookspath/hk/pre-commi[t]`,
   ],
   [
+    "a script written into a folder on disk, the folder copied by -r, then run",
+    `echo 'touch ${SCRIPT}' > ${HOME}/ondisk/run.sh; cp -r ${HOME}/ondisk e; sh e/run.sh`,
+  ],
+  [
+    "a script written into a folder on disk, the folder moved, then run",
+    `echo 'touch ${SCRIPT}' > ${HOME}/ondisk/run.sh; mv ${HOME}/ondisk e; sh e/run.sh`,
+  ],
+  [
+    "a script written into a folder on disk, the folder copied by -R into a folder, then run",
+    `mkdir e; echo 'touch ${SCRIPT}' > ${HOME}/ondisk/run.sh; cp -R ${HOME}/ondisk e; sh e/ondisk/run.sh`,
+  ],
+  [
     "a cat's output into a core.hooksPath folder by a * glob in a name",
     `cat payload > ${HOME}/hookspath/hk/lib*.sh`,
   ],
@@ -520,6 +532,14 @@ const linkControls = ({ HOME }: Paths): Row[] => [
   [
     "an echo naming the root through a dangling link to a plain place",
     `echo 'touch ${SCRIPT}' > ${HOME}/dangling-plain`,
+  ],
+  [
+    "a plain script written into a folder on disk, the folder copied by -r, then run",
+    `echo 'touch out.log' > ${HOME}/ondisk/run.sh; cp -r ${HOME}/ondisk e; sh e/run.sh`,
+  ],
+  [
+    "a plain script written into a folder on disk, the folder moved, then run",
+    `echo 'touch out.log' > ${HOME}/ondisk/run.sh; mv ${HOME}/ondisk e; sh e/run.sh`,
   ],
   [
     "a cat's output into a plain folder of a core.hooksPath repo by a * glob that matches nothing",
