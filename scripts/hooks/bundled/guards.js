@@ -19873,9 +19873,14 @@ var CODE_RUNNERS = new Set([
   "python3",
   "ruby"
 ]);
-var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|(?<![\w.$-])(?:cp|mv|install)["']\s*,|["'`](?:cp|mv|install)\s+[^\s"'`)]+\s+(?:[^\s"'`)]|["'`]\s*[+%.])|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i;
+var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i;
 var PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g;
-var writesCode = (code) => WRITE_WORDS.test(code.replace(PATHS, (path) => path.slice(path.lastIndexOf("/") + 1)));
+var SHELL_WORDS = /(?<![\w.$-])(?:cp|mv|install)["']\s*,|(?:["'`]|\bqx\s*[{(\[<|/!]|%x[{(\[<|!])(?:cp|mv|install)\s+[^\s"'`)]+\s+(?:[^\s"'`)]|["'`]\s*[+%.])/i;
+var RUNS3 = /\b(?:system|exec\w*|spawn\w*|popen\w*|subprocess|check_output|check_call|call|run|Open3|qx)\b|%x|\$`|`(?:cp|mv|install)\s/i;
+var writesCode = (code) => {
+  const cut = code.replace(PATHS, (path) => path.slice(path.lastIndexOf("/") + 1));
+  return WRITE_WORDS.test(cut) || RUNS3.test(cut) && SHELL_WORDS.test(cut);
+};
 var targetsOf = (environment) => {
   const data = dataDirOf(environment);
   let real = data;

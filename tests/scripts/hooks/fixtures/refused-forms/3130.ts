@@ -168,6 +168,74 @@ export const groups: Group[] = [
         `node -e "require('child_process').execSync('cp /tmp/x $HOME/.playground/roster.json')"`,
       ],
       [
+        "python3 code running cp onto the roster through os.system, its path joined on with +",
+        `python3 -c "import os; p = os.path.expanduser('~/.playground/roster.json'); os.system('cp /tmp/x ' + p)"`,
+      ],
+      [
+        "python3 code running mv onto the roster through os.system, its path joined on with %",
+        `python3 -c "import os; p = os.path.expanduser('~/.playground/roster.json'); os.system('mv -f /tmp/x %s' % p)"`,
+      ],
+      [
+        "python3 code running install onto the roster through os.system, its path in an f-string",
+        `python3 -c "import os; p = os.path.expanduser('~/.playground/roster.json'); os.system(f'install /tmp/x {p}')"`,
+      ],
+      [
+        "python3 code running cp onto the roster through os.system, its path filled by format",
+        `python3 -c "import os; p = os.path.expanduser('~/.playground/roster.json'); os.system('cp {} {}'.format('/tmp/x', p))"`,
+      ],
+      [
+        "node code running cp onto the roster through a template string",
+        "node -e \"const p = process.env.HOME + '/.playground/roster.json'; require('child_process').execSync(`cp /tmp/x ${p}`)\"",
+      ],
+      [
+        "python3 code running mv onto the roster through a shell=True command string",
+        `python3 -c "import subprocess; subprocess.run('mv /tmp/x $HOME/.playground/roster.json', shell=True)"`,
+      ],
+      [
+        "python3 code running cp onto the roster through os.popen",
+        `python3 -c "import os; os.popen('cp /tmp/x $HOME/.playground/roster.json')"`,
+      ],
+      [
+        "python3 code running install onto the roster through check_call",
+        `python3 -c "import subprocess; subprocess.check_call(['install', '/tmp/x', '$HOME/.playground/roster.json'])"`,
+      ],
+      [
+        "node code running cp onto the roster through spawnSync",
+        `node -e "require('child_process').spawnSync('cp', ['/tmp/x', '$HOME/.playground/roster.json'])"`,
+      ],
+      [
+        "node code running mv onto the roster through execFileSync",
+        `node -e "require('child_process').execFileSync('mv', ['/tmp/x', '$HOME/.playground/roster.json'])"`,
+      ],
+      [
+        "bun code running cp onto the roster through Bun's $ template",
+        "bun -e 'await Bun.$`cp /tmp/x ${process.env.HOME}/.playground/roster.json`'",
+      ],
+      [
+        "perl code running cp onto the roster through system with a list",
+        `perl -e "system('cp', '/tmp/x', '$HOME/.playground/roster.json')"`,
+      ],
+      [
+        "perl code running cp onto the roster through system with a command string",
+        `perl -e "system 'cp /tmp/x $HOME/.playground/roster.json'"`,
+      ],
+      [
+        "perl code running cp onto the roster through qx",
+        `perl -e "qx{cp /tmp/x $HOME/.playground/roster.json}"`,
+      ],
+      [
+        "perl code running cp onto the roster through a backtick",
+        "perl -e '`cp /tmp/x $ENV{HOME}/.playground/roster.json`'",
+      ],
+      [
+        "ruby code running cp onto the roster through system with a list",
+        `ruby -e "system('cp', '/tmp/x', '$HOME/.playground/roster.json')"`,
+      ],
+      [
+        "ruby code running cp onto the roster through %x",
+        `ruby -e "%x(cp /tmp/x $HOME/.playground/roster.json)"`,
+      ],
+      [
         "chmod -R on the data folder printed by a substitution",
         'chmod -R 000 "$(echo ~/.playground)"',
       ],

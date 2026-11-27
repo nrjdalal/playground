@@ -123,13 +123,21 @@ const CODE_RUNNERS = new Set([
   "ruby",
 ])
 
-// A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a remove, delete or move call, a truncate, an append, a replace (a path's one-argument replace too), a mode, owner or flags change (an l or f before it too), a copy, move or install call onto a roster.json or onto a destination that is no string literal, cp, mv or install as a shell word, or a redirect's > (an arrow's => and a comparison's >= aside).
+// A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a remove, delete or move call, a truncate, an append, a replace (a path's one-argument replace too), a mode, owner or flags change (an l or f before it too), a copy, move or install call onto a roster.json or onto a destination that is no string literal, or a redirect's > (an arrow's => and a comparison's >= aside).
 const WRITE_WORDS =
-  /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|(?<![\w.$-])(?:cp|mv|install)["']\s*,|["'`](?:cp|mv|install)\s+[^\s"'`)]+\s+(?:[^\s"'`)]|["'`]\s*[+%.])|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i
+  /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i
 // A path in the code, from its first slash, its segments up to a quote, a blank, a bracket or a shell operator: its folders (a temp folder's -rMNlX1, a no-roster-write folder) hold no write, and its last segment (/bin/rm) and the word before its first slash (writeFileSync/**/) are kept.
 const PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g
-const writesCode = (code: string) =>
-  WRITE_WORDS.test(code.replace(PATHS, (path) => path.slice(path.lastIndexOf("/") + 1)))
+// cp, mv or install as a shell word: a quoted list item, or a string (a quote, a backtick, perl's qx or ruby's %x) it opens with two operands, or one and a string joined on with +, % or the dot.
+const SHELL_WORDS =
+  /(?<![\w.$-])(?:cp|mv|install)["']\s*,|(?:["'`]|\bqx\s*[{(\[<|/!]|%x[{(\[<|!])(?:cp|mv|install)\s+[^\s"'`)]+\s+(?:[^\s"'`)]|["'`]\s*[+%.])/i
+// A call that runs a command: a system, exec, spawn, popen, subprocess, check_output, check_call, call or run call, Open3, qx, %x, Bun's $`, or a backtick that opens a cp, mv or install.
+const RUNS =
+  /\b(?:system|exec\w*|spawn\w*|popen\w*|subprocess|check_output|check_call|call|run|Open3|qx)\b|%x|\$`|`(?:cp|mv|install)\s/i
+const writesCode = (code: string) => {
+  const cut = code.replace(PATHS, (path) => path.slice(path.lastIndexOf("/") + 1))
+  return WRITE_WORDS.test(cut) || (RUNS.test(cut) && SHELL_WORDS.test(cut))
+}
 
 // The live roster, as typed and as the data folder's links resolve, each in lower case, since macOS opens a path in any case.
 const targetsOf = (environment: Environment): string[] => {

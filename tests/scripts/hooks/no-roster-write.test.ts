@@ -305,6 +305,11 @@ describe("roster.ts and every read run", () => {
     `python3 -c "import json; r = json.load(open('${ROSTER}')); print([x.get('task', 'mv ok') for x in r])"`,
     `python3 -c "import json; r = json.load(open('${ROSTER}')); print([x for x in r if x.get('task', '').startswith('mv ')])"`,
     `bun -e "const r = JSON.parse(require('fs').readFileSync('${ROSTER}', 'utf8')); console.log(r.filter(x => x.task.includes('bun install ')).length)"`,
+    `python3 -c "import json; r = json.load(open('${ROSTER}')); print('cp done for', len(r))"`,
+    `python3 -c "import json; r = json.load(open('${ROSTER}')); print('Install the roster rows:', len(r))"`,
+    `python3 -c "import json; r = json.load(open('${ROSTER}')); print([x for x in r if 'mv x y' in str(x)])"`,
+    `bun -e "const r = require('fs').readFileSync('${ROSTER}', 'utf8'); console.log('install deps ' + r.length)"`,
+    `bun -e "const r = require('fs').readFileSync('${ROSTER}', 'utf8'); console.log(['cp', 'a'].join(' '), r.length)"`,
     // 3134.ts's twin: an ANSI-C item naming another file of the data folder
     "xargs -I{} sh -c 'echo x >> {}' <<< '$'\"'\"'\\x7e/.playground/notes.json'\"'\"''",
   ])("%s", async (command) => {
