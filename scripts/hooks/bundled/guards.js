@@ -11771,7 +11771,7 @@ async function xargsFed(cmd, parsed, args, env, direct) {
           unread: appends ? "what xargs appends from its input" : `what xargs puts in place of ${strings.join(" or ")}`
         }
       ];
-    const filled = args.flatMap((w) => holds(w) ? wordsOf(strings.reduce((v, s) => v.replaceAll(s, text), w.value)) : [w]);
+    const filled = args.flatMap((w) => holds(w) ? wordsOf(strings.reduce((v, s) => v.replaceAll(s, () => text), w.value)) : [w]);
     const fed = appends ? [...filled, ...wordsOf(text)] : filled;
     const [sub, verb] = ghCommand(fed).head;
     if (sub !== "pr" || verb !== "merge")

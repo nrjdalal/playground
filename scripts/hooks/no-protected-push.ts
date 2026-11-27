@@ -479,7 +479,7 @@ async function xargsFed(
         },
       ]
     const filled = args.flatMap((w) =>
-      holds(w) ? wordsOf(strings.reduce((v, s) => v.replaceAll(s, text), w.value)) : [w],
+      holds(w) ? wordsOf(strings.reduce((v, s) => v.replaceAll(s, () => text), w.value)) : [w],
     )
     const fed = appends ? [...filled, ...wordsOf(text)] : filled
     const [sub, verb] = ghCommand(fed).head
