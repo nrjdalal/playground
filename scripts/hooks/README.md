@@ -1027,7 +1027,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-kill-by-name
 
-- A factory session signals only processes it started, by their own handle (the **signal** rule): `scripts/hooks/no-kill-by-name.ts`, run on Bash by [guards](#guards), refuses `pkill`, `killall` and `fuser -k`, <!-- kill-check: names only -->
+- A factory session signals only processes it started, by their own handle (the **signal** rule): `scripts/hooks/no-kill-by-name.ts`, run on Bash by [guards](#guards), refuses `pkill`, `killall`, `fuser -k` and a `kill` of every process, <!-- kill-check: names only -->
+  its own group or a process group the session did not start (a pid operand of `-1` or `0`, or a negative number whose group leader does not descend from the session), <!-- kill-check: names only -->
   and, in a call that searches with `pgrep`, `pidof`, `lsof`, `fuser` or `ps` (but `ps` given a pid by `-p`, `-q`, `--pid` or `--quick-pid`), a `kill` run by xargs or given a pid the hook cannot read, in a chain, a pipe, a loop, a group or `sh -c` alike,
   since a name, pattern or port matches the live dashboard and every worker's stack (31 Oct: a session ran `pkill -f` on its own watcher, and only `tests/test_kill_by_name.py`, which reads the repo's text, guarded it). <!-- kill-check: names only -->
   A command the shared reader marks `unread` (the shared reader, at the top: a program word or an `eval` or `-c` script built from a value no reading resolves, such as `"$X" pkill -f x`, or a glob it cannot match) is refused too, since it may be any kill. <!-- kill-check: names only -->

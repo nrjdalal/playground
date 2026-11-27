@@ -197,6 +197,8 @@ export type Setup = {
   sandboxed?: boolean
   swapins?: number
   topDelay?: number
+  // the job slots.windowJob names, which the settings reader answers as a store that sets it would
+  windowJob?: string
 }
 
 // A scratch state folder and config folder, with a fake sysctl on PATH giving the load asked for (load5 and load15 as load1 unless given), the core count asked for (15 unless given) and normal memory, a fake uptime giving the same load, a fake top whose second sample reads the CPU idle share asked for, a fake vm_stat whose last row reads the swap-ins asked for, and a fake iostat whose second sample reads disk0's transfers/s and MB/s asked for; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone.
@@ -219,6 +221,7 @@ export const machine = ({
   sandboxed = false,
   swapins = 0,
   topDelay = 0,
+  windowJob,
 }: Setup = {}) => {
   const root = mkdtempSync(join(tmpdir(), "run-slot-"))
   dirs.push(root)
@@ -294,10 +297,10 @@ esac
     )
     chmodSync(join(bin, "ps"), 0o755)
   }
-  // the settings reader answers factory.repo, the guarded orgs and slots.peers as a store that sets them would, and every other key as the real one does
+  // the settings reader answers factory.repo, the guarded orgs, slots.peers and a given slots.windowJob as a store that sets them would, and every other key as the real one does
   writeFileSync(
     join(bin, "bun"),
-    `#!/bin/bash\n[ "$2" = factory.repo ] && { echo '"acme/app"'; exit 0; }\n[ "$2" = --guarded-orgs ] && { echo '["acme-co"]'; exit 0; }\n[ "$2" = slots.peers ] && { echo '${JSON.stringify(peers)}'; exit 0; }\nexec ${process.execPath} "$@"\n`,
+    `#!/bin/bash\n[ "$2" = factory.repo ] && { echo '"acme/app"'; exit 0; }\n[ "$2" = --guarded-orgs ] && { echo '["acme-co"]'; exit 0; }\n[ "$2" = slots.peers ] && { echo '${JSON.stringify(peers)}'; exit 0; }\n${windowJob === undefined ? "" : `[ "$2" = slots.windowJob ] && { echo '${JSON.stringify(windowJob)}'; exit 0; }\n`}exec ${process.execPath} "$@"\n`,
   )
   chmodSync(join(bin, "bun"), 0o755)
   if (now !== undefined) {
