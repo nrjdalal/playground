@@ -447,6 +447,52 @@ describe("what passes", () => {
     ["do nothing until still asks", "Do nothing until you review it yourself.", true],
     ["wait until still asks", "Wait until you try it yourself.", true],
     [
+      "three plain words between the status verb and until",
+      "The PR stays open for review until you merge it yourself.",
+      false,
+    ],
+    [
+      "four words between the status verb and until still ask",
+      "The PR stays open for code review until you merge it yourself.",
+      true,
+    ],
+    [
+      "a so clause after the status verb still asks",
+      "The PR stays a draft, so don't merge until you test it yourself.",
+      true,
+    ],
+    [
+      "an and clause after a comma still asks",
+      "It stays open, and hold off until you check it yourself.",
+      true,
+    ],
+    [
+      "a then clause still asks",
+      "The ship waits for CI, then wait until you try it yourself.",
+      true,
+    ],
+    [
+      "a but clause still asks",
+      "The fix stays in, but don't ship until you test it yourself.",
+      true,
+    ],
+    [
+      "an order after a colon still asks",
+      "It remains held: don't merge until you test it yourself.",
+      true,
+    ],
+    [
+      "an and clause with no comma still asks",
+      "It stays open and hold off until you check it yourself.",
+      true,
+    ],
+    [
+      "an order after a dash still asks",
+      "It stays open - merge until you check it yourself.",
+      true,
+    ],
+    ["an or clause still asks", "It stays green or merge until you check it yourself.", true],
+    [
       "an until clause opening a sentence still asks",
       "Until you merge it yourself, nothing ships.",
       true,
