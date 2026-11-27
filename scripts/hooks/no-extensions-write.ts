@@ -3632,7 +3632,7 @@ async function inspect(
     const putIn = (word: Word) =>
       args.map((arg) => {
         if (!replace || !arg.value.includes(replace)) return arg
-        const put = { ...arg, value: arg.value.replaceAll(replace, word.value) }
+        const put = { ...arg, value: arg.value.replaceAll(replace, () => word.value) }
         fromStdin.add(put)
         if (fromArgFile.has(word)) fromArgFile.add(put)
         return put

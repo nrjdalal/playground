@@ -300,7 +300,7 @@ function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
   if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
-  return script.replaceAll(mark, value);
+  return script.replaceAll(mark, () => value);
 }
 var held = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
@@ -2213,7 +2213,7 @@ function viaRunner(parsed, state, budget) {
     xargs: parsed.xargs && { ...parsed.xargs }
   }, key, budget);
   if (!reading.first)
-    return;
+    return reading.xargs?.wrapped ? { ...reading, via: key } : undefined;
   const file = reading.first.value;
   if (key === "bun run" && (file.includes("/") || SCRIPT_FILE.test(file)))
     return;
@@ -2982,7 +2982,7 @@ async function xargsFilled(cmd, xargs, env) {
           return [w];
         if (text === undefined)
           return [{ ...w, ...unknown(`the program xargs puts in place of ${held.join(" or ")}`) }];
-        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, text), w.value));
+        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, () => text), w.value));
       }),
       ...!wrapped ? [] : text === undefined ? [{ quoted: false, ...unknown("the program xargs hands its wrapper") }] : wordsOf(text)
     ]
@@ -3543,12 +3543,27 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     return;
   const { inline, operand } = shellOperand(args, name);
   if (operand && inline) {
-    let script = operand.value;
-    if (xargs?.replace && script.includes(xargs.replace)) {
-      const fed = await stdinOf(cmd, env);
-      script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
+    const script = operand.value;
+    if (!xargs?.replace || !script.includes(xargs.replace))
+      return run2(lexScript(script, env), subshell(env), visit, builtins);
+    const fed = await stdinOf(cmd, env);
+    const texts = new Set;
+    for (const split of [null, ...xargs.delimiters ?? []]) {
+      const items = itemsOf(fed, split);
+      if (!items || items.length > READINGS)
+        texts.add(UNKNOWN);
+      else
+        for (const text of items)
+          if (text.trim())
+            texts.add(text.trim());
     }
-    return run2(lexScript(script, env), subshell(env), visit, builtins);
+    for (const text of texts.size > 0 ? texts : [""]) {
+      const lexed = lexScript(filled(script, xargs.replace, text), env);
+      const verdict = await run2(lexed, subshell(env), visit, builtins);
+      if (verdict)
+        return verdict;
+    }
+    return;
   }
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script);
@@ -16839,7 +16854,13 @@ async function inspect9(raw) {
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;
   const decoded = toolInput.command.includes("$'") ? lex(toolInput.command).commands.flatMap((c) => c.words.map((w) => w.value)).join(" ") : "";
-  const bare = spelledText(`${toolInput.command} ${decoded}`).replace(/["'\\]/g, "");
+  const spelled = spelledText(`${toolInput.command} ${decoded}`);
+  const breaks = spelled.replace(/\\(?:x[0-9A-Fa-f]{1,2}|[0-7]{1,4}|.)/g, " ");
+  const letters = spelled.replace(/\\(?:x([0-9A-Fa-f]{1,2})|u([0-9A-Fa-f]{1,4})|U([0-9A-Fa-f]{1,8})|0?([0-7]{1,3})|.)/g, (_, x, u, U, octal) => {
+    const code = x || u || U ? parseInt(x ?? u ?? U, 16) : octal ? parseInt(octal, 8) : NaN;
+    return code > 32 && code <= 1114111 ? String.fromCodePoint(code) : " ";
+  });
+  const bare = `${spelled} ${breaks} ${letters}`.replace(/["'\\]/g, "");
   const namesKill = /(?:fuser|kill|killall|pkill)\b/.test(bare) || /(?:\$\{?\w+\}?){2,}/.test(bare) || /\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) || globSpells(bare, KILLS);
   if (!namesKill && !/\bportless\b/.test(bare))
     return;
@@ -20060,7 +20081,7 @@ async function judgeBash(command, cwd, environment) {
         glob: a.glob || item.glob || anyName,
         raw: undefined,
         source: undefined,
-        value: a.value.replaceAll(mark, anyName ? "*" : item.value)
+        value: a.value.replaceAll(mark, () => anyName ? "*" : item.value)
       };
       if (unseen.has(item))
         unseen.add(word);
@@ -20119,7 +20140,7 @@ async function judgeBash(command, cwd, environment) {
         const end = args.findIndex((w, j) => j > i && (w.value === ";" || w.value === "+"));
         const line = args.slice(i + 1, end < 0 ? undefined : end).map((w) => {
           const typed = w.raw ?? w.source ?? `'${w.value.replaceAll("'", `'\\''`)}'`;
-          return reached ? typed.replaceAll("{}", roster.value) : typed;
+          return reached ? typed.replaceAll("{}", () => roster.value) : typed;
         }).join(" ");
         const found = await run2(lex(line, at.known), { ...at, vars: new Map(at.vars) }, visit, true);
         if (found)
