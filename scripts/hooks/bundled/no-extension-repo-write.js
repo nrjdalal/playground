@@ -45,7 +45,7 @@ applyEnvAliases();
 
 // scripts/hooks/no-extension-repo-write.ts
 import { existsSync as existsSync3, statSync as statSync3 } from "fs";
-import { join as join7 } from "path";
+import { join as join8 } from "path";
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
@@ -370,7 +370,7 @@ async function input(name, kind, deadline = DEADLINE) {
 
 // scripts/hooks/no-playground-leak.ts
 import { AsyncLocalStorage as AsyncLocalStorage3 } from "async_hooks";
-import { basename as basename3, join as join6 } from "path";
+import { basename as basename3, join as join7 } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
@@ -9937,7 +9937,7 @@ var REF_MOVE = /\b(?:createCommitOnBranch|createRef|deleteRef|mergeBranch|mergeP
 var REF_MUTATION = new RegExp(`${REF_MOVE.source}|\\bcreatePullRequest\\b`);
 
 // packages/scripts/src/playground/setting.ts
-import { resolve as resolve3 } from "path";
+import { join as join6, resolve as resolve3 } from "path";
 
 // packages/settings/src/accounts.ts
 var email2 = string2().email();
@@ -11379,7 +11379,7 @@ function chipsSigned(blocks, signature) {
   return opensLine && text.split(`
 `).at(-1)?.trim() === signature.replace(/^_(.*)_$/, "$1");
 }
-var CHECKOUT2 = join6(__CHECKOUT + "/scripts/hooks", "..", "..");
+var CHECKOUT2 = join7(__CHECKOUT + "/scripts/hooks", "..", "..");
 var REPHRASE = "Say it without the term: name the work, not who did it or how it is run.";
 var READABLE = `Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md, or -F /abs/msg.md for a commit). ${NOT_RUN}`;
 var MCP_READABLE = "Pass the input as an object whose fields are strings.";
@@ -12586,7 +12586,7 @@ function guardedRepos(data, values, environment) {
   const repos = new Set(named.values());
   const scopes = scopesIn(data);
   for (const scope of scopes) {
-    const repo = remoteRepo(originUrl(join7(extensionsDir(data), scope, ".git", "config")));
+    const repo = remoteRepo(originUrl(join8(extensionsDir(data), scope, ".git", "config")));
     if (repo)
       repos.add(`${repo.owner}/${repo.repo}`.toLowerCase());
   }
