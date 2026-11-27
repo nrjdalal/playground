@@ -2050,7 +2050,8 @@ except Exception:
     sys.exit(1)
 if until <= datetime.datetime.now(datetime.timezone.utc):
     sys.exit(1)
-print(f"{f.get('session')} until {f['until']}")
+why = " ".join(str(f.get("reason") or "").split())
+print(f"{f.get('session')} until {f['until']}" + (f', its reason "{why}"' if why else ""))
 PY
 ); then
   # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --priority start goes on while a priority file passes it, a job's own start file included, since no gate but the machine's own delays a job's ticket start

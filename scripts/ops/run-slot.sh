@@ -441,7 +441,7 @@ if [ "${1:-}" = slots ]; then
   SLOTS_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
-# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many the queue's next run can take now (the open, unheld ones while unit_fits passes for first_waiter's ticket, or a medium with no waiter; none while waiters wait and none can start, and none while focus's hold stands), and the live tickets in the queue, which spawn.sh's slots gate reads
+# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many the queue's next run can take now (the open, unheld ones while unit_fits passes for first_waiter's ticket, or a medium with no waiter; none while waiters wait and none can start, and none while focus's hold stands), and the live tickets in the queue, which spawn.sh's slots gate reads; while focus's hold stands, one more line on stderr names it, its end and its reason
 # run-slot.sh kind -- <command>: print the lane run-slot picks for that command (refuse for a run it refuses, docker for a docker build, else quick_kind's clone, commit, quick, or nothing for the queue) and exit, with no ask line, ticket or holder and nothing run, so a lane question reads run-slot's own pick
 KIND_ONLY=
 if [ "${1:-}" = kind ]; then
@@ -2713,6 +2713,10 @@ if [ -n "$ROOM_ONLY" ]; then
     elif [ "$waiters" = 0 ]; then
       unit_fits 22 2 medium "" "$c" && free=$((c / 2 - held))
     fi
+  else
+    # stdout stays the four numbers spawn.sh's slots gate parses, so the hold names itself on stderr (issue 3189)
+    read -r _ _ ends why 2>/dev/null < "$OPS/run-slot.focus"
+    echo "run-slot.sh: run-slot.focus for $FOCUS_HOLDER holds the lanes until ${ends:-its end}: ${why:-no reason given}" >&2
   fi
   echo "$((c / 2)) $held $free $waiters"
   exit 0
