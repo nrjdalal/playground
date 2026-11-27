@@ -152,7 +152,7 @@ For skills alone, each bundled extension `ext.bundled` turns on is read between 
 - A list is the union of every scope's copy, so a guard reads every entry any scope adds.
   Arrays join item by item and objects key by key, while a single value such as the terms' `probe` keeps the first scope's, and core is read last, so an org's list holds only the items it adds and leaves each single value to core.
 
-`playground ext which <skill> [--repo <dir> | --org <org>]` prints the copy a session in that folder (or a repo of that org) loads, and `playground ext why <skill> [--repo <dir> | --org <org>]` prints it with its scope and each scope whose copy it shadows.
+`playground ext which <skill> [--repo <dir> | --org <org>]` prints the copy a session in that folder (or a repo of that org) loads, with neither flag the home set's copy, else the one org scope's that holds it (two or more exit 2, each named with its `--org`), and `playground ext why <skill> [--repo <dir> | --org <org>]` prints the copy that session loads, the home set's alone with neither flag, with its scope and each scope whose copy it shadows.
 
 ## A Playground skill is an Agent Skill
 

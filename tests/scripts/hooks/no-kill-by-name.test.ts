@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { check } from "../../../scripts/hooks/no-kill-by-name"
+import { check, type Proc } from "../../../scripts/hooks/no-kill-by-name"
 
 const root = join(import.meta.dir, "..", "..", "..")
 
@@ -105,11 +105,61 @@ describe("a command built from a value the reader cannot read, in a call that na
   })
 })
 
+// A made-up process table: the hook (100) under its shell (90) under the session's claude (80), which runs in the pane's group (70); a Bash call's shell (4000) under that claude leads its own group, and its child 4567 leads another; another session's claude (81) has a child group 5000; group 6000's leader has exited, leaving 6001
+const TABLE = new Map<number, Proc>([
+  [70, { comm: "-zsh", pgid: 70, ppid: 1 }],
+  [80, { comm: "/usr/local/bin/claude", pgid: 70, ppid: 70 }],
+  [81, { comm: "claude", pgid: 71, ppid: 1 }],
+  [90, { comm: "sh", pgid: 90, ppid: 80 }],
+  [100, { comm: "bun", pgid: 90, ppid: 90 }],
+  [4000, { comm: "/bin/zsh", pgid: 4000, ppid: 80 }],
+  [4567, { comm: "node", pgid: 4567, ppid: 4000 }],
+  [5000, { comm: "node", pgid: 5000, ppid: 81 }],
+  [6001, { comm: "node", pgid: 6000, ppid: 80 }],
+])
+const inTable = (command: string, procs = TABLE) =>
+  check(input(command), () => ({ procs, self: 100 }))
+
+describe("a kill of a process group passes only for a group the session started", () => {
+  test.each(["kill -TERM -4567", "kill -- -4567", "kill -9 -- -4000", "kill -s TERM -4567 -4000"])(
+    "%s, a group under the session's claude, passes",
+    async (command) => {
+      expect(await inTable(command)).toBeUndefined()
+    },
+  )
+
+  test.each([
+    ["kill -- -70", "the pane's group, above the session"],
+    ["kill -TERM -5000", "another session's group"],
+    ["kill -- -6000", "a group whose leader has exited"],
+    ["kill -- -80", "a group the session's claude itself would lead"],
+    ["kill -TERM -4567 -5000", "an own group beside a foreign one"],
+    ["kill -- -9999", "a group no process leads"],
+  ])("%s, %s, is refused", async (command) => {
+    expect(await inTable(command)).toContain(
+      "a kill of every process, a process group or its own group",
+    )
+  })
+
+  test("a group is refused when the process table cannot be read", async () => {
+    expect(await inTable("kill -TERM -4567", new Map())).toContain("a process group")
+  })
+
+  test("the table is read only for a negative pid", async () => {
+    let reads = 0
+    const counted = () => (reads++, { procs: TABLE, self: 100 })
+    await check(input("kill -9 1234"), counted)
+    await check(input("kill 0"), counted)
+    expect(reads).toBe(0)
+    await check(input("kill -- -4567"), counted)
+    expect(reads).toBe(1)
+  })
+})
+
 describe("a signal to a pid you hold, and a read, pass", () => {
   test.each([
     "kill 1234",
     "kill -9 1234",
-    "kill -TERM -4567",
     "kill -s TERM 1234",
     "kill $!",
     "kill %1",
@@ -209,6 +259,37 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     // -d takes the n as its value, so the 2 is the program, which names no kill
     "watch -dn 2 date",
     "echo skill",
+    // #3155's twins: a kill of one pid after each signal form, a lone -1 kill reads as signal 1 with no pid, and -1 before a pid read as that signal
+    "kill -TERM 1234",
+    "kill -0 1234",
+    "kill -n 9 1234",
+    "kill -- 1234",
+    "kill -1",
+    "kill -1 1234",
+    "kill -l",
+    "kill -l 9",
+    "kill -L",
+    "P=1234; kill -9 $P",
+    "kill $(cat /tmp/x.pid)",
+    "xargs kill -9 <<< 1234",
+    "echo 1234 | xargs -I{} kill -9 {}",
+    "cat /tmp/x.pid | xargs kill",
+    "printf '1234\\0' | xargs -0 kill -9",
+    "printf '1234\\0 5678\\0' | xargs -0 kill -9",
+    "echo 1234 | xargs -0 kill",
+    "cat /tmp/x.pid | xargs -0 kill",
+    "printf '1234,5678' | xargs -d , kill -9",
+    "echo 1234 > /tmp/f; xargs -a /tmp/f kill -9",
+    "xargs -a <(echo 1234) kill -9",
+    "echo 1234 | xargs -a - kill -9",
+    "echo $$ > /tmp/f; xargs -a /tmp/f kill -9",
+    "echo hi > /tmp/f; xargs -a /tmp/f echo",
+    "kill -$SIG 1234",
+    "kill -${SIG} 1234",
+    "kill -$SIG $PID",
+    "kill -9 99999",
+    "kill -9 2147483647",
+    "kill -9 +1234",
     // #3134's controls: refused-forms/3134.ts's pipes and escapes, each handing on a kill by pid
     "printf 'x\\nkill 1234\\n' | xargs -L1 ~/.playground/ops/run-slot.sh w --",
     "xargs -0 ~/.playground/ops/run-slot.sh w -- < <(printf 'x\\0kill 1234')",
