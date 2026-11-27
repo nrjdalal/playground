@@ -1004,6 +1004,14 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["a harmless here-string on a brace group around bash", "{ bash; } <<< 'ls -la'"],
     ["a harmless here-string on descriptor 3 duplicated onto bash's stdin", "bash 3<<< 'ls' <&3"],
     [
+      "cat reading a relative stdin path after a cd to the root folder",
+      "cd / && cat dev/stdin <<< 'rm -rf ~/.playground/extensions/.no-such-folder'",
+    ],
+    [
+      "bash running dev/stdin from a folder where it names a file, not stdin",
+      "env -C /tmp bash dev/stdin <<< 'rm -rf ~/.playground/extensions/.no-such-folder'",
+    ],
+    [
       "pkexec running a program of its own",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | pkexec cat",
     ],
@@ -1634,12 +1642,12 @@ describe("a quoted argument is read as a command line only where a program runs 
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
   })
 
-  // PG-2173 and #3070: an awk program awkRuns finds nothing in prints its input and its own strings alone, as grep and echo do, so its ~ is no path on a line read whole, a " string included
+  // PG-2173 and #3070: an awk program awkRuns finds nothing in prints its input and its own strings alone, as grep and echo do, so its ~ is no path on a line read whole, a " string included; sort's and uniq's output file is a write (#3067), so these write a log
   test.each([
-    ["sorted into a git hook by sort -o", "| sort -o .git/hooks/pre-commit"],
-    ["written into a git hook by uniq's second file", "| uniq - .git/hooks/pre-commit"],
+    ["sorted into a log by sort -o", "| sort -o out.log"],
+    ["written into a log by uniq's second file", "| uniq - out.log"],
     ["sorted through a compress program", "| sort --compress-program=sh"],
-    ["sorted into a git hook by an abbreviated --out", "| sort --out=.git/hooks/pre-commit"],
+    ["sorted into a log by an abbreviated --out", "| sort --out=out.log"],
     ["sorted through an abbreviated --comp", "| sort --comp=sh"],
   ])("awk's input-only output %s runs", async (_, tail) => {
     for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")]) {
@@ -2941,7 +2949,7 @@ describe("the hook's run", () => {
 
   // the timer fires at 1 s; a slow step left to the worker answers only at the walk's 10 s deadline or later, past this test's time
   test("a single step the deadline cannot interrupt is refused when the main thread's timer fires", async () => {
-    const command = `printf '%s${",".repeat(60)}' '{' ${"x ".repeat(6_000)}| xargs -I @ watch '@ a'; playground ext import x`
+    const command = `printf '%s${",".repeat(60)}' '{' ${"x ".repeat(6_000)}| xargs -I @ frob '@ a'; playground ext import x`
     const raw = JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" })
     expect(await guarded(raw, ENV, 1_000)).toContain("split it into shorter calls")
   }, 5_000)
@@ -4230,4 +4238,32 @@ describe("a glob-option switch on a remote or fed line", () => {
       expect(await bash(command)).toBeUndefined()
     },
   )
+})
+
+// #3067: a write target is read as the shell expands it, each operator, brace and parameter worked out, so the hook file it lands on is judged as one typed whole is
+describe("a write target is read as the shell expands it", () => {
+  test.each([
+    'X=a/.git/hooks/pre-commit; cat payload > "${X#a/}"',
+    'X=.git/hooks/pre-commit.x.y; cat payload > "${X%%.x*}"',
+    'X=.git/hookz/pre-commit; cat payload > "${X/hookz/hooks}"',
+    'X=.git/hooks/pre-commiz; cat payload > "${X/%z/t}"',
+    "cat payload > .git/hooks/pre-commi{r..t..2}",
+    "cat payload > .git/hooks/pre-commit{,}",
+    'set -e -- .git/hooks/pre-commit; cat payload > "$1"',
+    "sort -ro.git/hooks/pre-commit payload",
+    "uniq -f 1 payload .git/hooks/pre-commit",
+  ])("%s is refused", async (command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook refuses")
+  })
+
+  test.each([
+    'X=.git/hooks/pre-commit; cat payload > "${X%/*}.log"',
+    'X=.git/hooks/pre-commit; cat payload > "${X:+out.log}"',
+    'set -o pipefail; cat payload > "${1:-out.log}"',
+    "echo hi | sort -o .git/hooks/pre-commit",
+    "sort -k 1 -o out.log payload",
+    "uniq -s 2 payload out.log",
+  ])("%s runs", async (command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
 })

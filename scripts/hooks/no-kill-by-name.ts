@@ -1,8 +1,11 @@
-// PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash command that signals processes chosen by name, pattern or port (pkill, killall, fuser -k, or kill in a call that searches with pgrep, pidof, lsof, ps or fuser, the words after run-slot.sh's -- read as the command), since a pattern matches the live dashboard and every worker's stack (31 Oct: a session ran pkill -f on its own watcher). It refuses a portless proxy stop with no port and a portless clean too, run by any launcher and behind portless's global flags, since each stops whichever proxy answers on 443, 80 or 1355. A kill given a literal pid, $! or a pid file's contents passes, as does every search alone, `ps -p <pid>` and a proxy stop given `-p <port>`.
+// PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash command that signals processes chosen by name, pattern or port (pkill, killall, fuser -k, or kill in a call that searches with pgrep, pidof, lsof, ps or fuser, the words after run-slot.sh's -- read as the command), since a pattern matches the live dashboard and every worker's stack (31 Oct: a session ran pkill -f on its own watcher). It refuses a portless proxy stop with no port and a portless clean too, run by any launcher and behind portless's global flags, since each stops whichever proxy answers on 443, 80 or 1355. It refuses a kill of every process, a process group or its own group too (a pid operand of -1, a negative number or 0, as kill reads its words, xargs' input included), since one such call ends every session this user runs. A kill given a literal pid, $! or a pid file's contents passes, as does every search alone, `ps -p <pid>` and a proxy stop given `-p <port>`.
+
+import { basename } from "node:path"
 
 import { input } from "./input"
 import { fromFactory } from "./role"
 import {
+  argFile,
   examine,
   globSpells,
   lex,
@@ -11,12 +14,17 @@ import {
   run,
   shellSlot,
   SHELLS,
+  slotFilled,
   slotWords,
   spelledText,
+  stdinOf,
+  stdinPath,
   UNKNOWN,
   type Command,
+  type Env,
   type Visit,
   type Word,
+  type Xargs,
 } from "./shell"
 
 const BY_NAME = new Set(["killall", "pkill"])
@@ -80,7 +88,84 @@ const isSearch = (name: string, args: Word[]) =>
     name === "ps" && args.some((a) => /^-[A-Za-z]*[pq]$|^-[pq]\d|^--(?:quick-)?pid\b/.test(a.value))
   )
 
-async function inspect(raw: string) {
+// kill's words as kill reads them: a first word that is a signal option (-9, -KILL, -$SIG, -s X, -n X) or a list (-l, -L), then pid operands, every word after -- an operand, each read past the blanks and the plus sign kill's number parse skips. A group target is "all" for -1, 0, a pid past 32 bits, which zsh's kill cuts to one (4294967295 is -1), or a minus sign before a value the hook cannot read (`-$PGID`), else the process groups its negative operands name.
+const groupTarget = (words: string[]): "all" | number[] => {
+  let i = 0
+  if (words[0] === "-l" || words[0] === "-L") return []
+  if (words[0] === "-s" || words[0] === "-n") i = 2
+  else if (words[0] !== "--" && words[0]?.startsWith("-")) i = 1
+  if (words[i] === "--") i++
+  const operands = words.slice(i).map((w) => w.trim().replace(/^\+/, ""))
+  const wide = (w: string) => /^-?\d+$/.test(w) && Math.abs(Number(w)) > 2 ** 31 - 1
+  if (
+    operands.some(
+      (w) => /^(?:-0*1|0+)$/.test(w) || wide(w) || (w.startsWith("-") && w.includes(UNKNOWN)),
+    )
+  )
+    return "all"
+  return operands.filter((w) => /^-\d+$/.test(w)).map((w) => Number(w.slice(1)))
+}
+
+export type Proc = { comm: string; pgid: number; ppid: number }
+// The process table and the pid whose parents lead to the session, the hook's own by default
+export type Table = { procs: Map<number, Proc>; self: number }
+
+// One read of the process table through ps; an empty one when ps cannot be read, so every group reads as foreign
+export function readTable(): Table {
+  const procs = new Map<number, Proc>()
+  try {
+    const out = Bun.spawnSync(["/bin/ps", "-axo", "pid=,ppid=,pgid=,comm="], { stderr: "ignore" })
+    for (const line of out.stdout.toString().split("\n")) {
+      const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/)
+      if (m) procs.set(Number(m[1]), { comm: m[4]!, pgid: Number(m[3]), ppid: Number(m[2]) })
+    }
+  } catch {}
+  return { procs, self: process.pid }
+}
+
+// The pids from `pid` up through its parents, at most 64 hops
+const parents = (pid: number, procs: Map<number, Proc>) => {
+  const chain: number[] = []
+  for (let at = pid; at > 1 && chain.length < 64 && procs.has(at); at = procs.get(at)!.ppid)
+    chain.push(at)
+  return chain
+}
+
+// Whether a process group is the session's own: its leader (the pid the group is named for, still leading it) sits below the nearest claude above `self`, which a group the session started does and the pane's or another session's never does
+const ownGroup = (pgid: number, { procs, self }: Table) => {
+  const claude = parents(self, procs).find((pid) => basename(procs.get(pid)!.comm) === "claude")
+  if (!claude || procs.get(pgid)?.pgid !== pgid) return false
+  return parents(pgid, procs).slice(1).includes(claude)
+}
+
+// The words a kill xargs runs gets: its own, the -I string filled with what xargs reads from stdin and from each file GNU's -a names, else that input appended; its own alone when the hook cannot read stdin and no -a names a file. The input splits at blanks and at each -0 or -d delimiter too, so no item hides a pid behind a NUL or a comma, and an -a file or a delimiter the reader cannot read reads as an unread pid
+const xargsWords = async (cmd: Command, args: Word[], xargs: Xargs, env: Env) => {
+  const words = args.map((a) => a.value)
+  if (!xargs) return words
+  const files = (xargs.files ?? []).filter((f) => !stdinPath(f.file.value))
+  const read = await Promise.all(files.map((f) => argFile(f, cmd, env)))
+  const fed = await stdinOf(cmd, env)
+  if (fed.unknown && files.length === 0) return words
+  const delimiters = xargs.delimiters ?? []
+  if (read.some((t) => t.unknown) || delimiters.includes(undefined))
+    return [...words, `-${UNKNOWN}`]
+  const texts = [...(fed.unknown ? [] : [fed.value]), ...read.map((t) => t.value)]
+  const items = delimiters
+    .reduce(
+      (parts, d) => parts.flatMap((p) => p.split(d!)),
+      texts.flatMap((t) => t.split(/\s+/)),
+    )
+    .filter(Boolean)
+  const replace = xargs.replace
+  return replace && words.some((w) => w.includes(replace))
+    ? words.flatMap((w) =>
+        w.includes(replace) ? items.map((item) => w.replaceAll(replace, () => item)) : [w],
+      )
+    : [...words, ...items]
+}
+
+async function inspect(raw: string, readProcs: () => Table) {
+  let table: Table | undefined
   const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as {
     tool_input?: { command?: unknown }
     tool_name?: unknown
@@ -92,9 +177,21 @@ async function inspect(raw: string) {
         .commands.flatMap((c) => c.words.map((w) => w.value))
         .join(" ")
     : ""
-  const bare = spelledText(`${toolInput.command} ${decoded}`).replace(/["'\\]/g, "")
+  const spelled = spelledText(`${toolInput.command} ${decoded}`)
+  // a second spelling reads each backslash escape as the word break printf, echo -e or $'…' may decode it to, so a name an escape ends (`pkill\0node`, a here-string's `$'pkill\nnode'`) passes too
+  const breaks = spelled.replace(/\\(?:x[0-9A-Fa-f]{1,2}|[0-7]{1,4}|.)/g, " ")
+  // a third decodes each hex, unicode and octal escape to the letter printf, echo -e or $'…' gives it, and reads the rest as blanks, so a name an escape spells a letter of (`p\x6bill`, `pki\154l`) passes too
+  const letters = spelled.replace(
+    /\\(?:x([0-9A-Fa-f]{1,2})|u([0-9A-Fa-f]{1,4})|U([0-9A-Fa-f]{1,8})|0?([0-7]{1,3})|.)/g,
+    (_, x, u, U, octal) => {
+      const code = x || u || U ? parseInt(x ?? u ?? U, 16) : octal ? parseInt(octal, 8) : NaN
+      return code > 32 && code <= 0x10ffff ? String.fromCodePoint(code) : " "
+    },
+  )
+  const bare = `${spelled} ${breaks} ${letters}`.replace(/["'\\]/g, "")
+  // a kill's name may sit glued to an option it is the value of (`flock /tmp/l -cpkill`), so the first look takes it at a word's end too
   const namesKill =
-    /\b(?:fuser|kill|killall|pkill)\b/.test(bare) ||
+    /(?:fuser|kill|killall|pkill)\b/.test(bare) ||
     /(?:\$\{?\w+\}?){2,}/.test(bare) ||
     /\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) ||
     globSpells(bare, KILLS)
@@ -113,18 +210,27 @@ async function inspect(raw: string) {
   // a pid xargs hands a shell it starts arrives as the -I string (`xargs -I{} sh -c 'kill {}'`)
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || [])
   const visit: Visit = async (cmd, parsed, env) => {
-    // run-slot.sh, typed bare or as a shell's script, runs the words after its -- as the command, with the input an xargs running run-slot hands that command alone
+    // run-slot.sh, typed bare or as a shell's script, runs the words after its -- as the command, with the input an xargs running run-slot hands that command alone, read as xargs fills it (slotFilled)
     const slot =
       slotWords(parsed) ??
       (SHELLS.has(parsed.name) ? shellSlot(parsed.args, parsed.name) : undefined)
-    if (slot?.length) {
-      const slotted = { ...cmd, words: slot }
-      return examine(
-        slotted,
-        env,
-        (c, p, e) => visit(c, c === slotted ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e),
-        false,
-      )
+    const typed = slot && { ...cmd, words: slot }
+    const handsSlot =
+      parsed.name === "run-slot.sh" && parsed.args.some((a, i) => i > 0 && a.value === "--")
+    const slotted = !typed
+      ? []
+      : [typed, ...(handsSlot && parsed.xargs ? await slotFilled(typed, parsed.xargs, env) : [])]
+    if (slotted.some((s) => s.words.length > 0)) {
+      for (const s of slotted.filter((s) => s.words.length > 0)) {
+        const verdict = await examine(
+          s,
+          env,
+          (c, p, e) => visit(c, c === s ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e),
+          false,
+        )
+        if (verdict) return verdict
+      }
+      return
     }
     const { args, first, name, xargs } = parsed
     // a command the shell builds from a value the reader cannot read may be any kill, in a call whose text names one
@@ -141,6 +247,9 @@ async function inspect(raw: string) {
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args)) return refuse(name)
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
       return refuse("fuser -k")
+    const target = name === "kill" ? groupTarget(await xargsWords(cmd, args, xargs, env)) : []
+    if (target === "all" || target.some((pgid) => !ownGroup(pgid, (table ??= readProcs()))))
+      return `no-kill-by-name hook refuses a kill of every process, a process group or its own group: a pid operand of -1, a negative number or 0 signals every process this user may signal, a whole group or the caller's own group, the live dashboard and every session among them. ${WAY_OUT}`
     if (name !== "kill" || !search) return
     const fed =
       xargs ||
@@ -155,9 +264,12 @@ async function inspect(raw: string) {
 }
 
 // Fails open: a call the hook cannot read runs, so a parser bug never blocks a Bash command.
-export async function check(raw: string): Promise<string | undefined> {
+export async function check(
+  raw: string,
+  readProcs: () => Table = readTable,
+): Promise<string | undefined> {
   try {
-    return await inspect(raw)
+    return await inspect(raw, readProcs)
   } catch {
     return undefined
   }

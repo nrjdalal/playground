@@ -181,7 +181,8 @@ export function filled(script: string, mark: string, value: string): string {
   const count = script.split(mark).length - 1
   if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read")
-  return script.replaceAll(mark, value)
+  // a function replacement, so a value holding `$'` or `$&` is inserted as written, never as a replacement pattern
+  return script.replaceAll(mark, () => value)
 }
 
 // A text a command writes or reads from stdin, unknown past the size of a file the hook reads, so a text that doubles stops growing.
@@ -362,6 +363,16 @@ const MISE = runner(
   "-c -j --allow-env --allow-net --allow-read --allow-unix --allow-write --command --jobs --secrets",
   { script: "-c --command", tools: true },
 )
+// watch, from procps-ng's watch(1) and watch.c's getopt string (`+bCcefd::ghq:n:prs:twvx`), reruns its words past its options joined into one `sh -c` line, or as its program's own words after -x (WATCH_EXEC)
+const WATCH = runner(
+  "-b -C -c -d -e -f -g -h -p -r -t -v -w -x --beep --chgexit --color --differences --errexit --exec --follow --help --no-color --no-rerun --no-title --no-wrap --precise --version",
+  "-n -q -s --equexit --interval --shotsdir",
+  { always: true },
+)
+// in a cluster, -d takes the rest as its optional value, so an x counts only before any d (`-xd` execs, `-dx` diffs)
+const WATCH_EXEC = /^(?:--exec|-[bCcefghprtvw]*x[bCcefghprtvwx]*(?:d.*)?)$/
+// a cluster whose flags reach a d, which ends it: no letter after the d takes the next word
+const WATCH_DIFF = /^-[bCcefghprtvwx]*d/
 const BUN_FLAGS =
   "-b -i --bun --check --hot --if-present --no-clear-screen --no-exit-on-error --no-install --no-orphans --parallel --sequential --silent --smol --watch --workspaces"
 const BUN_VALUES =
@@ -388,6 +399,7 @@ export const RUNNERS = new Map<string, Runner>([
   ["pnpm exec", runner(PNPM_FLAGS, PNPM_VALUES, { folder: "-C --dir", joined: "-c --shell-mode" })],
   ["pnpx", PNPM_DLX],
   ["volta run", runner("--bundled-npm --no-yarn --quiet --verbose", "--env --node --npm --yarn")],
+  ["watch", WATCH],
   ["yarn dlx", runner("-q --quiet", "-p --package", { spec: true })],
   ["yarn exec", runner("", "", { always: true })],
 ])
@@ -970,16 +982,32 @@ const QUOTED_ONE_WORD =
   /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/
 // The script names a shell or a source reads stdin through
 const STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"])
-// An absolute path with its `.` segments and doubled slashes read past, as the kernel reads them; a `..` stays, since it climbs from wherever a link leads
-export const plainPath = (value: string) =>
+// An absolute path with its `.` segments, doubled slashes and a trailing slash read past; a `..` stays, since it climbs from wherever a link leads
+const plainPath = (value: string) =>
   value.startsWith("/")
     ? `/${value
         .split("/")
         .filter((s) => s && s !== ".")
         .join("/")}`
     : value
-// Whether a word names stdin, spelled plainly or through ./ hops and doubled slashes
-const stdinPath = (value: string) => STDIN_PATHS.has(plainPath(value))
+// Whether a word names stdin, spelled plainly or through ./ hops and doubled slashes, a relative path read from each folder the command may run in, both as a logical cd folds its `..` and by its real path (a link or a hop to the root is the root), or from the root where the reader can place none
+export const stdinPath = (value: string, env?: Env): boolean => {
+  if (STDIN_PATHS.has(plainPath(value))) return true
+  if (!env || value.startsWith("/") || marked(value)) return false
+  const folders = places(env).flatMap((e) => (e.cwd === undefined ? [] : [e.cwd]))
+  return (folders.length > 0 ? folders : ["/"]).some((dir) =>
+    [realFolder(dir), realFolder(resolve(dir))].some((at) =>
+      STDIN_PATHS.has(plainPath(`${at}/${value}`)),
+    ),
+  )
+}
+const realFolder = (dir: string): string => {
+  try {
+    return realpathSync.native(dir)
+  } catch {
+    return dir
+  }
+}
 export const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 export const PRINTERS = new Set(["echo", "printf"])
 // Every git-reading hook's one list of the words git 2.56 steps over before its subcommand: each option that takes the next word as its value, and --exec-path, which takes none but whose bare form prints git's folder and exits, so the word after it never runs.
@@ -1994,14 +2022,16 @@ function mktempPath(cmd: Command, known: Record<string, string>): string | undef
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`
 }
 
-// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from its input. GNU's input options: `files` holds each file -a or --arg-file reads in place of stdin, with env -C's folder word before xargs (`chdir`) and whether a privilege wrapper before it may move the folder or the root (`moved`), and `delimiters` each string -d, --delimiter, -0 or --null splits the input at, undefined for an escape the reader cannot decode.
+// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from its input. `appends` marks a BSD -J string, after which xargs appends its input to the words when no word is that string, and `wrapped` a wrapper after an xargs with no replace string or a -J one that is given no program word (`xargs nohup`), whose program is xargs' input words. GNU's input options: `files` holds each file -a or --arg-file reads in place of stdin, with env -C's folder word before xargs (`chdir`) and whether a privilege wrapper before it may move the folder or the root (`moved`), and `delimiters` each string -d, --delimiter, -0 or --null splits the input at, undefined for an escape the reader cannot decode.
 export type Xargs =
   | {
+      appends?: boolean
       delimiters?: (string | undefined)[]
       files?: { chdir?: Word; file: Word; moved?: boolean }[]
       filled?: [Word, string][]
       outer?: string[]
       replace?: string
+      wrapped?: boolean
     }
   | undefined
 
@@ -2087,8 +2117,10 @@ function xargsOption(
   }
   if (name === "i" || name === "replace") xargs.replace = value?.value || "{}"
   else if (name === "null") split("\0")
-  else if (name === "I" || name === "J") xargs.replace = (value ?? next)?.value
-  else if (name === "a" || name === "arg-file")
+  else if (name === "I" || name === "J") {
+    xargs.replace = (value ?? next)?.value
+    xargs.appends = name === "J"
+  } else if (name === "a" || name === "arg-file")
     xargs.files = [
       ...(xargs.files ?? []),
       ...[value ?? next]
@@ -2162,6 +2194,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
   }
   // a spec runner's program word is a package name, read as the program it names
   let spec = false
+  let last = inside
   for (let wrapper = inside; ; wrapper = undefined) {
     if (!wrapper) {
       const word = peek()
@@ -2181,6 +2214,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         state.xargs = { ...state.xargs, outer: [...(state.xargs.outer ?? []), state.xargs.replace] }
       if (wrapper === "xargs") state.xargs ??= {}
       take()
+      last = wrapper
     }
     const runs = RUNNERS.get(wrapper)
     const options = (WRAPPERS.get(wrapper) ?? runs) as Options
@@ -2192,6 +2226,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
       const folder = runs && namedOption(v, runs, runs.folder)
       if (wrapper === "xargs") xargsOption((state.xargs ??= {}), w, next(), state)
       if (runs && runs.joined !== true && joinsWords(v, runs.joined)) joined = true
+      if (wrapper === "watch" && WATCH_EXEC.test(v)) joined = false
       if (ASSIGN.test(v)) assign(local, take() as Word)
       // env -S splits its one string into the words it runs
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -2215,6 +2250,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         take()
         state.xargs ??= {}
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
+        state.xargs.appends = v.startsWith("-J")
       } else if (wrapper === "env" && v === "-") {
         // a lone `-` is env's -i, and BSD env reads its options on after it
         take()
@@ -2233,9 +2269,9 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         while (ASSIGN.test(peek()?.value ?? "")) assign(local, take() as Word)
         break
       } else if (v.startsWith("-") && v !== "-") {
-        // nice's own -<number> is its adjustment
+        // nice's own -<number> is its adjustment, and watch's -d takes the rest of its cluster as its value
         const end =
-          wrapper === "nice" && /^-\d+$/.test(v)
+          (wrapper === "nice" && /^-\d+$/.test(v)) || (wrapper === "watch" && WATCH_DIFF.test(v))
             ? "own"
             : marked(v)
               ? undefined
@@ -2246,7 +2282,12 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
           fork(wrapper, 3)
         }
         rest.length = Math.max(0, rest.length - (end === "next" ? 2 : 1))
-      } else if (runs?.tools && rest.some((r) => r.value === "--")) take()
+      } else if (
+        runs?.tools &&
+        rest.some((r) => r.value === "--" || namedOption(r.value, runs, runs.script) !== undefined)
+      )
+        // a tool name sits before mise's -- or its command option, wherever that option falls
+        take()
       else break
     }
     // pnpm's shell mode and yarn exec run the words left joined by spaces as one shell script
@@ -2260,16 +2301,25 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
     }
     if (COUNTED.has(wrapper)) take()
     if (wrapper === "chrt" && /^\d+$/.test(peek()?.value ?? "")) take()
-    // flock's -c or --command after its file runs the next word in a shell
-    if (wrapper === "flock" && FLOCK_SCRIPT.has(peek()?.value ?? "")) {
-      take()
-      const text = take()
+    // flock's -c or --command after its file runs the next word in a shell, or its text attached (`-cX`, `--command=X`), read the same though util-linux takes only the bare word
+    const lock = wrapper === "flock" ? FLOCK_ATTACHED.exec(peek()?.value ?? "") : null
+    if (lock) {
+      const w = take() as Word
+      const text = lock[1] ? slice(w, w.value.length - lock[1].length) : take()
       if (text) rest.push(text, ...SH_C)
     }
     // zsh's `repeat N do … done` and `repeat N { … }` run their body's first command after the do or the brace
     if (wrapper === "repeat" && REPEAT_BODY.has(peek()?.value ?? "") && !peek()?.quoted) take()
   }
   const typed = take()
+  if (
+    !typed &&
+    state.xargs &&
+    (!state.xargs.replace || state.xargs.appends) &&
+    last &&
+    last !== "xargs"
+  )
+    state.xargs = { ...state.xargs, wrapped: true }
   const first = spec && typed ? packageName(typed) : typed
   const parsed: Parsed = {
     also,
@@ -2290,7 +2340,7 @@ const SH_C: Word[] = [
   { quoted: false, value: "-c" },
   { quoted: false, value: "sh" },
 ]
-const FLOCK_SCRIPT = new Set(["-c", "--command"])
+const FLOCK_ATTACHED = /^(?:-c|--command(?:=|$))([\s\S]*)$/
 
 // Where a runner's option word names one of `names`, an option that takes a value: the offset of its value attached (`--call=x`, `-cx`), -1 for a value in the next word, or undefined for an option word naming none of them
 function namedOption(v: string, { values }: Options, names: Set<string>): number | undefined {
@@ -2382,7 +2432,8 @@ function viaRunner(parsed: Parsed, state: State, budget: Budget): Parsed | undef
     key,
     budget,
   )
-  if (!reading.first) return
+  // a runner xargs gives no program word (`xargs watch`) runs xargs' input words, which xargsFilled reads from the wrapped mark this reading carries
+  if (!reading.first) return reading.xargs?.wrapped ? { ...reading, via: key } : undefined
   const file = reading.first.value
   if (key === "bun run" && (file.includes("/") || SCRIPT_FILE.test(file))) return
   if (key === "deno run" && words.includes(reading.first)) return
@@ -2856,6 +2907,69 @@ export function braceRun(cmd: Command, first: Word | undefined): Command | null 
   return { ...cmd, words: cmd.words.flatMap((w) => (w === first ? words : [w])) }
 }
 
+// The values a word holding a brace list or sequence the shell sees expands to (`hook{s,x}`, `pre-commi{t..t}`), its quotes removed, as a write target reads them; null when the reader cannot expand it (an expansion in the word, past BRACE_WORDS), and undefined for a word with none
+export function braceValues(word: Word): string[] | null | undefined {
+  if (word.unknown !== BRACE) return
+  const source = (word.source ?? "").replace(/\\\n/g, "")
+  if (/[$`]/.test(source)) return null
+  const masked = source.replace(QUOTED, (part) => part.replace(/[{,}()]/g, hide))
+  const expanded = braceSequences(masked)
+  if (!expanded) return null
+  const values: string[] = []
+  for (const each of expanded) {
+    const { commands } = lex(unhide(each))
+    const words = commands[0]?.words ?? []
+    if (commands.length > 1 || words.length !== 1 || marked(words[0].value)) return null
+    values.push(words[0].value)
+  }
+  return values.length > 0 ? values : null
+}
+
+// A brace sequence bash and zsh expand: two integers or two single letters, and an optional step
+const BRACE_SEQUENCE = /\{(-?\d+|[A-Za-z])\.\.(-?\d+|[A-Za-z])(?:\.\.(-?\d+))?\}/
+
+// The words a word's brace lists and sequences expand to (braceWords, then each sequence's terms, an integer one padded to its widest zero-led end), or undefined past BRACE_WORDS
+function braceSequences(word: string): string[] | undefined {
+  const done: string[] = []
+  const todo = [word]
+  while (todo.length > 0) {
+    const lists = braceWords(todo.pop()!)
+    if (!lists || done.length + todo.length + lists.length > BRACE_WORDS) return undefined
+    for (const each of lists) {
+      const found = BRACE_SEQUENCE.exec(each)
+      if (!found) {
+        done.push(each)
+        continue
+      }
+      const [whole, from, to, by] = found
+      const numeric = /\d/.test(from) && /\d/.test(to)
+      if (!numeric && (/\d/.test(from) || /\d/.test(to))) {
+        done.push(each)
+        continue
+      }
+      const start = numeric ? Number(from) : from.charCodeAt(0)
+      const end = numeric ? Number(to) : to.charCodeAt(0)
+      const step = Math.abs(Number(by ?? 1)) || 1
+      if (Math.abs(end - start) / step + 1 > BRACE_WORDS) return undefined
+      const width =
+        numeric && [from, to].some((end) => /^-?0\d/.test(end))
+          ? Math.max(from.length, to.length)
+          : 0
+      const padded = (n: number) =>
+        width
+          ? `${n < 0 ? "-" : ""}${String(Math.abs(n)).padStart(width - (n < 0 ? 1 : 0), "0")}`
+          : String(n)
+      for (let n = start; start <= end ? n <= end : n >= end; n += start <= end ? step : -step)
+        todo.push(
+          each.slice(0, found.index) +
+            (numeric ? padded(n) : String.fromCharCode(n)) +
+            each.slice(found.index + whole.length),
+        )
+    }
+  }
+  return done
+}
+
 // A quoted part of a word, or a character after a backslash, whose braces and commas the shell's brace expansion leaves as text
 const QUOTED = /'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]/g
 
@@ -3154,7 +3268,11 @@ export async function examine(
     ...resolving,
     ...prior,
     ...vanished,
-    ...(await xargsFilled(cmd, [primary, ...others], env)),
+    ...(await xargsFilled(
+      cmd,
+      [primary, ...others].map((p) => p.xargs),
+      env,
+    )),
   ]
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env
@@ -3245,7 +3363,7 @@ function stdinScript({ args, name }: Parsed): boolean {
 }
 
 // The text GNU xargs' -a reads in place of stdin: a process substitution's output, else the file, which readPath reads only when it is a regular file within MAX_BYTES, so any other reads as unread; a relative path from env -C's folder before xargs, as examineReading's `here` reads it, and any file as unread after a privilege wrapper, which may move the folder or the root
-async function argFile(
+export async function argFile(
   { chdir, file, moved }: NonNullable<NonNullable<Xargs>["files"]>[number],
   cmd: Command,
   env: Env,
@@ -3266,13 +3384,13 @@ const itemsOf = (fed: Text, split: string | null | undefined): string[] | undefi
   return [fed.value, ...fed.value.split(split)]
 }
 
-// The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J) or an outer xargs' one, which xargs fills from its input, so it runs a program no typed word names: each such word filled with each text itemsOf reads from stdin and from each file GNU's -a names (stdin's name aside, which stdin's reading covers), split by default and at each -d or -0 delimiter, a text holding a quote or a backslash with them stripped, as xargs strips them, and split at blanks into the words xargs runs; or unread when the hook cannot read an input or decode a delimiter, one input's split holds more texts than READINGS, or a text holds a quote or a backslash, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
-async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Command[]> {
+// The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J) or an outer xargs' one, or whose wrapper after xargs is given no program word (`xargs nohup`, its input words appended as that program), which xargs fills from its input, so it runs a program no typed word names: each such word filled with each text itemsOf reads from stdin and from each file GNU's -a names (stdin's name aside, which stdin's reading covers), split by default and at each -d or -0 delimiter, a text holding a quote or a backslash with them stripped, as xargs strips them, and split at blanks into the words xargs runs; or unread when the hook cannot read an input or decode a delimiter, one input's split holds more texts than READINGS, or a text holds a quote or a backslash, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
+async function xargsFilled(cmd: Command, xargs: Xargs[], env: Env): Promise<Command[]> {
   const filled = new Map<Word, string[]>()
-  for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
+  for (const [word, replace] of xargs.flatMap((x) => x?.filled ?? []))
     filled.set(word, [...new Set([...(filled.get(word) ?? []), replace])])
-  if (filled.size === 0) return []
-  const xargs = parsed.map((p) => p.xargs)
+  const wrapped = xargs.some((x) => x?.wrapped)
+  if (filled.size === 0 && !wrapped) return []
   const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !stdinPath(f.file.value))
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))]
   const inputs = [
@@ -3288,21 +3406,42 @@ async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Co
     else for (const text of items) texts.add(text)
     if (raw?.some((text) => /["'\\]/.test(text))) texts.add(undefined)
   }
+  const wordsOf = (value: string): Word[] =>
+    value
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((value) => ({ quoted: false, value }))
   const fill = (text: string | undefined) => ({
     ...cmd,
-    words: cmd.words.flatMap((w): Word[] => {
-      const held = filled.get(w)
-      if (!held) return [w]
-      if (text === undefined)
-        return [{ ...w, ...unknown(`the program xargs puts in place of ${held.join(" or ")}`) }]
-      return held
-        .reduce((value, replace) => value.replaceAll(replace, text), w.value)
-        .split(/\s+/)
-        .filter(Boolean)
-        .map((value) => ({ quoted: false, value }))
-    }),
+    words: [
+      ...cmd.words.flatMap((w): Word[] => {
+        const held = filled.get(w)
+        if (!held) return [w]
+        if (text === undefined)
+          return [{ ...w, ...unknown(`the program xargs puts in place of ${held.join(" or ")}`) }]
+        return wordsOf(
+          held.reduce((value, replace) => value.replaceAll(replace, () => text), w.value),
+        )
+      }),
+      ...(!wrapped
+        ? []
+        : text === undefined
+          ? [{ quoted: false, ...unknown("the program xargs hands its wrapper") }]
+          : wordsOf(text)),
+    ],
   })
   return [...texts].map(fill)
+}
+
+// The commands xargs hands run-slot.sh's slot, read as xargsFilled reads a wrapper's program: each slot word holding xargs' replace string or an outer one filled from its input, and with no replace string, or a -J one no word is, the input's words appended, so a guard judges each beside the typed slot.
+export function slotFilled(slot: Command, xargs: NonNullable<Xargs>, env: Env): Promise<Command[]> {
+  const held = [xargs.replace, ...(xargs.outer ?? [])].filter((r): r is string => !!r)
+  const filled = slot.words.flatMap((w) =>
+    held.filter((r) => w.value.includes(r)).map((r): [Word, string] => [w, r]),
+  )
+  const wrapped =
+    !xargs.replace || (!!xargs.appends && !slot.words.some((w) => w.value === xargs.replace))
+  return xargsFilled(slot, [{ ...xargs, filled, wrapped }], env)
 }
 
 const BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line"
@@ -3605,7 +3744,7 @@ async function examineReading(
       (await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs)))
   else if (
     (name === "source" || name === ".") &&
-    (args[0]?.procs || stdinPath(args[0]?.value ?? ""))
+    (args[0]?.procs || stdinPath(args[0]?.value ?? "", here))
   ) {
     const scripts = await scriptOf(args[0], cmd, here)
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined
@@ -4053,12 +4192,23 @@ async function shell(
   if (noExec(args, name)) return
   const { inline, operand } = shellOperand(args, name)
   if (operand && inline) {
-    let script = operand.value
-    if (xargs?.replace && script.includes(xargs.replace)) {
-      const fed = await stdinOf(cmd, env)
-      script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
+    const script = operand.value
+    if (!xargs?.replace || !script.includes(xargs.replace))
+      return run(lexScript(script, env), subshell(env), visit, builtins)
+    // the script is filled with each text itemsOf reads from stdin, so an item -0 or -d splits off runs as xargs runs it (`printf 'x\0pkill node'`)
+    const fed = await stdinOf(cmd, env)
+    const texts = new Set<string>()
+    for (const split of [null, ...(xargs.delimiters ?? [])]) {
+      const items = itemsOf(fed, split)
+      if (!items || items.length > READINGS) texts.add(UNKNOWN)
+      else for (const text of items) if (text.trim()) texts.add(text.trim())
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins)
+    for (const text of texts.size > 0 ? texts : [""]) {
+      const lexed = lexScript(filled(script, xargs.replace, text), env)
+      const verdict = await run(lexed, subshell(env), visit, builtins)
+      if (verdict) return verdict
+    }
+    return
   }
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script)
@@ -4073,7 +4223,7 @@ export const known = (script: Text): string => script.value.replaceAll(UNKNOWN, 
 // A shell's or source's scripts: stdin's readings with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
 async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text[]> {
   const scripts =
-    !operand || stdinPath(operand.value)
+    !operand || stdinPath(operand.value, env)
       ? await scriptStdin(cmd, env)
       : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")]
   if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))

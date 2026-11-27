@@ -108,6 +108,30 @@ row = next((a for a in agents if isinstance(a, dict) and a.get("name") == sys.ar
 sys.exit(0 if row.get("worker") == sys.argv[2] else 1)
 PY
 }
+# the session run-slot.focus names while it stands (playground focus); nothing, exit 1, when it does not, goes between the check and the read (issue 1491) or names no live session (focus_live)
+focus_holder() {
+  switch_on run-slot.focus || return 1
+  local h= why=
+  read -r h _ _ why 2>/dev/null < "$OPS/run-slot.focus"
+  [ -n "$h" ] && focus_live "$h" "$why" && printf '%s\n' "$h"
+}
+# whether focus on session $1, set with reason $2, names a live session, so a focus no session holds leaves the lanes to the queue (issue 3184): firefighting while the urgent guard's own hold reason stands, as the owner's stand-in, else a roster row by that name at a status roster-statuses.json lists as live; a roster or list that does not read keeps the hold
+focus_live() {
+  case "$1 $2" in "firefighting Ops firefighting hold: "*) return 0 ;; esac
+  python3 -I - "$1" "$SELF" <<'PY'
+import json, os, sys
+
+data = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
+try:
+    with open(os.path.join(os.path.dirname(os.path.realpath(sys.argv[2])), "..", "roster-statuses.json")) as f:
+        live = json.load(f)["live"]
+    with open(os.path.join(data, "roster.json")) as f:
+        rows = [a for a in json.load(f)["agents"] if isinstance(a, dict) and a.get("name") == sys.argv[1]]
+except (OSError, ValueError, KeyError, TypeError):
+    sys.exit(0)
+sys.exit(0 if any(a.get("status") in live for a in rows) else 1)
+PY
+}
 # whether slot directory $1, whose holder line is $2, is stale: its pid has died, or a line with no pid (or no line, read by the directory's
 # own mtime) has aged 2 hours; a run killed between free()'s rm of its holder and its rmdir leaves a directory with no line
 stale() {
@@ -266,6 +290,43 @@ if [ "${1:-}" = window ]; then
   printf '%s\n' "$WIN_SESSION"
   exit 0
 fi
+# ORG_WIN, 1 while an org job's window stands, else 0, and ORG_WIN_AT, the epoch second it next turns (empty when it never does), read once and again only once the clock passes that second: the jobs.json row slots.windowJob names, while it is not disabled, stands inside its config.hours ("HH:MM-HH:MM" in UTC, past midnight wrapping, none for all day) on a UTC date its daysOff omits, the start job's own inWindow test, and no row stands while the setting is empty, so an org's runs go first in its hours (the dispatcher, 27 Nov)
+ORG_PY='import datetime as dt, json, re, sys
+
+try:
+    rows = json.load(open(sys.argv[1])).get("jobs", [])
+except (OSError, ValueError, AttributeError):
+    rows = []
+row = next((r for r in rows if isinstance(r, dict) and r.get("name") == sys.argv[2]), None) if sys.argv[2] and isinstance(rows, list) else None
+c = row.get("config") if row and row.get("disabled") is not True else None
+hours = c.get("hours", "") if isinstance(c, dict) else None
+m = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)", hours) if isinstance(hours, str) and hours else None
+if m is None and hours != "":
+    print(0)
+    sys.exit()
+fh, fm, th, tm = [int(g) for g in m.groups()] if m else (0, 0, 0, 0)
+off = c.get("daysOff")
+off = {d for d in off if isinstance(d, str)} if isinstance(off, list) else set()
+def inside(t):
+    hm, a, b = t.hour * 60 + t.minute, fh * 60 + fm, th * 60 + tm
+    return t.strftime("%Y-%m-%d") not in off and (not m or (a <= hm < b if a <= b else hm >= a or hm < b))
+now = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
+state = inside(now)
+day = now.replace(hour=0, minute=0)
+turns = sorted({day + dt.timedelta(days=d, hours=h, minutes=n) for d in range(9) for h, n in ((0, 0), (fh, fm), (th, tm))})
+print(int(state), next((int(t.timestamp()) for t in turns if t > now and inside(t) != state), ""))
+'
+ORG_WIN= ORG_WIN_AT=
+org_window() {
+  local job
+  [ -n "$ORG_WIN" ] && { [ -z "$ORG_WIN_AT" ] || [ $((T0 + SECONDS)) -lt "$ORG_WIN_AT" ]; } && { [ "$ORG_WIN" = 1 ]; return; }
+  job=$(setting slots.windowJob 2>/dev/null | tr -d '"')
+  ORG_WIN=0 ORG_WIN_AT=
+  [ -n "$job" ] && read -r ORG_WIN ORG_WIN_AT <<< "$(python3 -I -c "$ORG_PY" "$PDATA/ops/jobs.json" "$job" 2>/dev/null)"
+  [ "$ORG_WIN" = 1 ] || { ORG_WIN=0; return 1; }
+}
+# run-slot.sh org-window: exit 0 while an org job's window stands (org_window), so spawn.sh's start in an org's checkout reads the hours the lanes do
+if [ "${1:-}" = org-window ]; then org_window; exit; fi
 # run-slot.sh box-off: print, one word a line, each precondition of the runner-box route (below) that fails, for ops-sweep's box-route-off finding, since a run otherwise falls back to this Mac without a word; nothing when the route can fire
 if [ "${1:-}" = box-off ]; then
   [ -x "$OPS/runner-host/ci.sh" ] || echo no-ci-sh
@@ -306,9 +367,7 @@ fi
 # run-slot.sh preempt: while run-slot.focus stands, TERM the process group of each <slot>.child that focus does not spare, only while it is still its holder's child leading its own group, so an urgent ticket's fix goes first (scripts/ops/README.md)
 if [ "${1:-}" = preempt ]; then
   [ $# -eq 1 ] || { echo "usage: run-slot.sh preempt" >&2; exit 2; }
-  h=
-  switch_on run-slot.focus && read -r h _ 2>/dev/null < "$OPS/run-slot.focus"
-  [ -n "$h" ] || { echo "run-slot.sh: no focus stands (run-slot.focus), so preempt stops nothing" >&2; exit 2; }
+  h=$(focus_holder) || { echo "run-slot.sh: no focus stands (run-slot.focus) for a live session, so preempt stops nothing" >&2; exit 2; }
   for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-commit run-slot-clone run-slot-quick $(ls "$OPS" 2>/dev/null | sed -n 's/^\(run-slot-model-[0-9]*\)\.holder$/\1/p' | sort -u); do
     [ -f "$OPS/$s.holder" ] && read -r who pid _ < "$OPS/$s.holder" || continue
     child=$(cat "$OPS/$s.child" 2>/dev/null)
@@ -1688,6 +1747,9 @@ due_at() {
   # the load5 hold's ceiling for slots 2 to 4 (load5_held)
   oldest_asked; e=$((OLDEST + LOAD_WAIT))
   [ "$e" -gt "$now" ] && { [ -z "$d" ] || [ "$e" -lt "$d" ]; } && d=$e
+  # an org job's window opening or closing (org_window)
+  e=${ORG_WIN_AT:-0}
+  [ "$e" -gt "$now" ] && { [ -z "$d" ] || [ "$e" -lt "$d" ]; } && d=$e
   for f in $SWITCHES; do
     [ -e "$OPS/$f" ] || continue
     switch_ends "$f"
@@ -1810,13 +1872,6 @@ window_holder() {
     session_waiting "$WIN_SESSION" && best=$WIN_SESSION bs=$WIN_SINCE
   done
   [ -n "$best" ] && printf '%s\n' "$best"
-}
-# the session run-slot.focus names while it stands (playground focus); nothing, exit 1, when it does not or goes between the check and the read (issue 1491)
-focus_holder() {
-  switch_on run-slot.focus || return 1
-  local h=
-  read -r h _ 2>/dev/null < "$OPS/run-slot.focus"
-  [ -n "$h" ] && printf '%s\n' "$h"
 }
 # true while focus holds this run: a heavy lane waits for every session but the focus one and ops' upkeep (ops-tick's beats, the dashboard), which keep running (dispatcher, 5 Nov); FOCUS_HOLDER keeps the name it read, so can-take prints the holder that held (issue 1647)
 focus_holds() {
@@ -2240,7 +2295,15 @@ unit_fits() {
   may_reserve "$1" "$3" "$4" "$r" m ${9+"$9"}
   # the walk's lane units pass through empty, so held_for reads its own only when it needs one, and a call that names none keeps its old cost (issue 1818)
   held_for "$m" "${6:-}" "${7:-0}" h "${8:-}"
-  fits "$h" "$2" $((c - m))
+  fits "$h" "$2" $((c - m)) && org_lane "$1" "$c"
+}
+# whether a run of rank $1 leaves an org's run its lane within capacity $2: while an org job's window stands (org_window), a run that is not an org's (rank 1x) takes a CPU lane only while another open one stays free after it, so an org's run can always start (the dispatcher, 27 Nov: three firefighting runs waited while three medium Playground runs held load5 at 18 to 24)
+org_lane() {
+  local s n=0
+  case "$1" in 1?) return 0 ;; esac
+  org_window || return 0
+  for s in run-slot run-slot-2 run-slot-3 run-slot-4; do [ -d "$OPS/$s" ] && n=$((n + 1)); done
+  [ $(($2 / 2 - n)) -ge 2 ]
 }
 # whether a run of $2 units fits beside $1 held within a limit of $3; any run fits while no slot is held, so a big run still starts on a quiet machine
 fits() { [ "$1" -eq 0 ] || [ $(($1 + $2)) -le "$3" ]; }
@@ -2628,6 +2691,8 @@ fi
 
 # slots.peers, one folder a line, read once here since held_units runs in a subshell; a reader that cannot answer counts no peer
 PEERS=$(setting slots.peers 2>/dev/null | python3 -I -c 'import json, sys; [print(p) for p in json.load(sys.stdin) if isinstance(p, str)]' 2>/dev/null)
+# read here, in the main shell, so every walk's subshell inherits the window and reads it again only at its turn
+org_window || :
 [ -n "$HEAD_ONLY" ] && { first_waiter; exit 0; }
 [ -n "$SLOTS_ONLY" ] && { echo $(($(capacity) / 2)); exit 0; }
 if [ -n "$ROOM_ONLY" ]; then

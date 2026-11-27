@@ -5,12 +5,18 @@ import { join } from "node:path"
 
 import {
   BOT_ROUTE,
+  decisionArg,
+  decisionSource,
+  namesDecision,
   type Launch,
   launchAbove,
   opsLaunch,
   type Project,
+  prSource,
   schemaChanges,
+  type SchemaSource,
   shipYard,
+  subjectPr,
   type YardArgs,
   type YardIo,
 } from "../../../../../packages/scripts/src/ship/yard"
@@ -19,11 +25,16 @@ import type { Proc } from "../../../../../scripts/hooks/session-state"
 const HOSTS = { api: "https://api.yard.example.com", web: "https://yard.example.com" }
 
 type Fake = {
+  bodies?: Record<number, string>
   changed?: string[]
   deploys?: Partial<Record<Project, boolean>>
+  files?: Record<string, string[] | null>
+  inRange?: (sha: string) => boolean
   launch?: Launch
   record?: string
+  schemaCleared?: (value: string) => Promise<SchemaSource | null>
   statuses?: Record<string, number>
+  touching?: Record<string, string[]>
 }
 
 // Every vercel call, network read and git read stubbed: the io logs each call in order, and answers as the case sets it.
@@ -47,10 +58,14 @@ const fake = (set: Fake = {}) => {
     fetch: async (tags) => {
       calls.push(`fetch ${tags.join(" ")}`)
     },
+    files: async (sha) => set.files?.[sha] ?? null,
+    inRange: async (sha) => set.inRange?.(sha) ?? true,
     launch: async () =>
       set.launch ?? { found: "the Ops lead's claude process", kind: "ops", role: "lead" },
     out: (line) => lines.push(line),
+    prBody: async (pr) => set.bodies?.[pr] ?? null,
     readRecord: async () => record,
+    schemaCleared: async (value) => set.schemaCleared?.(value) ?? Promise.resolve(null),
     status: async (url) => {
       calls.push(`status ${url}`)
       return (
@@ -58,6 +73,7 @@ const fake = (set: Fake = {}) => {
         (url.endsWith("/api/health") ? 200 : url.endsWith(BOT_ROUTE) ? 401 : 0)
       )
     },
+    touching: async (file) => set.touching?.[file] ?? [],
     worktree: async (tag) => {
       calls.push(`worktree ${tag}`)
       return `/wt/${tag}`
@@ -151,13 +167,301 @@ describe("ship:yard's schema stop", () => {
     expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
   })
 
-  test("--schema-cleared naming the decision lets the step go on", async () => {
+  test("--schema-cleared #iN, the owner's approved decision, clears the schema", async () => {
     const { calls, code } = await run(
-      { schemaCleared: "i123" },
-      { changed: SCHEMA, record: "v0.0.110" },
+      { schemaCleared: ["#i123"] },
+      {
+        changed: SCHEMA,
+        record: "v0.0.110",
+        schemaCleared: async (value) =>
+          value === "#i123"
+            ? { approved: true, kind: "decision", schema: true }
+            : Promise.resolve(null),
+        bodies: { 41: "the owner's go: #i123" },
+        touching: { "packages/db/drizzle/0017_yard_more.sql": ["feat: yard more (#41)"] },
+      },
     )
     expect(code).toBe(0)
     expect(calls).toContain("record v0.0.111")
+  })
+
+  test("--schema-cleared #iN, an open or denied decision, refuses", async () => {
+    const { calls, code, out } = await run(
+      { schemaCleared: ["#i123"] },
+      {
+        changed: SCHEMA,
+        record: "v0.0.110",
+        schemaCleared: async (value) =>
+          value === "#i123"
+            ? { approved: false, kind: "decision", schema: true }
+            : Promise.resolve(null),
+      },
+    )
+    expect(code).not.toBe(0)
+    expect(out()).toContain("#i123 is not an approved Inbox decision")
+    expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+  })
+
+  test("--schema-cleared a merged PR with a shape review and a dump path clears the schema", async () => {
+    const { calls, code } = await run(
+      { schemaCleared: ["PR#456"] },
+      {
+        changed: SCHEMA,
+        record: "v0.0.110",
+        schemaCleared: async (value) =>
+          value === "PR#456"
+            ? {
+                dumpPath: "db.dump",
+                kind: "pr",
+                merged: true,
+                mergeSha: "aaa111",
+                shapeReview: true,
+              }
+            : Promise.resolve(null),
+        files: { aaa111: SCHEMA },
+      },
+    )
+    expect(code).toBe(0)
+    expect(calls).toContain("record v0.0.111")
+  })
+
+  test("--schema-cleared a PR missing the merge, the review, or the dump refuses", async () => {
+    for (const source of [
+      { dumpPath: "db.dump", kind: "pr", merged: false, shapeReview: true },
+      { dumpPath: "db.dump", kind: "pr", merged: true, shapeReview: false },
+      { dumpPath: undefined, kind: "pr", merged: true, shapeReview: true },
+    ] as SchemaSource[]) {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["PR#456"] },
+        {
+          changed: SCHEMA,
+          record: "v0.0.110",
+          schemaCleared: () => Promise.resolve(source),
+        },
+      )
+      expect(code).not.toBe(0)
+      expect(out()).toContain("PR#456 does not clear the schema")
+      expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+    }
+  })
+
+  test("--schema-cleared a free string refuses, naming both valid forms", async () => {
+    const { calls, code, out } = await run(
+      { schemaCleared: ["i123"] },
+      { changed: SCHEMA, record: "v0.0.110", schemaCleared: () => Promise.resolve(null) },
+    )
+    expect(code).not.toBe(0)
+    expect(out()).toContain("one of two forms: '#iN'")
+    expect(out()).toContain("PR#N")
+    expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+  })
+
+  test("--schema-cleared a valid form the source cannot read refuses, so the step fails closed", async () => {
+    const { calls, code, out } = await run(
+      { schemaCleared: ["#i123"] },
+      { changed: SCHEMA, record: "v0.0.110", schemaCleared: () => Promise.resolve(null) },
+    )
+    expect(code).not.toBe(0)
+    expect(out()).toContain("#i123 is not readable")
+    expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+  })
+
+  describe("its source covers the migrations the ship carries", () => {
+    const MIGRATIONS = ["packages/db/drizzle/0020_alpha.sql", "packages/db/drizzle/0021_beta.sql"]
+    const CHANGED = [
+      "packages/db/src/schema/yard.ts",
+      ...MIGRATIONS,
+      "packages/db/drizzle/meta/_journal.json",
+    ]
+    const merged = (mergeSha: string): SchemaSource => ({
+      dumpPath: "~/d.dump",
+      kind: "pr",
+      merged: true,
+      mergeSha,
+      shapeReview: true,
+    })
+    const refused = (calls: string[], code: number) => {
+      expect(code).not.toBe(0)
+      expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+    }
+
+    test("a PR#N merged in the tag's range whose diff holds every migration clears it", async () => {
+      const { calls, code } = await run(
+        { schemaCleared: ["PR#7"] },
+        {
+          changed: CHANGED,
+          files: { aaa111: [...MIGRATIONS, "packages/db/drizzle/meta/_journal.json"] },
+          record: "v0.0.110",
+          schemaCleared: async () => merged("aaa111"),
+        },
+      )
+      expect(code).toBe(0)
+      expect(calls).toContain("record v0.0.111")
+    })
+
+    test("a PR#N merged outside the tag's range refuses, though its diff holds every migration", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["PR#7"] },
+        {
+          changed: CHANGED,
+          files: { aaa111: MIGRATIONS },
+          inRange: () => false,
+          record: "v0.0.110",
+          schemaCleared: async () => merged("aaa111"),
+        },
+      )
+      refused(calls, code)
+      expect(out()).toContain("PR#7 merged outside v0.0.110..v0.0.111")
+    })
+
+    test("a PR#N whose diff misses one migration refuses, naming that one alone", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["PR#7"] },
+        {
+          changed: CHANGED,
+          files: { aaa111: [MIGRATIONS[0]!] },
+          record: "v0.0.110",
+          schemaCleared: async () => merged("aaa111"),
+        },
+      )
+      refused(calls, code)
+      const line = out()
+        .split("\n")
+        .find((l) => l.includes("does not cover"))
+      expect(line).toContain(MIGRATIONS[1])
+      expect(line).not.toContain(MIGRATIONS[0])
+    })
+
+    test("a PR#N whose merge commit is no one-parent squash, as a ship PR's merge holds the whole ship, refuses", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["PR#7"] },
+        {
+          changed: CHANGED,
+          files: { aaa111: null },
+          record: "v0.0.110",
+          schemaCleared: async () => merged("aaa111"),
+        },
+      )
+      refused(calls, code)
+      expect(out()).toContain("PR#7's merge commit is not a squash with one parent")
+    })
+
+    test("two PR#N sources that each cover one of two migrations clear it together", async () => {
+      const { calls, code } = await run(
+        { schemaCleared: ["PR#7", "PR#8"] },
+        {
+          changed: CHANGED,
+          files: { aaa111: [MIGRATIONS[0]!], bbb222: [MIGRATIONS[1]!] },
+          record: "v0.0.110",
+          schemaCleared: async (value) => merged(value === "PR#7" ? "aaa111" : "bbb222"),
+        },
+      )
+      expect(code).toBe(0)
+      expect(calls).toContain("record v0.0.111")
+    })
+
+    const schemaDecision: SchemaSource = { approved: true, kind: "decision", schema: true }
+    const carried = {
+      [MIGRATIONS[0]!]: ["feat: alpha (#41)"],
+      [MIGRATIONS[1]!]: ["feat: beta (#42)"],
+    }
+
+    test("an '#iN' named in the body of each PR that carries a migration clears it", async () => {
+      const { calls, code } = await run(
+        { schemaCleared: ["#i9"] },
+        {
+          bodies: { 41: "step 0: the owner's go, #i9", 42: "cleared by #i9." },
+          changed: CHANGED,
+          record: "v0.0.110",
+          schemaCleared: async () => schemaDecision,
+          touching: carried,
+        },
+      )
+      expect(code).toBe(0)
+      expect(calls).toContain("record v0.0.111")
+    })
+
+    test("an '#iN' that a migration's PR does not name refuses, naming that file alone", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["#i9"] },
+        {
+          bodies: { 41: "the owner's go, #i9", 42: "names #i90 alone" },
+          changed: CHANGED,
+          record: "v0.0.110",
+          schemaCleared: async () => schemaDecision,
+          touching: carried,
+        },
+      )
+      refused(calls, code)
+      const line = out()
+        .split("\n")
+        .find((l) => l.includes("does not cover"))
+      expect(line).toContain(MIGRATIONS[1])
+      expect(line).not.toContain(MIGRATIONS[0])
+    })
+
+    test("an '#iN' covers no migration whose PR's body cannot be read", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["#i9"] },
+        {
+          bodies: { 41: "#i9" },
+          changed: CHANGED,
+          record: "v0.0.110",
+          schemaCleared: async () => schemaDecision,
+          touching: carried,
+        },
+      )
+      refused(calls, code)
+      expect(out()).toContain(`still uncovered: ${MIGRATIONS[1]}`)
+    })
+
+    test("an '#iN' covers no migration a commit outside any PR added", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["#i9"] },
+        {
+          bodies: { 41: "#i9" },
+          changed: CHANGED,
+          record: "v0.0.110",
+          schemaCleared: async () => schemaDecision,
+          touching: {
+            [MIGRATIONS[0]!]: ["feat: alpha (#41)"],
+            [MIGRATIONS[1]!]: ["a direct commit"],
+          },
+        },
+      )
+      refused(calls, code)
+      expect(out()).toContain(`still uncovered: ${MIGRATIONS[1]}`)
+    })
+
+    test("an approved '#iN' that is not a schema decision refuses", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["#i9"] },
+        {
+          bodies: { 41: "#i9", 42: "#i9" },
+          changed: CHANGED,
+          record: "v0.0.110",
+          schemaCleared: async () => ({ ...schemaDecision, schema: false }),
+          touching: carried,
+        },
+      )
+      refused(calls, code)
+      expect(out()).toContain("#i9 is not a schema decision")
+    })
+
+    test("a ship whose schema diff holds no migration needs each schema file covered", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["#i9"] },
+        {
+          bodies: { 43: "a nullable column" },
+          changed: ["packages/db/src/schema/yard.ts"],
+          record: "v0.0.110",
+          schemaCleared: async () => schemaDecision,
+          touching: { "packages/db/src/schema/yard.ts": ["feat: yard (#43)"] },
+        },
+      )
+      refused(calls, code)
+      expect(out()).toContain("still uncovered: packages/db/src/schema/yard.ts")
+    })
   })
 
   test("only the schema and the migrations count", () => {
@@ -169,6 +473,188 @@ describe("ship:yard's schema stop", () => {
         ...SCHEMA,
       ]),
     ).toEqual(SCHEMA)
+  })
+})
+
+describe("ship:yard's schema source parsers", () => {
+  const DUMP = "~/.playground/scratchpad/ops/db-dump-2026-11-18/dashboard-db.dump"
+  // A made-up `gh pr view --json author,state,comments,body` read: a merged PR by "owner" whose body names DUMP, with the comments given.
+  const pr = (comments: { author: { login?: string }; body: string }[], over: object = {}) =>
+    JSON.stringify({
+      author: { login: "owner" },
+      body: `additive\n\npackages/db/drizzle/0017_x.sql, dump at ${DUMP}`,
+      comments,
+      state: "MERGED",
+      ...over,
+    })
+  const by = (login: string, body: string) => ({ author: { login }, body })
+  const cleared = { dumpPath: DUMP, kind: "pr" as const, merged: true, shapeReview: true }
+
+  test.each([
+    [
+      "a ReviewBot banner",
+      "## ReviewBot · shape review at 80cc2c2 · settle 2 findings, then generate",
+    ],
+    [
+      "a bold round 0 line",
+      "**Round 0: shape review of `a_table`** (db-migration step 0, at `a8b59ac`). Not a score.",
+    ],
+    [
+      "a plain step 0 line",
+      "Shape review (db-migration step 0) at e645f81a8: the shape is settled as additive.",
+    ],
+  ])(
+    "prSource, a merged PR whose author's shape review opens with %s, clears on the dump's path",
+    (_, first) => {
+      expect(prSource(pr([by("owner", `${first}\n\nadditive, shape settled`)]))).toEqual(cleared)
+    },
+  )
+
+  test("prSource, a merged PR naming only a packages/db migration, names no dump", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], {
+      body: "additive\n\npackages/db/drizzle/0017_x.sql",
+    })
+    expect(prSource(read)).toEqual({ ...cleared, dumpPath: undefined })
+  })
+
+  test("prSource, a dump path written `~db.dump` with no slash, names no dump", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], {
+      body: "additive, dump at ~db.dump",
+    })
+    expect(prSource(read)).toEqual({ ...cleared, dumpPath: undefined })
+  })
+
+  test("prSource, a merged PR with its author's shape review and no dump path from ~/, names no dump", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], {
+      body: "additive, the dump taken",
+    })
+    expect(prSource(read)).toEqual({ ...cleared, dumpPath: undefined })
+  })
+
+  test("prSource, a merged PR whose shape review another login posted, holds no shape review", () => {
+    expect(prSource(pr([by("outsider", "## ReviewBot · shape review at 80cc2c2")]))).toEqual({
+      ...cleared,
+      shapeReview: false,
+    })
+  })
+
+  test("prSource, a merged PR whose author's only comment is a round verdict, holds no shape review", () => {
+    const read = pr([
+      by(
+        "owner",
+        "## ReviewBot · round 1: 5/5 at 80cc2c2 · 0 blocking\n\nthe shape review is settled",
+      ),
+    ])
+    expect(prSource(read)).toEqual({ ...cleared, shapeReview: false })
+  })
+
+  test("prSource, an open PR with its author's shape review and a dump, is not merged", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], { state: "OPEN" })
+    expect(prSource(read)).toEqual({ ...cleared, merged: false })
+  })
+
+  test("prSource, a read with no author's login, no state or no comments, returns null", () => {
+    const review = [by("owner", "## ReviewBot · shape review at 80cc2c2")]
+    expect(prSource(pr(review, { author: {} }))).toBeNull()
+    expect(prSource(pr(review, { state: undefined }))).toBeNull()
+    expect(prSource(pr(review, { comments: undefined }))).toBeNull()
+    expect(prSource("not json")).toBeNull()
+  })
+
+  test("--schema-cleared a readable PR missing a part refuses, naming that part", async () => {
+    for (const [over, part] of [
+      [{ state: "OPEN" }, "it is not merged"],
+      [{ comments: [] }, "no comment of its author's names a shape review"],
+      [{ body: "additive" }, "its body names no dump path from `~/`"],
+    ] as const) {
+      const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], over)
+      const { calls, code, out } = await run(
+        { schemaCleared: ["PR#456"] },
+        {
+          changed: ["packages/db/drizzle/0017_x.sql"],
+          record: "v0.0.110",
+          schemaCleared: async () => prSource(read),
+        },
+      )
+      expect(code).not.toBe(0)
+      expect(out()).toContain("PR#456 does not clear the schema")
+      expect(out()).toContain(part)
+      expect(out()).not.toContain("not readable")
+      expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+    }
+  })
+
+  test("decisionSource, an approved Inbox decision, is approved", () => {
+    expect(decisionSource(JSON.stringify({ kind: "decision", status: "approved" }))).toEqual({
+      approved: true,
+      kind: "decision",
+      schema: false,
+    })
+  })
+
+  test.each(["open", "denied"])(
+    "decisionSource, an Inbox decision whose status reads %s, is not approved",
+    (status) => {
+      expect(decisionSource(JSON.stringify({ kind: "decision", status }))).toEqual({
+        approved: false,
+        kind: "decision",
+        schema: false,
+      })
+    },
+  )
+
+  test("decisionSource reads a schema preview, the one step 0 posts, as a schema decision", () => {
+    const read = {
+      kind: "decision",
+      preview: { shape: "drop yard_bot.token", type: "schema" },
+      status: "approved",
+    }
+    expect(decisionSource(JSON.stringify(read))).toEqual({
+      approved: true,
+      kind: "decision",
+      schema: true,
+    })
+  })
+
+  test("decisionSource reads an ask preview as no schema decision", () => {
+    const read = {
+      kind: "decision",
+      preview: { text: "a rename", type: "ask" },
+      status: "approved",
+    }
+    expect(decisionSource(JSON.stringify(read))).toEqual({
+      approved: true,
+      kind: "decision",
+      schema: false,
+    })
+  })
+
+  test("subjectPr reads the PR a squash's subject ends with, and none from a direct commit", () => {
+    expect(subjectPr("feat(PG-1): a column (#2819)")).toBe(2819)
+    expect(subjectPr("feat(PG-1): see #2819 for the column")).toBeUndefined()
+  })
+
+  test("namesDecision matches an Inbox id whole, so #i12 never reads as #i123 nor #i9 as x#i9", () => {
+    expect(namesDecision("the owner's go, #i123.", "#i123")).toBe(true)
+    expect(namesDecision("(#i123)", "#i123")).toBe(true)
+    expect(namesDecision("the owner's go, #i1234", "#i123")).toBe(false)
+    expect(namesDecision("see foo#i123", "#i123")).toBe(false)
+    expect(namesDecision("see ##i123", "#i123")).toBe(false)
+  })
+
+  test("prSource carries the merge commit's sha", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], {
+      mergeCommit: { oid: "aaa111" },
+    })
+    expect(prSource(read)).toEqual({ ...cleared, mergeSha: "aaa111" })
+  })
+
+  test("decisionSource, an approved item of another kind, returns null", () => {
+    expect(decisionSource(JSON.stringify({ kind: "ticket", status: "approved" }))).toBeNull()
+  })
+
+  test("decisionArg, for a #iN value, is the bare id `i123`", () => {
+    expect(decisionArg("#i123")).toBe("i123")
   })
 })
 

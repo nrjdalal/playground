@@ -6794,6 +6794,11 @@ var slotSettings = defineSettings({
     default: [],
     description: "The ops folders of other factories on this machine, each an absolute path: run-slot counts each live holder of their run slots against this factory's load units, and spawn.sh's load gate counts their starts beside its own, both reading only.",
     schema: array(string2().regex(/^\/.+/, "an absolute path"))
+  },
+  "slots.windowJob": {
+    default: "",
+    description: "The jobs.json row whose config.hours and daysOff hold an org's window, empty for none: while it stands, run-slot keeps an org's runs a free lane and spawn.sh gives a start in an org's checkout the priority path, though not focus.",
+    schema: string2().regex(/^(?:[a-z0-9][a-z0-9-]*)?$/, "a job's name, or empty")
   }
 });
 // packages/settings/src/whatsapp.ts
@@ -7151,7 +7156,7 @@ function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
   if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
-  return script.replaceAll(mark, value);
+  return script.replaceAll(mark, () => value);
 }
 var held2 = (text) => text.value.length > MAX_BYTES ? unknown2(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
@@ -7269,6 +7274,9 @@ var PNPM_FLAGS = "-c -r -w -y --aggregate-output --color --fail-if-no-match --ig
 var PNPM_VALUES = "-C -F --changed-files-ignore-pattern --dir --env-file --filter --filter-prod --http-proxy --https-proxy --loglevel --no-proxy --npmrc-auth-file --registry --reporter --state-dir --store-dir --test-pattern --userconfig --workspace-concurrency --workspace-packages";
 var PNPM_DLX = runner(`${PNPM_FLAGS} -v --version`, `${PNPM_VALUES} --allow-build --cpu --libc --os --package`, { folder: "-C --dir", joined: "-c --shell-mode", spec: true });
 var MISE = runner("--deny-all --deny-env --deny-net --deny-read --deny-unix --deny-write --fresh-env --no-deps --raw --secrets-all", "-c -j --allow-env --allow-net --allow-read --allow-unix --allow-write --command --jobs --secrets", { script: "-c --command", tools: true });
+var WATCH = runner("-b -C -c -d -e -f -g -h -p -r -t -v -w -x --beep --chgexit --color --differences --errexit --exec --follow --help --no-color --no-rerun --no-title --no-wrap --precise --version", "-n -q -s --equexit --interval --shotsdir", { always: true });
+var WATCH_EXEC = /^(?:--exec|-[bCcefghprtvw]*x[bCcefghprtvwx]*(?:d.*)?)$/;
+var WATCH_DIFF = /^-[bCcefghprtvwx]*d/;
 var BUN_FLAGS = "-b -i --bun --check --hot --if-present --no-clear-screen --no-exit-on-error --no-install --no-orphans --parallel --sequential --silent --smol --watch --workspaces";
 var BUN_VALUES = "-e -F -p -r --cwd --elide-lines --env-file --eval --filter --import --preload --print --require --shell";
 var DENO = runner("-A -q -r --allow-all --allow-env --allow-ffi --allow-import --allow-net --allow-read --allow-run --allow-scripts --allow-sys --allow-write --cached-only --check --coverage --deny-env --deny-ffi --deny-import --deny-net --deny-read --deny-run --deny-sys --deny-write --env-file --frozen --hmr --inspect --inspect-brk --inspect-wait --lock --no-check --no-clear-screen --no-code-cache --no-config --no-lock --no-npm --no-remote --node-modules-dir --quiet --reload --unsafely-ignore-certificate-errors --unstable --use-env-proxy --v8-flags --vendor --watch", "-c --cert --conditions --config --ext --import-map --location --min-dep-age --node-modules-linker --preload --require --seed --watch-exclude", { spec: true });
@@ -7289,6 +7297,7 @@ var RUNNERS = new Map([
   ["pnpm exec", runner(PNPM_FLAGS, PNPM_VALUES, { folder: "-C --dir", joined: "-c --shell-mode" })],
   ["pnpx", PNPM_DLX],
   ["volta run", runner("--bundled-npm --no-yarn --quiet --verbose", "--env --node --npm --yarn")],
+  ["watch", WATCH],
   ["yarn dlx", runner("-q --quiet", "-p --package", { spec: true })],
   ["yarn exec", runner("", "", { always: true })]
 ]);
@@ -7805,7 +7814,21 @@ var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]
 var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var plainPath = (value) => value.startsWith("/") ? `/${value.split("/").filter((s) => s && s !== ".").join("/")}` : value;
-var stdinPath = (value) => STDIN_PATHS.has(plainPath(value));
+var stdinPath = (value, env) => {
+  if (STDIN_PATHS.has(plainPath(value)))
+    return true;
+  if (!env || value.startsWith("/") || marked(value))
+    return false;
+  const folders = places(env).flatMap((e) => e.cwd === undefined ? [] : [e.cwd]);
+  return (folders.length > 0 ? folders : ["/"]).some((dir) => [realFolder(dir), realFolder(resolve3(dir))].some((at) => STDIN_PATHS.has(plainPath(`${at}/${value}`))));
+};
+var realFolder = (dir) => {
+  try {
+    return realpathSync.native(dir);
+  } catch {
+    return dir;
+  }
+};
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
 var GIT_TAKES = new Set([
@@ -8765,9 +8788,10 @@ function xargsOption(xargs, w, next, state) {
     xargs.replace = value?.value || "{}";
   else if (name === "null")
     split("\x00");
-  else if (name === "I" || name === "J")
+  else if (name === "I" || name === "J") {
     xargs.replace = (value ?? next)?.value;
-  else if (name === "a" || name === "arg-file")
+    xargs.appends = name === "J";
+  } else if (name === "a" || name === "arg-file")
     xargs.files = [
       ...xargs.files ?? [],
       ...[value ?? next].filter((file) => file !== undefined).map((file) => ({ chdir: state.chdir, file, moved: state.moved }))
@@ -8821,6 +8845,7 @@ function unwrap(state, inside, budget) {
     }, wrapper, budget));
   };
   let spec = false;
+  let last = inside;
   for (let wrapper = inside;; wrapper = undefined) {
     if (!wrapper) {
       const word = peek();
@@ -8843,6 +8868,7 @@ function unwrap(state, inside, budget) {
       if (wrapper === "xargs")
         state.xargs ??= {};
       take();
+      last = wrapper;
     }
     const runs = RUNNERS.get(wrapper);
     const options = WRAPPERS.get(wrapper) ?? runs;
@@ -8856,6 +8882,8 @@ function unwrap(state, inside, budget) {
         xargsOption(state.xargs ??= {}, w, next(), state);
       if (runs && runs.joined !== true && joinsWords(v, runs.joined))
         joined = true;
+      if (wrapper === "watch" && WATCH_EXEC.test(v))
+        joined = false;
       if (ASSIGN.test(v))
         assign(local, take());
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -8880,6 +8908,7 @@ function unwrap(state, inside, budget) {
         take();
         state.xargs ??= {};
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
+        state.xargs.appends = v.startsWith("-J");
       } else if (wrapper === "env" && v === "-") {
         take();
       } else if (folder !== undefined) {
@@ -8897,7 +8926,7 @@ function unwrap(state, inside, budget) {
           assign(local, take());
         break;
       } else if (v.startsWith("-") && v !== "-") {
-        const end = wrapper === "nice" && /^-\d+$/.test(v) ? "own" : marked(v) ? undefined : optionValue(v, options);
+        const end = wrapper === "nice" && /^-\d+$/.test(v) || wrapper === "watch" && WATCH_DIFF.test(v) ? "own" : marked(v) ? undefined : optionValue(v, options);
         if (!end)
           fork(wrapper, 2);
         else if (end === "next" && marked(next()?.value ?? "")) {
@@ -8905,7 +8934,7 @@ function unwrap(state, inside, budget) {
           fork(wrapper, 3);
         }
         rest.length = Math.max(0, rest.length - (end === "next" ? 2 : 1));
-      } else if (runs?.tools && rest.some((r) => r.value === "--"))
+      } else if (runs?.tools && rest.some((r) => r.value === "--" || namedOption(r.value, runs, runs.script) !== undefined))
         take();
       else
         break;
@@ -8919,9 +8948,10 @@ function unwrap(state, inside, budget) {
       take();
     if (wrapper === "chrt" && /^\d+$/.test(peek()?.value ?? ""))
       take();
-    if (wrapper === "flock" && FLOCK_SCRIPT.has(peek()?.value ?? "")) {
-      take();
-      const text = take();
+    const lock = wrapper === "flock" ? FLOCK_ATTACHED.exec(peek()?.value ?? "") : null;
+    if (lock) {
+      const w = take();
+      const text = lock[1] ? slice(w, w.value.length - lock[1].length) : take();
       if (text)
         rest.push(text, ...SH_C);
     }
@@ -8929,6 +8959,8 @@ function unwrap(state, inside, budget) {
       take();
   }
   const typed = take();
+  if (!typed && state.xargs && (!state.xargs.replace || state.xargs.appends) && last && last !== "xargs")
+    state.xargs = { ...state.xargs, wrapped: true };
   const first = spec && typed ? packageName(typed) : typed;
   const parsed = {
     also,
@@ -8948,7 +8980,7 @@ var SH_C = [
   { quoted: false, value: "-c" },
   { quoted: false, value: "sh" }
 ];
-var FLOCK_SCRIPT = new Set(["-c", "--command"]);
+var FLOCK_ATTACHED = /^(?:-c|--command(?:=|$))([\s\S]*)$/;
 function namedOption(v, { values }, names) {
   if (!v.startsWith("-") || v === "-" || v === "--")
     return;
@@ -9029,7 +9061,7 @@ function viaRunner(parsed, state, budget) {
     xargs: parsed.xargs && { ...parsed.xargs }
   }, key, budget);
   if (!reading.first)
-    return;
+    return reading.xargs?.wrapped ? { ...reading, via: key } : undefined;
   const file = reading.first.value;
   if (key === "bun run" && (file.includes("/") || SCRIPT_FILE.test(file)))
     return;
@@ -9580,7 +9612,7 @@ async function examine(cmd, env, visit, builtins) {
     ...resolving,
     ...prior,
     ...vanished,
-    ...await xargsFilled(cmd, [primary, ...others], env)
+    ...await xargsFilled(cmd, [primary, ...others].map((p) => p.xargs), env)
   ];
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
@@ -9670,13 +9702,13 @@ var itemsOf = (fed, split) => {
 `), ...fed.value.split(/\s+/)];
   return [fed.value, ...fed.value.split(split)];
 };
-async function xargsFilled(cmd, parsed, env) {
+async function xargsFilled(cmd, xargs, env) {
   const filled = new Map;
-  for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
+  for (const [word, replace] of xargs.flatMap((x) => x?.filled ?? []))
     filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
-  if (filled.size === 0)
+  const wrapped = xargs.some((x) => x?.wrapped);
+  if (filled.size === 0 && !wrapped)
     return [];
-  const xargs = parsed.map((p) => p.xargs);
   const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !stdinPath(f.file.value));
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))];
   const inputs = [
@@ -9694,16 +9726,20 @@ async function xargsFilled(cmd, parsed, env) {
     if (raw?.some((text) => /["'\\]/.test(text)))
       texts.add(undefined);
   }
+  const wordsOf = (value) => value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
   const fill = (text) => ({
     ...cmd,
-    words: cmd.words.flatMap((w) => {
-      const held = filled.get(w);
-      if (!held)
-        return [w];
-      if (text === undefined)
-        return [{ ...w, ...unknown2(`the program xargs puts in place of ${held.join(" or ")}`) }];
-      return held.reduce((value, replace) => value.replaceAll(replace, text), w.value).split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
-    })
+    words: [
+      ...cmd.words.flatMap((w) => {
+        const held = filled.get(w);
+        if (!held)
+          return [w];
+        if (text === undefined)
+          return [{ ...w, ...unknown2(`the program xargs puts in place of ${held.join(" or ")}`) }];
+        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, () => text), w.value));
+      }),
+      ...!wrapped ? [] : text === undefined ? [{ quoted: false, ...unknown2("the program xargs hands its wrapper") }] : wordsOf(text)
+    ]
   });
   return [...texts].map(fill);
 }
@@ -9943,7 +9979,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
     verdict = (here.visitShells ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
-  else if ((name === "source" || name === ".") && (args[0]?.procs || stdinPath(args[0]?.value ?? ""))) {
+  else if ((name === "source" || name === ".") && (args[0]?.procs || stdinPath(args[0]?.value ?? "", here))) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
     for (const script of verdict ? [] : scripts) {
@@ -10001,6 +10037,23 @@ var startFolders = (env) => [
   ...env.cwdSure === undefined ? [] : [env.cwdSure],
   ...env.cwdMaybe ?? []
 ];
+function places(env, fallback) {
+  const folders = [
+    ...startFolders(env),
+    ...env.cwdHeld ?? [],
+    ...env.cwdUnread && fallback !== undefined ? [fallback] : []
+  ];
+  const out = [];
+  const seen = new Set;
+  for (const cwd of folders) {
+    tick();
+    if (seen.has(cwd))
+      continue;
+    seen.add(cwd);
+    out.push({ ...env, cwd, cwdSure: cwd });
+  }
+  return out.length > 0 ? out : [{ ...env, cwd: undefined, cwdSure: undefined }];
+}
 function ancestors(path) {
   const out = [];
   for (let dir = dirname(path);; dir = dirname(dir)) {
@@ -10238,12 +10291,27 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     return;
   const { inline, operand } = shellOperand(args, name);
   if (operand && inline) {
-    let script = operand.value;
-    if (xargs?.replace && script.includes(xargs.replace)) {
-      const fed = await stdinOf(cmd, env);
-      script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
+    const script = operand.value;
+    if (!xargs?.replace || !script.includes(xargs.replace))
+      return run2(lexScript(script, env), subshell(env), visit, builtins);
+    const fed = await stdinOf(cmd, env);
+    const texts = new Set;
+    for (const split of [null, ...xargs.delimiters ?? []]) {
+      const items = itemsOf(fed, split);
+      if (!items || items.length > READINGS)
+        texts.add(UNKNOWN);
+      else
+        for (const text of items)
+          if (text.trim())
+            texts.add(text.trim());
     }
-    return run2(lexScript(script, env), subshell(env), visit, builtins);
+    for (const text of texts.size > 0 ? texts : [""]) {
+      const lexed = lexScript(filled(script, xargs.replace, text), env);
+      const verdict = await run2(lexed, subshell(env), visit, builtins);
+      if (verdict)
+        return verdict;
+    }
+    return;
   }
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script);
@@ -10255,7 +10323,7 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
-  const scripts = !operand || stdinPath(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown2("a script file")];
+  const scripts = !operand || stdinPath(operand.value, env) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown2("a script file")];
   if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;

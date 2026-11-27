@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { check } from "../../../scripts/hooks/no-kill-by-name"
+import { check, type Proc } from "../../../scripts/hooks/no-kill-by-name"
 
 const root = join(import.meta.dir, "..", "..", "..")
 
@@ -105,11 +105,61 @@ describe("a command built from a value the reader cannot read, in a call that na
   })
 })
 
+// A made-up process table: the hook (100) under its shell (90) under the session's claude (80), which runs in the pane's group (70); a Bash call's shell (4000) under that claude leads its own group, and its child 4567 leads another; another session's claude (81) has a child group 5000; group 6000's leader has exited, leaving 6001
+const TABLE = new Map<number, Proc>([
+  [70, { comm: "-zsh", pgid: 70, ppid: 1 }],
+  [80, { comm: "/usr/local/bin/claude", pgid: 70, ppid: 70 }],
+  [81, { comm: "claude", pgid: 71, ppid: 1 }],
+  [90, { comm: "sh", pgid: 90, ppid: 80 }],
+  [100, { comm: "bun", pgid: 90, ppid: 90 }],
+  [4000, { comm: "/bin/zsh", pgid: 4000, ppid: 80 }],
+  [4567, { comm: "node", pgid: 4567, ppid: 4000 }],
+  [5000, { comm: "node", pgid: 5000, ppid: 81 }],
+  [6001, { comm: "node", pgid: 6000, ppid: 80 }],
+])
+const inTable = (command: string, procs = TABLE) =>
+  check(input(command), () => ({ procs, self: 100 }))
+
+describe("a kill of a process group passes only for a group the session started", () => {
+  test.each(["kill -TERM -4567", "kill -- -4567", "kill -9 -- -4000", "kill -s TERM -4567 -4000"])(
+    "%s, a group under the session's claude, passes",
+    async (command) => {
+      expect(await inTable(command)).toBeUndefined()
+    },
+  )
+
+  test.each([
+    ["kill -- -70", "the pane's group, above the session"],
+    ["kill -TERM -5000", "another session's group"],
+    ["kill -- -6000", "a group whose leader has exited"],
+    ["kill -- -80", "a group the session's claude itself would lead"],
+    ["kill -TERM -4567 -5000", "an own group beside a foreign one"],
+    ["kill -- -9999", "a group no process leads"],
+  ])("%s, %s, is refused", async (command) => {
+    expect(await inTable(command)).toContain(
+      "a kill of every process, a process group or its own group",
+    )
+  })
+
+  test("a group is refused when the process table cannot be read", async () => {
+    expect(await inTable("kill -TERM -4567", new Map())).toContain("a process group")
+  })
+
+  test("the table is read only for a negative pid", async () => {
+    let reads = 0
+    const counted = () => (reads++, { procs: TABLE, self: 100 })
+    await check(input("kill -9 1234"), counted)
+    await check(input("kill 0"), counted)
+    expect(reads).toBe(0)
+    await check(input("kill -- -4567"), counted)
+    expect(reads).toBe(1)
+  })
+})
+
 describe("a signal to a pid you hold, and a read, pass", () => {
   test.each([
     "kill 1234",
     "kill -9 1234",
-    "kill -TERM -4567",
     "kill -s TERM 1234",
     "kill $!",
     "kill %1",
@@ -139,6 +189,20 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "sleep 60 & pid=$!; ps --pid $pid && kill $pid",
     "sleep 60 & pid=$!; ps --quick-pid $pid && kill $pid",
     "echo 1234 | xargs kill",
+    // #3123's twins: a kill by pid a wrapper, BSD -J or run-slot.sh runs from xargs' input words, split or filled, bare xargs and echo in a slot, which only echo their input, and GNU -I with no word its string, which drops its input
+    "xargs nohup <<< 'kill 1234'",
+    "xargs timeout 5 <<< 'kill 1234'",
+    "xargs env <<< 'kill 1234'",
+    "echo kill 1234 | xargs nohup",
+    "xargs -I{} nohup {} 1234 <<< kill",
+    "xargs <<< 'pkill node'",
+    "xargs -J % nohup <<< 'kill 1234'",
+    "xargs -I % nohup <<< 'pkill node'",
+    "xargs ~/.playground/ops/run-slot.sh w -- <<< 'kill 1234'",
+    "xargs -n2 ~/.playground/ops/run-slot.sh w -- <<< 'x y kill 1234'",
+    "xargs -I{} ~/.playground/ops/run-slot.sh w -- {} 1234 <<< kill",
+    "echo 1234 | xargs -J % ~/.playground/ops/run-slot.sh w -- kill %",
+    "xargs ~/.playground/ops/run-slot.sh w -- echo <<< 'pkill node'",
     "~/.playground/ops/run-slot.sh w -- kill 1234",
     "~/.playground/ops/run-slot.sh w -- kill $!",
     "~/.playground/ops/run-slot.sh w -- pkill --help",
@@ -182,6 +246,88 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "/usr/bin/pg(r|^x)ep -f watcher",
     // a bare * names no program, so a case arm the reader takes for a program word passes
     'cd x && for f in *.ts; do case "$f" in *" a "*) ;; esac; done',
+    // a wrapper's command option with harmless text attached, mise's after a tool, watch rerunning a harmless program, and a word that only ends in kill's name (#3111)
+    "flock /tmp/l -c'echo hi'",
+    "flock /tmp/l '--command=echo hi'",
+    "mise x node@20 -c 'node -v'",
+    "watch -n 1 date",
+    "watch -x ls",
+    // an x before -d turns exec on, so watch runs the one word as a program's name, which names none
+    "watch -xd 'pkill node'",
+    "watch -d -x 'pkill node'",
+    "watch -xdn 'pkill node'",
+    // -d takes the n as its value, so the 2 is the program, which names no kill
+    "watch -dn 2 date",
+    "echo skill",
+    // #3155's twins: a kill of one pid after each signal form, a lone -1 kill reads as signal 1 with no pid, and -1 before a pid read as that signal
+    "kill -TERM 1234",
+    "kill -0 1234",
+    "kill -n 9 1234",
+    "kill -- 1234",
+    "kill -1",
+    "kill -1 1234",
+    "kill -l",
+    "kill -l 9",
+    "kill -L",
+    "P=1234; kill -9 $P",
+    "kill $(cat /tmp/x.pid)",
+    "xargs kill -9 <<< 1234",
+    "echo 1234 | xargs -I{} kill -9 {}",
+    "cat /tmp/x.pid | xargs kill",
+    "printf '1234\\0' | xargs -0 kill -9",
+    "printf '1234\\0 5678\\0' | xargs -0 kill -9",
+    "echo 1234 | xargs -0 kill",
+    "cat /tmp/x.pid | xargs -0 kill",
+    "printf '1234,5678' | xargs -d , kill -9",
+    "echo 1234 > /tmp/f; xargs -a /tmp/f kill -9",
+    "xargs -a <(echo 1234) kill -9",
+    "echo 1234 | xargs -a - kill -9",
+    "echo $$ > /tmp/f; xargs -a /tmp/f kill -9",
+    "echo hi > /tmp/f; xargs -a /tmp/f echo",
+    "kill -$SIG 1234",
+    "kill -${SIG} 1234",
+    "kill -$SIG $PID",
+    "kill -9 99999",
+    "kill -9 2147483647",
+    "kill -9 +1234",
+    // #3134's controls: refused-forms/3134.ts's pipes and escapes, each handing on a kill by pid
+    "printf 'x\\nkill 1234\\n' | xargs -L1 ~/.playground/ops/run-slot.sh w --",
+    "xargs -0 ~/.playground/ops/run-slot.sh w -- < <(printf 'x\\0kill 1234')",
+    "printf 'x\\nkill 1234\\n' | xargs -L1 nohup",
+    "printf 'x\\nkill 1234\\n' | xargs -L1 sh -c",
+    "printf 'x\\nkill 1234\\n' | xargs -L1 -I{} sh -c {}",
+    "xargs -0 nohup < <(printf 'x\\0kill 1234')",
+    "xargs -0 sh -c < <(printf 'x\\0kill 1234')",
+    "xargs -0 -I{} sh -c {} < <(printf 'x\\0kill 1234')",
+    "xargs nohup <<< $'x\\nkill 1234'",
+    "xargs -L1 ~/.playground/ops/run-slot.sh w -- <<< $'x\\nkill 1234'",
+    "echo -e 'x\\nkill 1234' | xargs -L1 ~/.playground/ops/run-slot.sh w --",
+    "xargs watch <<< 'kill 1234'",
+    // the twins of 3134.ts's rows whose escape ends a word, a pid, date or kill-pid in place of the name; an ANSI-C item spelling date; and a program word whose item holds a dollar and a backtick, which xargs runs as written
+    "printf 'kill\\x001234' | xargs -0 nohup",
+    "printf 'kill\\n1234\\n' | xargs nohup",
+    "echo -e 'kill\\t1234' | xargs nohup",
+    "printf 'kill\\x201234' | xargs nohup",
+    "printf 'kill\\0401234' | xargs sh -c",
+    "xargs nohup <<< $'kill\\n1234'",
+    "printf 'x\\0kill\\0' | xargs -0 -I{} sh -c '{} 1234'",
+    "xargs -0 nohup < <(printf 'kill\\x001234')",
+    "printf 'date\\nnode\\n' | xargs nohup",
+    "xargs nohup <<< $'date\\nnode'",
+    "xargs -0 -I{} sh -c {} < <(printf 'x\\0$'\"'\"'\\\\x64ate'\"'\"'')",
+    "xargs -I{} {} node <<< '$`pkill'",
+    // the twins of 3134.ts's rows whose escape spells a letter or ends a word in another pipe, kill-pid in place of the name
+    "printf 'ki\\x6cl\\x001234' | xargs -0 nohup",
+    "printf 'ki\\x6cl 1234' | xargs nohup",
+    "xargs nohup <<< $'ki\\x6cl\\n1234'",
+    "printf 'x\\0ki\\x6cl 1234' | xargs -0 -I{} sh -c {}",
+    "printf 'kill\\u00201234' | xargs nohup",
+    "echo -e 'kill\\x0b1234' | xargs nohup",
+    "printf '%b' 'kill\\x201234' | xargs nohup",
+    "printf 'kill\\x201234\\n' | xargs -I{} sh -c {}",
+    "printf 'kill\\x201234' | sh",
+    "printf 'kill\\x201234' | bash",
+    "bash <<< $'kill\\x201234'",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })

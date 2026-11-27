@@ -32,7 +32,7 @@ import { SETTINGS_USAGE, settingsCommand } from "./settings"
 export type Out = (line: string) => void
 
 export const EXT_USAGE =
-  "usage: playground ext init [--yes | --dry-run] | add <name> [<owner/name>] [--yes | --dry-run] | order <name>... | link <name> <org|*> | unlink <name> <org|*> | lock | unlock | remove <name> | sync [<scope>] | list [--scope <scope>] [--kind <kind>] | show <scope> <kind> <key> [--rev <sha>] | put <scope> <kind> <key> <path|-> --reason <why> [--attach <path>]... | which <skill> [--repo <dir> | --org <org>] | why <scope> <kind> <key> | why <skill> [--repo <dir> | --org <org>] | diff <scope> <kind> <key> --from <sha> --to <sha> | search <words> [--kind <kind>] | export <dir> | import <dir> [--dry-run] | import --from-tree <dir> [--dry-run] | import-scripts <ops-dir> <job>... --org <org> [--dry-run] | score <scope> <kind> <key> <sha> <0-5> --reason <why> | accept|reject <scope> <kind> <key> <sha> --reason <why> | check-modes"
+  "usage: playground ext init [--yes | --dry-run] | add <name> [<owner/name>] [--yes | --dry-run] | order <name>... | link <name> <org|*> | unlink <name> <org|*> | lock | unlock | remove <name> | sync [<scope>] | list [--scope <scope>] [--kind <kind>] | show <scope> <kind> <key> [--rev <sha>] | put <scope> <kind> <key> <path|-> --reason <why> [--attach <path>]... | which <skill> [--repo <dir> | --org <org>] (no flag: the home set's copy, else the one org scope holding it) | why <scope> <kind> <key> | why <skill> [--repo <dir> | --org <org>] | diff <scope> <kind> <key> --from <sha> --to <sha> | search <words> [--kind <kind>] | export <dir> | import <dir> [--dry-run] | import --from-tree <dir> [--dry-run] | import-scripts <ops-dir> <job>... --org <org> [--dry-run] | score <scope> <kind> <key> <sha> <0-5> --reason <why> | accept|reject <scope> <kind> <key> <sha> --reason <why> | check-modes"
 
 const MIME: Record<string, string> = {
   ".json": "application/json",
@@ -222,8 +222,8 @@ export async function extCommand(words: string[], io: Io): Promise<number> {
     print(io.out, item)
   } else if (verb === "which" || (verb === "why" && positional.length === 1)) {
     if (positional.length !== 1) throw new Usage("which takes one skill's name")
-    const { orgsIo, whichSkill } = await import("./orgs")
-    const found = await whichSkill(
+    const { orgsIo, skillFolder, whichSkill } = await import("./orgs")
+    const found = await (verb === "which" ? skillFolder : whichSkill)(
       orgsIo(join(import.meta.dir, "../../../.."), io.data),
       positional[0]!,
       one(options, "--repo"),
