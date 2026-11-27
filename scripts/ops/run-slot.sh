@@ -266,41 +266,39 @@ if [ "${1:-}" = window ]; then
   printf '%s\n' "$WIN_SESSION"
   exit 0
 fi
-# ORG_WIN, 1 while an org job's window stands, else 0, and ORG_WIN_AT, the epoch second it next turns (empty when it never does), read once and again only once the clock passes that second: a jobs.json row naming an org, not disabled, whose config holds hours ("HH:MM-HH:MM" in UTC, past midnight wrapping) stands inside them on a UTC date its daysOff omits, the start job's own inWindow test, so an org's runs go first in its hours (the dispatcher, 27 Nov)
+# ORG_WIN, 1 while an org job's window stands, else 0, and ORG_WIN_AT, the epoch second it next turns (empty when it never does), read once and again only once the clock passes that second: the jobs.json row slots.windowJob names, while it is not disabled, stands inside its config.hours ("HH:MM-HH:MM" in UTC, past midnight wrapping, none for all day) on a UTC date its daysOff omits, the start job's own inWindow test, and no row stands while the setting is empty, so an org's runs go first in its hours (the dispatcher, 27 Nov)
 ORG_PY='import datetime as dt, json, re, sys
 
 try:
     rows = json.load(open(sys.argv[1])).get("jobs", [])
 except (OSError, ValueError, AttributeError):
     rows = []
-spans = []
-for r in rows if isinstance(rows, list) else []:
-    if not isinstance(r, dict) or not isinstance(r.get("org"), str) or not r["org"] or r.get("disabled") is True:
-        continue
-    c = r.get("config")
-    if not isinstance(c, dict):
-        continue
-    m = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)", str(c.get("hours", "")))
-    off = c.get("daysOff")
-    if m:
-        spans.append(([int(g) for g in m.groups()], {d for d in off if isinstance(d, str)} if isinstance(off, list) else set()))
+row = next((r for r in rows if isinstance(r, dict) and r.get("name") == sys.argv[2]), None) if sys.argv[2] and isinstance(rows, list) else None
+c = row.get("config") if row and row.get("disabled") is not True else None
+hours = c.get("hours", "") if isinstance(c, dict) else None
+m = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)", hours) if isinstance(hours, str) and hours else None
+if m is None and hours != "":
+    print(0)
+    sys.exit()
+fh, fm, th, tm = [int(g) for g in m.groups()] if m else (0, 0, 0, 0)
+off = c.get("daysOff")
+off = {d for d in off if isinstance(d, str)} if isinstance(off, list) else set()
 def inside(t):
-    hm = t.hour * 60 + t.minute
-    for (fh, fm, th, tm), off in spans:
-        a, b = fh * 60 + fm, th * 60 + tm
-        if t.strftime("%Y-%m-%d") not in off and (a <= hm < b if a <= b else hm >= a or hm < b):
-            return True
-    return False
+    hm, a, b = t.hour * 60 + t.minute, fh * 60 + fm, th * 60 + tm
+    return t.strftime("%Y-%m-%d") not in off and (not m or (a <= hm < b if a <= b else hm >= a or hm < b))
 now = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
 state = inside(now)
 day = now.replace(hour=0, minute=0)
-turns = sorted({day + dt.timedelta(days=d, hours=h, minutes=m) for d in range(9) for (fh, fm, th, tm), _ in spans for h, m in ((0, 0), (fh, fm), (th, tm))})
+turns = sorted({day + dt.timedelta(days=d, hours=h, minutes=n) for d in range(9) for h, n in ((0, 0), (fh, fm), (th, tm))})
 print(int(state), next((int(t.timestamp()) for t in turns if t > now and inside(t) != state), ""))
 '
 ORG_WIN= ORG_WIN_AT=
 org_window() {
+  local job
   [ -n "$ORG_WIN" ] && { [ -z "$ORG_WIN_AT" ] || [ $((T0 + SECONDS)) -lt "$ORG_WIN_AT" ]; } && { [ "$ORG_WIN" = 1 ]; return; }
-  read -r ORG_WIN ORG_WIN_AT <<< "$(python3 -I -c "$ORG_PY" "$PDATA/ops/jobs.json" 2>/dev/null)"
+  job=$(setting slots.windowJob 2>/dev/null | tr -d '"')
+  ORG_WIN=0 ORG_WIN_AT=
+  [ -n "$job" ] && read -r ORG_WIN ORG_WIN_AT <<< "$(python3 -I -c "$ORG_PY" "$PDATA/ops/jobs.json" "$job" 2>/dev/null)"
   [ "$ORG_WIN" = 1 ] || { ORG_WIN=0; return 1; }
 }
 # run-slot.sh org-window: exit 0 while an org job's window stands (org_window), so spawn.sh's start in an org's checkout reads the hours the lanes do

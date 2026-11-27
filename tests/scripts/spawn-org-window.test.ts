@@ -12,7 +12,9 @@ const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOStr
 const INSIDE = `${at(-60)}-${at(60)}`
 const OUTSIDE = `${at(120)}-${at(180)}`
 
-const SETTINGS = { SETTINGS_JSON: JSON.stringify({ "ext.links": { acme: ["acme"] } }) }
+const LINKS = { "ext.links": { acme: ["acme"] } }
+// slots.windowJob names the start job's row, whose hours hold the window
+const SETTINGS = { SETTINGS_JSON: JSON.stringify({ ...LINKS, "slots.windowJob": "acme-start" }) }
 // load5 over a medium start's line (the 15 cores less the quarter kept for small items, 11.25) and under the cores' 15
 const LOADED = { ...SETTINGS, FAKE_CPU_IDLE: "80", FAKE_LOAD5: "12.00" }
 const ORG_WORKER = [
@@ -71,6 +73,20 @@ describe("in an org job's window, a start in the org's checkout takes the priori
 describe("the load gate holds as before", () => {
   test("for a start in the org's checkout outside the window", async () => {
     const r = await start(ORG_WORKER, OUTSIDE)
+    expect(r.code).not.toBe(0)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain("the load gate holds it: max(load1, load5) is 12.00")
+  })
+
+  test("for a start in the org's checkout while slots.windowJob is unset", async () => {
+    const r = await spawn(
+      ORG_WORKER,
+      [],
+      { ...LOADED, SETTINGS_JSON: JSON.stringify(LINKS) },
+      script,
+      undefined,
+      setup(INSIDE),
+    )
     expect(r.code).not.toBe(0)
     expect(placing(r)).toEqual([])
     expect(r.err).toContain("the load gate holds it: max(load1, load5) is 12.00")
