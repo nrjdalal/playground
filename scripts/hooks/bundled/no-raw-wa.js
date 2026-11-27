@@ -162,7 +162,7 @@ function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
   if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
-  return script.replaceAll(mark, value);
+  return script.replaceAll(mark, () => value);
 }
 var held = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
@@ -2067,7 +2067,7 @@ function viaRunner(parsed, state, budget) {
     xargs: parsed.xargs && { ...parsed.xargs }
   }, key, budget);
   if (!reading.first)
-    return;
+    return reading.xargs?.wrapped ? { ...reading, via: key } : undefined;
   const file = reading.first.value;
   if (key === "bun run" && (file.includes("/") || SCRIPT_FILE.test(file)))
     return;
@@ -2742,7 +2742,7 @@ async function xargsFilled(cmd, xargs, env) {
           return [w];
         if (text === undefined)
           return [{ ...w, ...unknown(`the program xargs puts in place of ${held.join(" or ")}`) }];
-        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, text), w.value));
+        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, () => text), w.value));
       }),
       ...!wrapped ? [] : text === undefined ? [{ quoted: false, ...unknown("the program xargs hands its wrapper") }] : wordsOf(text)
     ]
@@ -3297,12 +3297,27 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     return;
   const { inline, operand } = shellOperand(args, name);
   if (operand && inline) {
-    let script = operand.value;
-    if (xargs?.replace && script.includes(xargs.replace)) {
-      const fed = await stdinOf(cmd, env);
-      script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
+    const script = operand.value;
+    if (!xargs?.replace || !script.includes(xargs.replace))
+      return run(lexScript(script, env), subshell(env), visit, builtins);
+    const fed = await stdinOf(cmd, env);
+    const texts = new Set;
+    for (const split of [null, ...xargs.delimiters ?? []]) {
+      const items = itemsOf(fed, split);
+      if (!items || items.length > READINGS)
+        texts.add(UNKNOWN);
+      else
+        for (const text of items)
+          if (text.trim())
+            texts.add(text.trim());
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins);
+    for (const text of texts.size > 0 ? texts : [""]) {
+      const lexed = lexScript(filled(script, xargs.replace, text), env);
+      const verdict = await run(lexed, subshell(env), visit, builtins);
+      if (verdict)
+        return verdict;
+    }
+    return;
   }
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script);
@@ -3627,16 +3642,6 @@ var WRITERS = new Set([
   "xz",
   "zstd"
 ]);
-var RECURSIVE = new Map([
-  ["chflags", /^-[A-Za-z]*R/],
-  ["chgrp", /^-[A-Za-z]*R/],
-  ["chmod", /^-[A-Za-z]*R/],
-  ["chown", /^-[A-Za-z]*R/],
-  ["gzip", /^-[A-Za-z0-9]*r/],
-  ["pigz", /^-[A-Za-z0-9]*r/],
-  ["rm", /^-[A-Za-z]*[Rr]/],
-  ["zstd", /^-[A-Za-z0-9]*r/]
-]);
 var CODE_RUNNERS = new Set([
   "awk",
   "bun",
@@ -3650,7 +3655,7 @@ var CODE_RUNNERS = new Set([
   "python3",
   "ruby"
 ]);
-var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|(?<![\w.$-])(?:cp|mv|install)(?:\s|["']\s*,)|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i;
+var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|(?<![=-])>(?!=)/i;
 var PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g;
 var writesCode = (code) => WRITE_WORDS.test(code.replace(PATHS, (path) => path.slice(path.lastIndexOf("/") + 1)));
 var targetsOf = (environment) => {
@@ -3673,43 +3678,24 @@ var namesRoster = (text, targets) => {
   const plain = text.replace(/["'\\]/g, "").toLowerCase();
   return targets.some((t) => new RegExp(`${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(plain)) || /(?:\.playground|playground_data_dir\}?)\/+roster\.json(?![\w.-])/.test(plain);
 };
-var namesBare = (text) => /(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(text.replace(/["'\\]/g, "").toLowerCase().replace(/(?<![\w.-])(?:\.\/)+/g, ""));
 var namesApart = (text, targets) => {
   const plain = text.replace(/["'\\]/g, "").toLowerCase();
-  if (!namesBare(text))
+  if (!/(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(plain))
     return false;
   return targets.some((t) => new RegExp(`${dirname2(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-]|/[\\w.-])`).test(plain)) || /\.playground(?![\w.-]|\/[\w.-])|playground_data_dir/.test(plain);
-};
-var knownOf = (at) => {
-  const known = { ...at.known };
-  for (const [key, text] of at.vars) {
-    if (!marked(text.value))
-      known[key] = text.value;
-    else if (text.raw?.startsWith(`${key}=`)) {
-      const { commands } = lex(text.raw.slice(key.length + 1), known);
-      const again = commands.length === 1 && commands[0].words.length === 1 ? commands[0].words[0] : undefined;
-      if (again && !marked(again.value))
-        known[key] = again.value;
-    }
-  }
-  return known;
 };
 var readOf = (word, at) => {
   if (!marked(word.value))
     return word;
   if (!word.raw)
     return;
-  const known = knownOf(at);
+  const known = { ...at.known };
+  for (const [key, text] of at.vars)
+    if (!marked(text.value))
+      known[key] = text.value;
   const { commands } = lex(word.raw, known);
   const again = commands.length === 1 ? commands[0].words[0] : undefined;
   return again && !marked(again.value) ? again : undefined;
-};
-var sharpened = (word, at) => {
-  if (!marked(word.value) || !word.raw || !at.vars.size)
-    return word;
-  const { commands } = lex(word.raw, knownOf(at));
-  const again = commands.length === 1 && commands[0].words.length === 1 ? commands[0].words[0] : undefined;
-  return again && again.value !== word.value ? { ...word, glob: again.glob, value: again.value } : word;
 };
 var tailOf = (source) => {
   const text = source.replace(/["']/g, "");
@@ -3787,7 +3773,7 @@ async function judgeBash(command, cwd, environment) {
       const folder = prefix.slice(0, prefix.lastIndexOf("/") + 1);
       return !!folder && holdsWord({ ...typed, glob: false, value: folder }, at);
     }
-    return lexed.commands.some((c) => c.words.some((w) => w.value === "read")) && unseenHolds(at) || inOwnFolder(at);
+    return lexed.commands.some((c) => c.words.some((w) => w.value === "read")) && unseenHolds(at);
   };
   const writes = (typed, at, position = false) => {
     const paths = pathsOf(typed, at);
@@ -3816,7 +3802,6 @@ async function judgeBash(command, cwd, environment) {
   const holdsWord = (word, at) => pathsOf(word, at)?.some(({ glob, path }) => holds(path, glob)) ?? false;
   const ownFolder = (word, at) => pathsOf(word, at)?.some(({ path }) => targets.some((target) => segments(path).length === segments(target).length - 1 && holds(path, false))) ?? false;
   const lexed = lex(command, env.known);
-  const inOwnFolder = (at) => places(at).some(({ cwd }) => !!cwd && targets.some((t) => resolve4(cwd).toLowerCase() === dirname2(t)));
   const near = named || lexed.commands.some((c) => c.words.some((w) => holdsWord(w, env)));
   const unseenHolds = (at) => near || places(at).some(({ cwd }) => !!cwd && holds(cwd, false));
   const startsOf = (args) => {
@@ -3888,7 +3873,7 @@ async function judgeBash(command, cwd, environment) {
         glob: a.glob || item.glob || anyName,
         raw: undefined,
         source: undefined,
-        value: a.value.replaceAll(mark, anyName ? "*" : item.value)
+        value: a.value.replaceAll(mark, () => anyName ? "*" : item.value)
       };
       if (unseen.has(item))
         unseen.add(word);
@@ -3912,10 +3897,9 @@ async function judgeBash(command, cwd, environment) {
     return items.length ? put(items) : [];
   };
   const visit = async (cmd, parsed, at) => {
-    const { name, xargs } = parsed;
-    const args = parsed.args.map((a) => sharpened(a, at));
+    const { args, name, xargs } = parsed;
     for (const r of cmd.redirects)
-      if (r.target && r.op.includes(">") && writes(sharpened(r.target, at), at, true))
+      if (r.target && r.op.includes(">") && writes(r.target, at, true))
         return refuse(`a redirect onto ${shown(r.target)}`);
     if (!program(name))
       return;
@@ -3948,7 +3932,7 @@ async function judgeBash(command, cwd, environment) {
         const end = args.findIndex((w, j) => j > i && (w.value === ";" || w.value === "+"));
         const line = args.slice(i + 1, end < 0 ? undefined : end).map((w) => {
           const typed = w.raw ?? w.source ?? `'${w.value.replaceAll("'", `'\\''`)}'`;
-          return reached ? typed.replaceAll("{}", roster.value) : typed;
+          return reached ? typed.replaceAll("{}", () => roster.value) : typed;
         }).join(" ");
         const found = await run(lex(line, at.known), { ...at, vars: new Map(at.vars) }, visit, true);
         if (found)
@@ -3966,7 +3950,7 @@ async function judgeBash(command, cwd, environment) {
       }
       return;
     }
-    if (CODE_RUNNERS.has(tool) && args.some((a) => (namesRoster(a.value, targets) || namesApart(a.value, targets) || intoRoster.has(a) || namesBare(a.value) && inOwnFolder(at)) && writesCode(a.value)))
+    if (CODE_RUNNERS.has(tool) && args.some((a) => (namesRoster(a.value, targets) || namesApart(a.value, targets) || intoRoster.has(a)) && writesCode(a.value)))
       return refuse(`${tool} code that names the roster and holds a write word`);
     if (PLACERS.has(tool)) {
       const dest = destinationOf(tool, args);
@@ -3994,12 +3978,6 @@ async function judgeBash(command, cwd, environment) {
     if (READERS.has(tool))
       return;
     const writer = WRITERS.has(tool) || SEDS.has(tool);
-    const flag = RECURSIVE.get(tool);
-    if (flag && args.some((a) => flag.test(a.value) || a.value === "--recursive")) {
-      for (const word of args)
-        if (!word.value.startsWith("-") && (holdsWord(word, at) || !pathsOf(word, at) && near))
-          return refuse(`${tool} recursing into ${shown(word)}`);
-    }
     for (const word of args)
       if ((writer || marked(name) || !unseen.has(word)) && writes(word, at, writer))
         return refuse(`${tool} on ${shown(word)}`);
@@ -4189,7 +4167,7 @@ function sessionOf(raw) {
 var refuse2 = (what) => `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`;
 var refuseJob = (what) => `no-raw-wa hook refuses ${what}: the relay tags each line with its queue's job, and a line tagged [ops-wa] or [ops-dm-watch] reads as the owner's own words, so only ops-wa and ops-dm-watch queue under those jobs. Queue your line under your own job, notify.sh <your job> <text>, or tell your manager with SendMessage.`;
 var OWNER_JOBS = new Set(["dm-watch", "wa"]);
-var RECURSIVE2 = new Set(["ack", "ag", "ditto", "find", "rg", "rsync", "tar"]);
+var RECURSIVE = new Set(["ack", "ag", "ditto", "find", "rg", "rsync", "tar"]);
 var RECURSIVE_WITH = {
   cp: /^-[A-Za-z]*[rRa]|^--(?:recursive|archive)$/,
   egrep: /^-[A-Za-z]*[rR]|^--(?:recursive|dereference-recursive|directories=recurse)$/,
@@ -4252,7 +4230,7 @@ var readOf2 = (word, at) => {
   const again = lex(word.raw, known).commands[0]?.words[0];
   return again && !marked(again.value) ? again : undefined;
 };
-var recursive = (name, args) => RECURSIVE2.has(name) || args.some((a) => RECURSIVE_WITH[name]?.test(a.value));
+var recursive = (name, args) => RECURSIVE.has(name) || args.some((a) => RECURSIVE_WITH[name]?.test(a.value));
 var ownerJob = (name, args, at) => {
   let rest = args;
   if (SHELLS.has(name)) {

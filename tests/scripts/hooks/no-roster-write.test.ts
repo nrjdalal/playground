@@ -300,6 +300,8 @@ describe("roster.ts and every read run", () => {
     `python3 -c "import json, datetime; rows = json.load(open('${ROSTER}')); print([datetime.datetime.fromisoformat(x['eta']).replace(tzinfo=datetime.timezone.utc) for x in rows])"`,
     `python3 -c "print(open('${ROSTER}').read().count('install'))"`,
     `python3 -c "import json; print([x for x in json.load(open('${ROSTER}')) if 'mv' in x.get('task', '')])"`,
+    // 3134.ts's twin: an ANSI-C item naming another file of the data folder
+    "xargs -I{} sh -c 'echo x >> {}' <<< '$'\"'\"'\\x7e/.playground/notes.json'\"'\"''",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })

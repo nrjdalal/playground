@@ -459,7 +459,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
         glob: a.glob || item.glob || anyName,
         raw: undefined,
         source: undefined,
-        value: a.value.replaceAll(mark, anyName ? "*" : item.value),
+        value: a.value.replaceAll(mark, () => (anyName ? "*" : item.value)),
       }
       if (unseen.has(item)) unseen.add(word)
       if (unseen.has(item) && intoFolderOf(a)) intoRoster.add(word)
@@ -522,7 +522,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
           .slice(i + 1, end < 0 ? undefined : end)
           .map((w) => {
             const typed = w.raw ?? w.source ?? `'${w.value.replaceAll("'", `'\\''`)}'`
-            return reached ? typed.replaceAll("{}", roster.value) : typed
+            return reached ? typed.replaceAll("{}", () => roster.value) : typed
           })
           .join(" ")
         const found = await run(lex(line, at.known), { ...at, vars: new Map(at.vars) }, visit, true)
