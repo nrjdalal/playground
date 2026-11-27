@@ -42,6 +42,9 @@ describe("the Suite job pulls every image a test starts before the shard runs", 
     expect(pull).toBeDefined()
     expect(names.indexOf("Pull the test images")).toBeLessThan(names.indexOf("Test this shard"))
     expect(pull!.run).toContain("pulled in")
+    expect(pull!.run).toContain(
+      'docker pull -q "$image" || { sleep 5; docker pull -q "$image"; } || { sleep 15; docker pull -q "$image"; }',
+    )
     const pulled = /for image in ([^;]+);/
       .exec(pull!.run ?? "")![1]!
       .trim()

@@ -8,7 +8,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 ## spawn.sh
 
-- While `playground focus` stands (the data folder's `focus.json`, playbook's LIFECYCLE.md), spawn.sh refuses every start, naming focus's session and its end, but two: a reviewer or tester that reports to the focused session (a resume's, the worker its roster row names),
+- While `playground focus` stands (the data folder's `focus.json`, playbook's LIFECYCLE.md), spawn.sh refuses every start, naming focus's session, its end and its reason, but two: a reviewer or tester that reports to the focused session (a resume's, the worker its roster row names),
   and a `--priority` start while a priority file stands in the data folder: `priority.json`, an urgent window, or any `priority-<name>.json`, an org's own urgent window, a session's own window for that session's own start or a job's own start file, `priority-start.json`, each writer keeping its own file.
   Each one passes focus, and the gates SPAWN.md's Capacity gate names for a priority start.
 - A session opens a priority window only with `playground priority on <session> --reason "<why>"`, which writes `priority-<session>.json` naming the session, who opened it, the reason and the time, and lifts it with `playground priority off <session> --reason "<why>"`; a window written by hand passes no review of who opened it or why.
@@ -46,7 +46,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   and it pushes with `git push origin HEAD:<branch>`, since `-u` writes the shut `.git/config`.
   A start from inside the sandbox (`SANDBOX_RUNTIME=1`), where the Keychain reads as empty, leaves the `--account` and GLM key check to the new pane's shell, which runs outside it and stops on a missing item before claude runs.
   `--account <email>` logs the session in as that Claude account, and a worker's, reviewer's or tester's Claude start needs one while `usage.accounts` lists a Claude row, refused with those rows in order (playbook's SPAWN.md, --account): spawn.sh refuses an email that is not a plain `local@domain`,
-  starts one naming this machine's own login (Claude Code's `oauthAccount.emailAddress` in `.claude.json`, matched in any case) on that login with no token, the account split skipped and its usage judged as a bare start's, or on its seat token while ops-usage's fresh status reads its Claude Code login ended, whichever account `usage.json` reads (playbook's SPAWN.md, --account),
+  starts one naming this machine's own login (Claude Code's `oauthAccount.emailAddress` in `.claude.json`, matched in any case) on that login with no token, the account split skipped and its usage judged as a bare start's, or on its seat token while ops-usage's fresh status reads its Claude Code login ended, whichever account `usage.json` reads,
+  as a start or resume with no `--account` that lands on that login does (playbook's SPAWN.md, --account),
   and for any other checks only that the Keychain holds an item for it under the `usage.keychainService` setting's service (`playground-claude-oauth` by default),
   and the launch carries `CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password ... -w)"` as text for the new pane's shell to expand, so the token reaches no argv, output or log, and that shell stops there on an empty token or key, before claude runs.
   `--backend glm` runs the session on Z.ai's GLM through Claude Code (`ANTHROPIC_BASE_URL` its Anthropic-compatible endpoint, Opus and Sonnet mapped to `models.glm` with `[1m]` and Haiku to `models.glm`, 3x the plan's quota, the suffix gives Claude Code GLM's 1M window, compacting in the same 400k window as a Claude session does, with `ENABLE_TOOL_SEARCH=true`,
