@@ -3126,7 +3126,7 @@ async function inspect(
       const inner = c.inner?.()
       return inner && (inner.length > 0 || c.words.length === 0) ? inner : bodies.get(c)
     }
-    // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), a function body's positional parameter by its call's words as the shell gives them (positionals), one a call word the hook cannot read gives refused even when the check must be sure, and any other whose value the hook cannot read counts unless the check must be sure, failing closed as an unanswered git folder does
+    // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), a function body's positional parameter by its call's words as the shell gives them (positionals), one a call word the hook cannot read gives refused even when the check must be sure, a top-level set's words and an operator worked out on the value (operatedWords) only adding a refusal, and any other whose value the hook cannot read counts unless the check must be sure, failing closed as an unanswered git folder does
     const hookWord = (word: Word, here: Env, sure = false): boolean => {
       // a brace list or sequence counts by each value it expands to, and one the reader cannot expand as any other unread target does
       const braced = braceValues(word)
