@@ -153,9 +153,9 @@ export const approvalPicks = (
   return { keep: of("keep"), remove: of("remove") }
 }
 
-// Pure: the saved list id names in nightly-clean's state, or none.
+// Pure: the saved list id names in nightly-clean's state, tonight's `card` or `sent`, the last list's items sent to Ops for a peer, or none.
 export const listOf = (saved: { card?: CardState; sent?: CardState }, id: string) =>
-  saved.card?.id === id ? saved.card : undefined
+  saved.card?.id === id ? saved.card : saved.sent?.id === id ? saved.sent : undefined
 
 // Pure: the command each peer runs for one approved item, since approved weights reach a peer only as a narrow `playground rm --peer` that re-checks there before deleteWeights, while an image is `docker image rm` and a replay a `playground rm` with a reason.
 export const peerCommand = (item: CardItem, card: string): string =>
@@ -180,7 +180,7 @@ export type CardDeps = {
 
 const lastLine = (out: string) => out.trim().split("\n").at(-1) ?? ""
 
-// One night of the list: the saved list's approved Removes still listed tonight at the same size are removed here (deps.remove) or sent to Ops for a peer, each approved Keep held at its size, and every item no line approves comes back on tonight's list; then a new list of what is left is saved and sent to Ops as one line, and no Inbox item is posted. Returns the list and kept to save, the log's words, and each line for Ops.
+// One night of the list: the saved list's approved Removes still listed tonight at the same size are removed here (deps.remove) or sent to Ops for a peer, each approved Keep held at its size, and every item no line approves comes back on tonight's list; then a new list of what is left is saved and sent to Ops as one line, and no Inbox item is posted. Returns the list and kept to save, the saved list's items sent to Ops as `sent` (its id and write time kept, so a peer's `playground rm --card <id> --peer` line still reads after the new list replaces it), the log's words, and each line for Ops.
 export async function cardNight(
   found: Machine[],
   home: string,
@@ -192,6 +192,7 @@ export async function cardNight(
   const said: string[] = []
   const done = new Set<string>()
   const list = saved.card
+  let sent: CardState | undefined
   if (list) {
     const counted = approvalPicks(await deps.approvals(), list, list.id)
     const { keep, remove } = typeof counted === "string" ? { keep: [], remove: [] } : counted
@@ -208,7 +209,7 @@ export async function cardNight(
       ),
     )
     let removed = 0
-    let sent = 0
+    const toOps: CardItem[] = []
     for (const asked of remove) {
       done.add(keyOf(asked))
       if (listed.get(keyOf(asked)) !== asked.bytes) {
@@ -217,7 +218,7 @@ export async function cardNight(
       }
       if (asked.machine !== deps.here) {
         ops.push(`list ${list.id} approved on ${asked.machine}: ${peerCommand(asked, list.id)}`)
-        sent++
+        toOps.push(asked)
         continue
       }
       const ran = await deps.remove(asked, list.id)
@@ -228,14 +229,16 @@ export async function cardNight(
           : `kept ${asked.path}: ${lastLine(ran.out)}`,
       )
     }
-    said.unshift(`list ${list.id}: removed ${removed}, ${sent} to Ops, ${keep.length} kept`)
+    said.unshift(`list ${list.id}: removed ${removed}, ${toOps.length} to Ops, ${keep.length} kept`)
+    if (toOps.length) sent = { ...(list.at ? { at: list.at } : {}), id: list.id, items: toOps }
   }
   const tonight = offered(found, home, deps.out, kept)
     .filter((i) => !done.has(keyOf(i)))
     .slice(0, CARD_MAX)
-  if (!tonight.length) return { kept, ops, said: said.join("; ") }
+  const sentOf = sent ? { sent } : {}
+  if (!tonight.length) return { kept, ops, said: said.join("; "), ...sentOf }
   const next = { at: deps.now(), id: deps.id(), items: tonight }
   ops.push(listLine(next))
   said.push(`list ${next.id} sent to Ops, ${tonight.length} items`)
-  return { card: next, kept, ops, said: said.join("; ") }
+  return { card: next, kept, ops, said: said.join("; "), ...sentOf }
 }

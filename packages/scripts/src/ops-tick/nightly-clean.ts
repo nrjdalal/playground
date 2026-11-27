@@ -67,8 +67,14 @@ export type NightDeps = {
   unused: (ctx: Context) => Promise<Machine[]>
 }
 
-// The beat's own record: the last run's time, the night each image with no age docker knows was first read unused, by `<machine> <path>` (unused.ts's aged), the unused list the approvals name and each item kept (unused-card.ts); a decision or denied key an older run wrote is read past and dropped on the next write.
-type State = { at?: string; card?: CardState; imagesSeen?: Record<string, string>; kept?: Kept }
+// The beat's own record: the last run's time, the night each image with no age docker knows was first read unused, by `<machine> <path>` (unused.ts's aged), the unused list the approvals name, the last list's items sent to Ops for a peer under its own id (`sent`, until the next night's write) and each item kept (unused-card.ts); a decision or denied key an older run wrote is read past and dropped on the next write.
+type State = {
+  at?: string
+  card?: CardState
+  imagesSeen?: Record<string, string>
+  kept?: Kept
+  sent?: CardState
+}
 
 const lines = (out: string): string[] => out.split("\n").filter((l) => l.trim())
 const gbOf = (bytes: number): string => (bytes / GB).toFixed(1)
@@ -814,6 +820,7 @@ export const nightlyClean =
     const unused: string[] = []
     let imagesSeen = state.imagesSeen ?? {}
     let card = state.card
+    let sent = state.sent
     let keptItems = state.kept ?? {}
     await step("unused", async () => {
       const judged = aged(await deps.unused(ctx), imagesSeen, ctx.now.getTime())
@@ -864,6 +871,7 @@ export const nightlyClean =
         },
       )
       card = night.card
+      sent = night.sent
       keptItems = night.kept
       for (const line of night.ops) await ctx.send("ops", line)
       return night.said ? `${totals}; ${night.said}` : totals
@@ -890,6 +898,7 @@ export const nightlyClean =
         ...(card ? { card } : {}),
         ...(Object.keys(imagesSeen).length ? { imagesSeen } : {}),
         ...(Object.keys(keptItems).length ? { kept: keptItems } : {}),
+        ...(sent ? { sent } : {}),
       } satisfies State),
     )
     await mkdir(join(ctx.ops, "log"), { recursive: true })
