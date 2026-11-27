@@ -34,7 +34,7 @@ export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<numb
     return 2
   }
   if (!CARD_ID.test(card)) {
-    console.error(`playground: ${card} is not an Inbox card id`)
+    console.error(`playground: ${card} is not a nightly-clean card id`)
     return 2
   }
   // recorded: the path is on this peer's own machine record, or isWeights accepts it under ~/models or a recorded folder, so the peer uses the one shared rule

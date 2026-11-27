@@ -19949,7 +19949,19 @@ import { resolve as resolve15 } from "path";
 import { realpathSync as realpathSync7 } from "fs";
 import { homedir as homedir5 } from "os";
 import { basename as basename12, dirname as dirname11, resolve as resolve14 } from "path";
-var refuse15 = (what) => `no-roster-write hook refuses ${what}: the live roster changes only through scripts/roster.ts (the roster rule), so every reader sees it whole. Write it with bun scripts/roster.ts set <name> <key>=<value>, and read it with cat, jq or grep.`;
+var GUARDED2 = [
+  {
+    file: "roster.json",
+    noun: "the roster",
+    refuse: (what) => `no-roster-write hook refuses ${what}: the live roster changes only through scripts/roster.ts (the roster rule), so every reader sees it whole. Write it with bun scripts/roster.ts set <name> <key>=<value>, and read it with cat, jq or grep.`
+  },
+  {
+    file: "ops/tick/unused-approvals.jsonl",
+    noun: "the approvals log",
+    refuse: (what) => `no-roster-write hook refuses ${what}: the unused-space approvals log changes only through playground rm --approve, run by the Ops lead or a dispatcher, so each line names who approved it and nightly-clean removes only what they approved. Approve with playground rm --approve <id> <path> [--peer <machine>] [--keep], and read it with cat, jq or grep.`
+  }
+];
+var escape3 = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var READERS4 = new Set([
   "[",
   "basename",
@@ -20034,7 +20046,7 @@ var CODE_RUNNERS = new Set([
   "python3",
   "ruby"
 ]);
-var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i;
+var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*(?:roster\.json|unused-approvals\.jsonl)|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i;
 var PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g;
 var SHELL_WORDS = /(?<![\w.$-])(?:cp|mv|install)["']\s*,|(?:["'`]|\bqx\s*[{(\[<|/!]|%x[{(\[<|!])(?:cp|mv|install)\s+[^\s"'`)]+\s+(?:[^\s"'`)]|["'`]\s*[+%.])/i;
 var RUNS3 = /(?<![a-z0-9])(?:system|exec\w*|spawn\w*|popen\w*|check_output|check_call|call|run|capture\w*|get(?:status)?output|passthru|proc_open|command)\s*\(|\b(?:system|exec)\s+["']|\bOpen3\b|\bqx\s*[{(\[<|/!]|%x[{(\[<|!]|\$`|["']\|-["']/i;
@@ -20045,13 +20057,13 @@ var writesCode = (code, tool) => {
   const runs = RUNS3.test(cut) || BACKTICK_RUNNERS.has(tool) && BACKTICK_RUN.test(cut);
   return WRITE_WORDS.test(cut) || runs && SHELL_WORDS.test(cut);
 };
-var targetsOf = (environment) => {
+var targetsOf = (environment, file) => {
   const data = dataDirOf(environment);
   let real = data;
   try {
     real = realpathSync7(data);
   } catch {}
-  return [...new Set([data, real].map((d) => resolve14(d, "roster.json").toLowerCase()))];
+  return [...new Set([data, real].map((d) => resolve14(d, file).toLowerCase()))];
 };
 var segments = (path) => resolve14(path).toLowerCase().split("/").filter(Boolean);
 var isRoster = (path, targets, glob = false) => targets.some((target) => {
@@ -20061,16 +20073,27 @@ var isRoster = (path, targets, glob = false) => targets.some((target) => {
     return glob && p.some((s) => s.includes("**"));
   return p.every((s, i) => glob ? new Bun.Glob(s).match(t[i]) : s === t[i]);
 });
-var namesRoster = (text, targets) => {
+var namesRoster = (text, targets, file) => {
   const plain = text.replace(/["'\\]/g, "").toLowerCase();
-  return targets.some((t) => new RegExp(`${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(plain)) || /(?:\.playground|playground_data_dir\}?)\/+roster\.json(?![\w.-])/.test(plain);
+  return targets.some((t) => new RegExp(`${escape3(t)}(?![\\w.-])`).test(plain)) || new RegExp(`(?:\\.playground|playground_data_dir\\}?)\\/+${escape3(file).replaceAll("/", "\\/+")}(?![\\w.-])`).test(plain);
 };
-var namesBare = (text) => /(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(text.replace(/["'\\]/g, "").toLowerCase().replace(/(?<![\w.-])(?:\.\/)+/g, ""));
-var namesApart = (text, targets) => {
-  const plain = text.replace(/["'\\]/g, "").toLowerCase();
-  if (!namesBare(text))
-    return false;
-  return targets.some((t) => new RegExp(`${dirname11(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-]|/[\\w.-])`).test(plain)) || /\.playground(?![\w.-]|\/[\w.-])|playground_data_dir/.test(plain);
+var plainOf = (text) => text.replace(/["'\\]/g, "").toLowerCase().replace(/(?<![\w.-])(?:\.\/)+/g, "");
+var namesBare = (text, file) => new RegExp(`(?<![\\w.-]\\/)(?<![\\w.-])${escape3(basename12(file))}(?![\\w.-])`).test(plainOf(text));
+var namesApart = (text, targets, file) => {
+  const plain = plainOf(text);
+  const parts = file.split("/");
+  return parts.some((_, i) => {
+    const rest = parts.slice(i).join("/");
+    if (!new RegExp(`(?<![\\w.-]\\/)(?<![\\w.-])${escape3(rest)}(?![\\w.-])`).test(plain))
+      return false;
+    const up = parts.length - i;
+    return targets.some((t) => {
+      let folder = t;
+      for (let n = 0;n < up; n++)
+        folder = dirname11(folder);
+      return new RegExp(`${escape3(folder)}(?![\\w.-]|/[\\w.-])`).test(plain);
+    }) || /\.playground(?![\w.-]|\/[\w.-])|playground_data_dir/.test(plain);
+  });
 };
 var knownOf = (at) => {
   const known = { ...at.known };
@@ -20148,9 +20171,10 @@ var destinationOf = (tool, args) => {
     return args[t].value.includes("=") ? args[t] : args[t + 1];
   return args.filter((a) => !a.value.startsWith("-")).at(-1);
 };
-async function judgeBash(command, cwd, environment) {
-  const targets = targetsOf(environment);
-  const named = namesRoster(command, targets);
+async function judgeBash(command, cwd, environment, { file, noun, refuse }) {
+  const base = basename12(file);
+  const targets = targetsOf(environment, file);
+  const named = namesRoster(command, targets, file);
   const env = {
     cwd,
     cwdSure: cwd,
@@ -20247,7 +20271,7 @@ async function judgeBash(command, cwd, environment) {
       const read = readOf(word, at);
       if (!read || read.value.includes("\\"))
         return true;
-      return new Bun.Glob(insensitive ? read.value.toLowerCase() : read.value).match("roster.json");
+      return new Bun.Glob(insensitive ? read.value.toLowerCase() : read.value).match(base);
     });
   };
   const isFind = (cmd) => !!cmd && FINDS.has(toolOf(cmd.words[0]?.value ?? ""));
@@ -20264,7 +20288,7 @@ async function judgeBash(command, cwd, environment) {
     const items = itemsOf(out.value);
     if (items.length > ITEMS)
       return viaXargs && unseenHolds(at);
-    return namesRoster(out.value, targets) || items.some((w) => writes(w, at));
+    return namesRoster(out.value, targets, file) || items.some((w) => writes(w, at));
   };
   const xargsRuns = async (cmd, args, xargs, at) => {
     const mark = xargs.replace;
@@ -20310,14 +20334,14 @@ async function judgeBash(command, cwd, environment) {
     const args = parsed.args.map((a) => sharpened(a, at));
     for (const r of cmd.redirects)
       if (r.target && r.op.includes(">") && writes(sharpened(r.target, at), at, true))
-        return refuse15(`a redirect onto ${shown4(r.target)}`);
+        return refuse(`a redirect onto ${shown4(r.target)}`);
     if (!program(name))
       return;
     const tool = toolOf(name);
     if (cmd.feedsShell) {
       const xargsFed = lexed.commands.some((c) => c.stdin === cmd && program(c.words[0]?.value ?? "") === "xargs");
       if (await listsRoster(cmd, args, tool, at, xargsFed))
-        return refuse15(`${tool} feeding the roster to a program that runs it as code`);
+        return refuse(`${tool} feeding ${noun} to a program that runs it as code`);
     }
     if (xargs) {
       const runs = await xargsRuns(cmd, args, xargs, at);
@@ -20332,10 +20356,10 @@ async function judgeBash(command, cwd, environment) {
     if (FINDS.has(tool)) {
       for (const [i, a] of args.entries())
         if (FIND_FILES.has(a.value) && args[i + 1] && writes(args[i + 1], at, true))
-          return refuse15(`${tool} ${a.value} onto ${shown4(args[i + 1])}`);
+          return refuse(`${tool} ${a.value} onto ${shown4(args[i + 1])}`);
       const reached = reaches(args, at);
       if (reached && args.some((a) => a.value === "-delete"))
-        return refuse15(`${tool} -delete reaching the roster`);
+        return refuse(`${tool} -delete reaching ${noun}`);
       for (const [i, a] of args.entries()) {
         if (!FIND_EXECS.has(a.value) || !args[i + 1])
           continue;
@@ -20360,30 +20384,30 @@ async function judgeBash(command, cwd, environment) {
       }
       return;
     }
-    if (CODE_RUNNERS.has(tool) && args.some((a) => (namesRoster(a.value, targets) || namesApart(a.value, targets) || intoRoster.has(a) || namesBare(a.value) && inOwnFolder(at)) && writesCode(a.value, tool)))
-      return refuse15(`${tool} code that names the roster and holds a write word`);
+    if (CODE_RUNNERS.has(tool) && args.some((a) => (namesRoster(a.value, targets, file) || namesApart(a.value, targets, file) || intoRoster.has(a) || namesBare(a.value, file) && inOwnFolder(at)) && writesCode(a.value, tool)))
+      return refuse(`${tool} code that names ${noun} and holds a write word`);
     if (PLACERS.has(tool)) {
       const dest = destinationOf(tool, args);
       if (dest && writes(dest, at, true))
-        return refuse15(`${tool} onto ${shown4(dest)}`);
+        return refuse(`${tool} onto ${shown4(dest)}`);
       const into = dest ? pathsOf(dest, at) ?? [] : [];
       const sources = args.filter((a) => a !== dest && !a.value.startsWith("-"));
-      if (sources.some((s) => basename12(s.value).toLowerCase() === "roster.json") && into.some(({ path }) => isRoster(resolve14(path, "roster.json"), targets)))
-        return refuse15(`${tool} of a roster.json into ${dest && shown4(dest)}`);
+      if (sources.some((s) => basename12(s.value).toLowerCase() === base) && into.some(({ path }) => isRoster(resolve14(path, base), targets)))
+        return refuse(`${tool} of a ${base} into ${dest && shown4(dest)}`);
       if (COPIERS2.has(tool))
         return;
     }
     if (SEDS3.has(tool)) {
-      const script = (a) => namesRoster(a.source ?? a.value, targets) && !(pathsOf(a, at) ?? []).some(({ glob, path }) => isRoster(path, targets, glob));
+      const script = (a) => namesRoster(a.source ?? a.value, targets, file) && !(pathsOf(a, at) ?? []).some(({ glob, path }) => isRoster(path, targets, glob));
       if (args.some(script))
-        return refuse15(`${tool} whose script names the roster`);
+        return refuse(`${tool} whose script names ${noun}`);
       if (!inPlace2(args))
         return;
     }
     if (tool === "sort") {
       for (const out of sortOutputs(args))
         if (writes(out, at, true))
-          return refuse15(`sort -o onto ${shown4(out)}`);
+          return refuse(`sort -o onto ${shown4(out)}`);
     }
     if (READERS4.has(tool))
       return;
@@ -20392,11 +20416,11 @@ async function judgeBash(command, cwd, environment) {
     if (flag && args.some((a) => flag.test(a.value) || a.value === "--recursive")) {
       for (const word of args)
         if (!word.value.startsWith("-") && (holdsWord(word, at) || !pathsOf(word, at) && near))
-          return refuse15(`${tool} recursing into ${shown4(word)}`);
+          return refuse(`${tool} recursing into ${shown4(word)}`);
     }
     for (const word of args)
       if ((writer || marked(name) || !unseen.has(word)) && writes(word, at, writer))
-        return refuse15(`${tool} on ${shown4(word)}`);
+        return refuse(`${tool} on ${shown4(word)}`);
   };
   return run2(lexed, env, visit, true);
 }
@@ -20408,24 +20432,30 @@ async function inspect18(raw, environment) {
     tool_name: tool
   } = JSON.parse(raw);
   const folder = typeof cwd === "string" ? cwd : undefined;
-  if (tool === "Bash" && typeof input?.command === "string")
-    return judgeBash(input.command, folder, environment);
-  if (typeof tool === "string" && FILE_TOOLS5.has(tool)) {
-    const path = input?.file_path ?? input?.notebook_path;
-    if (typeof path === "string" && isRoster(resolve14(folder ?? "/", path), targetsOf(environment)))
-      return refuse15(`a ${tool} of ${path}`);
+  for (const guarded of GUARDED2) {
+    if (tool === "Bash" && typeof input?.command === "string") {
+      const found = await judgeBash(input.command, folder, environment, guarded);
+      if (found)
+        return found;
+    }
+    if (typeof tool === "string" && FILE_TOOLS5.has(tool)) {
+      const path = input?.file_path ?? input?.notebook_path;
+      if (typeof path === "string" && isRoster(resolve14(folder ?? "/", path), targetsOf(environment, guarded.file)))
+        return guarded.refuse(`a ${tool} of ${path}`);
+    }
   }
 }
 async function check25(raw, environment = process.env) {
   try {
     return await eachInput(raw, "no-roster-write", (one) => inspect18(one, environment));
   } catch {
-    return namesRoster(raw, targetsOf(environment)) ? refuse15("a call naming the roster that it cannot read") : undefined;
+    const guarded = GUARDED2.find(({ file }) => namesRoster(raw, targetsOf(environment, file), file));
+    return guarded?.refuse(`a call naming ${guarded.noun} that it cannot read`);
   }
 }
 
 // scripts/hooks/no-raw-wa.ts
-var refuse16 = (what) => `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`;
+var refuse15 = (what) => `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`;
 var refuseJob = (what) => `no-raw-wa hook refuses ${what}: the relay tags each line with its queue's job, and a line tagged [ops-wa] or [ops-dm-watch] reads as the owner's own words, so only ops-wa and ops-dm-watch queue under those jobs. Queue your line under your own job, notify.sh <your job> <text>, or tell your manager with SendMessage.`;
 var OWNER_JOBS = new Set(["dm-watch", "wa"]);
 var RECURSIVE2 = new Set(["ack", "ag", "ditto", "find", "rg", "rsync", "tar"]);
@@ -20512,7 +20542,7 @@ var ownerJob = (name, args, at) => {
 async function judgeBash2(command, cwd, environment) {
   const targets = targetsOf2(environment);
   if (namesTarget(command, targets))
-    return refuse16("a command naming whatsapp/ in the data folder");
+    return refuse15("a command naming whatsapp/ in the data folder");
   if (namesOwnerJob(command))
     return refuseJob("a command naming an owner-word job's queue");
   const queues = queuesOf(environment);
@@ -20535,7 +20565,7 @@ async function judgeBash2(command, cwd, environment) {
     ];
     for (const place of places(at)) {
       if (place.cwd && worst(place.cwd, targets) === "inside")
-        return refuse16(`a command run inside whatsapp/ in the data folder`);
+        return refuse15(`a command run inside whatsapp/ in the data folder`);
       for (const typed of words) {
         const word = readOf2(typed, at);
         if (!word?.value)
@@ -20547,11 +20577,11 @@ async function judgeBash2(command, cwd, environment) {
             continue;
           const stands = worst(path, targets, !!word.glob);
           if (stands === "inside")
-            return refuse16(`${visible(word.value)}, which reaches whatsapp/ in the data folder`);
+            return refuse15(`${visible(word.value)}, which reaches whatsapp/ in the data folder`);
           if (worst(path, queues, !!word.glob) === "inside")
             return refuseJob(`${visible(word.value)}, an owner-word job's queue`);
           if (stands === "above" && recursive4(program(name), args))
-            return refuse16(`${name} through ${visible(word.value)}, which reads whatsapp/ in the data folder on its way down`);
+            return refuse15(`${name} through ${visible(word.value)}, which reads whatsapp/ in the data folder on its way down`);
         }
       }
     }
@@ -20572,7 +20602,7 @@ async function inspect19(raw, environment) {
   if (typeof tool === "string" && FILE_TOOLS6.has(tool)) {
     const path = input?.file_path ?? input?.notebook_path;
     if (typeof path === "string" && worst(path, targets) === "inside")
-      return refuse16(`a ${tool} of ${path}`);
+      return refuse15(`a ${tool} of ${path}`);
     if (typeof path === "string" && worst(path, queuesOf(environment)) === "inside")
       return refuseJob(`a ${tool} of ${path}, an owner-word job's queue`);
     return;
@@ -20583,10 +20613,10 @@ async function inspect19(raw, environment) {
       return;
     const at = worst(path, targets);
     if (at === "inside" || tool === "Grep" && at === "above")
-      return refuse16(`a ${tool} through ${path}, which reads whatsapp/ in the data folder`);
+      return refuse15(`a ${tool} through ${path}, which reads whatsapp/ in the data folder`);
     const pattern = input?.pattern;
     if (tool === "Glob" && typeof pattern === "string" && worst(resolve15(path, pattern), targets, true) === "inside")
-      return refuse16(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
+      return refuse15(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
   }
 }
 async function check26(raw, environment = process.env) {
@@ -20767,7 +20797,7 @@ function decide2(candidates) {
   const repo = candidates[hit];
   return { guarded: true, label: repo ? `${repo.owner}/${repo.repo}` : UNRESOLVED };
 }
-function refuse17(what, target, detail, fix) {
+function refuse16(what, target, detail, fix) {
   return `no-release-comment hook refused ${what} on ${target.label}: ${detail}. On a guarded owner's repos an owner comment containing "release" in any case publishes to npm, and gh and the GitHub MCP post as that owner. ${fix}`;
 }
 var READABLE2 = "Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md).";
@@ -20778,16 +20808,16 @@ async function judge8(what, target, bodies, env, fix = READABLE2) {
     return;
   const texts = await Promise.all(bodies.map((b) => resolveText(b, env)));
   if (texts.some((t) => WORD2.test(visible(t.value))))
-    return refuse17(what, target, 'its text contains "release"', REWORD);
+    return refuse16(what, target, 'its text contains "release"', REWORD);
   const hidden = texts.find((t) => t.unknown);
   if (hidden) {
-    return refuse17(what, target, `the hook cannot read its text before the command runs (it comes from ${hidden.unknown})`, fix);
+    return refuse16(what, target, `the hook cannot read its text before the command runs (it comes from ${hidden.unknown})`, fix);
   }
 }
 function mcp4(tool, input) {
   const what = tool.replace(/^mcp__/, "");
   if (!input)
-    return refuse17(what, { guarded: true, label: UNRESOLVED }, "its input is not an object", REWORD);
+    return refuse16(what, { guarded: true, label: UNRESOLVED }, "its input is not an object", REWORD);
   const { body, owner, repo } = input;
   if (body === undefined || body === null)
     return;
@@ -20796,9 +20826,9 @@ function mcp4(tool, input) {
   if (!target.guarded)
     return;
   if (typeof body !== "string")
-    return refuse17(what, target, "its body is not text the hook can read", REWORD);
+    return refuse16(what, target, "its body is not text the hook can read", REWORD);
   if (WORD2.test(body))
-    return refuse17(what, target, 'its text contains "release"', REWORD);
+    return refuse16(what, target, 'its text contains "release"', REWORD);
 }
 var commentCall = (raw) => GH3.test(raw) && COMMENT_CALL.test(raw);
 function candidate7(command) {
@@ -20863,7 +20893,7 @@ if (false) {}
 import { existsSync as existsSync11, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync3 } from "fs";
 import { tmpdir } from "os";
 import { join as join22, resolve as resolve16, sep as sep6 } from "path";
-var refuse18 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
+var refuse17 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var refuseDocker = (what, cd, command, fix) => fix ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}` : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var COMMIT_TAKES3 = new Set([
   "--author",
@@ -21215,7 +21245,7 @@ function inspect21(raw, environment, main) {
         return;
       const moved = here.cwd !== undefined && (directory === undefined || resolve16(here.cwd) !== resolve16(directory));
       const cd = moved ? `cd ${quotedDir(here.cwd)} && ` : "";
-      return found.anywhere ? refuseDocker(found.what, cd, line, found.fix) : refuse18(found.what, cd, line);
+      return found.anywhere ? refuseDocker(found.what, cd, line, found.fix) : refuse17(found.what, cd, line);
     }
   };
   const env = {
