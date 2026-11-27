@@ -59,7 +59,7 @@ export const factoryRepoOf = async (
   return repo
 }
 
-// slots.windowJob as the login's scope sets it, else the first an org's sets, A to Z: its orgs.<org> in policy.json, then an org extension's own settings.json, since an org's window belongs in its scope; "" when none sets it or a read fails, so no window stands (issue 3187).
+// slots.windowJob as the login's scope sets it, else the first an org's sets, A to Z: its orgs.<org> in policy.json, then an org extension's own settings.json, since an org's window belongs in its scope; "" when none sets it, so no window stands, a read that fails skipping its own source (issue 3187).
 export const windowJob = (
   settings: Settings,
   data: string,
@@ -70,21 +70,29 @@ export const windowJob = (
   const schema = settingFields().find(({ key }) => key === "slots.windowJob")!.field.schema
   const valid = (value: unknown): string =>
     typeof value === "string" && schema.safeParse(value).success ? value : ""
-  try {
-    for (const org of guardedOrgs(settings.values)) {
-      const value = valid(readPolicyOrDefaults(data, org).settings?.values["slots.windowJob"])
-      if (value) return value
+  // each read on its own, so one that fails (a bad ext.links, a scope with no settings.json or one that does not parse) skips that source alone
+  const tried = <T>(read: () => T, none: T): T => {
+    try {
+      return read()
+    } catch {
+      return none
     }
-    const login = loginOf(data, environment)
-    for (const scope of scopesIn(data).filter((name) => name !== login && name !== CORE)) {
-      const value = valid(
-        JSON.parse(readFileSync(join(scopeDir(data, scope), "settings.json"), "utf8"))?.[
-          "slots.windowJob"
-        ],
-      )
-      if (value) return value
-    }
-  } catch {}
+  }
+  for (const org of tried(() => guardedOrgs(settings.values), [] as string[])) {
+    const value = valid(
+      tried(() => readPolicyOrDefaults(data, org).settings?.values["slots.windowJob"], ""),
+    )
+    if (value) return value
+  }
+  const login = tried(() => loginOf(data, environment), "")
+  for (const scope of tried(() => scopesIn(data), [] as string[])) {
+    if (scope === login || scope === CORE) continue
+    const file = join(scopeDir(data, scope), "settings.json")
+    const value = valid(
+      tried(() => JSON.parse(readFileSync(file, "utf8"))?.["slots.windowJob"], ""),
+    )
+    if (value) return value
+  }
   return ""
 }
 

@@ -168,13 +168,14 @@ test("--guarded-orgs prints every org ext.links links, none with no store, and e
 describe("slots.windowJob, which run-slot and spawn.sh read an org's window by", () => {
   const LINKS = { "ext.links": { acme: ["acme-co"] } }
   const job = async (data: string) => await exit(["slots.windowJob"], data)
-  // a data folder whose login is made-up-me, with each scope a clone holding its own settings.json
-  const scoped = async (name: string, scopes: Record<string, string>, values = {}) => {
+  // a data folder whose login is made-up-me, with each scope a clone holding its own settings.json, or none where its text is undefined
+  const scoped = async (name: string, scopes: Record<string, string | undefined>, values = {}) => {
     const data = render(name, values)
     await Bun.write(join(extensionsDir(data), "login"), "made-up-me\n")
     for (const [scope, text] of Object.entries({ "made-up-me": "{}", ...scopes })) {
       mkdirSync(join(extensionsDir(data), scope, ".git"), { recursive: true })
-      await Bun.write(join(extensionsDir(data), scope, "settings.json"), text)
+      if (text !== undefined)
+        await Bun.write(join(extensionsDir(data), scope, "settings.json"), text)
     }
     return data
   }
@@ -201,6 +202,15 @@ describe("slots.windowJob, which run-slot and spawn.sh read an org's window by",
       acme: JSON.stringify({ "slots.windowJob": "acme-start" }),
     })
     expect((await job(data)).out).toBe('"acme-start"')
+  })
+
+  test("a scope whose settings.json is missing or does not parse is skipped, and a later one A to Z is read", async () => {
+    const zeta = JSON.stringify({ "slots.windowJob": "zeta-start" })
+    for (const [name, acme] of [
+      ["window-missing-first", undefined],
+      ["window-unparsed-first", "{"],
+    ] as const)
+      expect((await job(await scoped(name, { acme, zeta }))).out).toBe('"zeta-start"')
   })
 
   test("the login's value wins over every org's", async () => {
