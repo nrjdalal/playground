@@ -376,6 +376,9 @@ describe("a roster under a temp folder whose name holds rm", () => {
     `python3 -c "print(open('${roster}').read())"`,
     `node -e "console.log(require('fs').readFileSync('${roster}', 'utf8'))"`,
     `python3 -c "print(open('/tmp/no-roster-write/x').read(), open('${roster}').read())"`,
+    // a list's or a form's append is no write: only an appendFile call is
+    `python3 -c "import json; l = list(json.load(open('${roster}'))); l.append(1); print(l)"`,
+    `bun -e "const r = require('fs').readFileSync('${roster}', 'utf8'); const q = new URLSearchParams(); q.append('n', r.length); console.log(q)"`,
   ])("runs %s", async (command) => {
     expect(await under(command)).toBeUndefined()
   })
@@ -400,6 +403,8 @@ describe("a roster under a temp folder whose name holds rm", () => {
     `perl -e 'unlink/**/("${roster}")'`,
     `perl -e 'unlink/1/("${roster}")'`,
     `bun -e "await Bun.write/**/('${roster}', '{}')"`,
+    `node -e "require('fs').appendFileSync('${roster}', 'x')"`,
+    `node -e "require('fs').promises.appendFile('${roster}', 'x')"`,
   ])("refuses %s", async (command) => {
     expect(await under(command)).toContain("scripts/roster.ts")
   })
