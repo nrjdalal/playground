@@ -196,7 +196,7 @@ const resolveOwn = async (ctx: Context, id: string, by: string, note: string) =>
 
 type FocusCardKept = { by: string; id: string; since: string; until: string }
 
-// Once focus has ended, by off or at its end, one Inbox update under the ops manager's name names what queued while it stood (focusCard), kept in tick/focus-cards.json; a card kept at an earlier beat resolves once no ask posted while its focus stood is open, since what it pointed at is answered; a card that fails stays for the next beat, and the first failure throws once the rest are tried and the new card posted.
+// Once focus has ended, by off or at its end, one Inbox update under the ops manager's name names what queued while it stood (focusCard), kept in tick/focus-cards.json; a card kept at an earlier beat resolves once no ask posted while its focus stood is open and awake, since what it pointed at is answered or put away; a card that fails stays for the next beat, and the first failure throws once the rest are tried and the new card posted.
 const focusCardBeat = async (ctx: Context) => {
   const keptPath = join(ctx.ops, "tick", "focus-cards.json")
   const kept = ((await readJson(keptPath).catch(() => [])) ?? []) as FocusCardKept[]
@@ -299,7 +299,7 @@ export const runSlotHold = async (ctx: Context) => {
   if (JSON.stringify(told) !== before) await writeAtomic(toldPath, JSON.stringify(told))
 }
 
-// One kept focus card resolved, true, once no ask posted in its window is open; false while one is
+// One kept focus card resolved, true, once no ask posted in its window is open and awake (ask open --awake leaves out what the owner archived or put off with Later); false while one is
 const settleFocusCard = async (ctx: Context, card: FocusCardKept): Promise<boolean> => {
   const open = await ctx.run([
     "bun",
@@ -309,6 +309,7 @@ const settleFocusCard = async (ctx: Context, card: FocusCardKept): Promise<boole
     ctx.repo,
     "ask",
     "open",
+    "--awake",
     "--since",
     card.since,
     "--until",
@@ -316,7 +317,12 @@ const settleFocusCard = async (ctx: Context, card: FocusCardKept): Promise<boole
   ])
   if (open.code !== 0) throw new Error(`bun run ask open: ${lines(open.out).at(-1)}`)
   if (lines(open.out).some((line) => /^#i\d+ /.test(line.trim()))) return false
-  await resolveOwn(ctx, card.id, card.by, "Everything that came in while focus stood is answered")
+  await resolveOwn(
+    ctx,
+    card.id,
+    card.by,
+    "Everything that came in while focus stood is answered or put away",
+  )
   return true
 }
 

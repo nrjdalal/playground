@@ -1,4 +1,4 @@
-// A check for a factory session: refuses an Edit, a Write or a shell write to the live roster, the data folder's roster.json, whose one writer is scripts/roster.ts (the roster rule), and lets its readers (READERS) run. guards.ts runs it on Bash and no-raw-wa's process on the file tools, so it has no main block of its own. A write position it cannot read, where the call may build it toward the file (builtToward), is refused, failing closed.
+// A check for a factory session: refuses an Edit, a Write or a shell write to each file of the data folder's GUARDED, the live roster (roster.json, whose one writer is scripts/roster.ts by the roster rule) and the unused-space approvals log (ops/tick/unused-approvals.jsonl, whose one writer is playground rm --approve), and lets their readers (READERS) run. guards.ts runs it on Bash and no-raw-wa's process on the file tools, so it has no main block of its own. A write position it cannot read, where the call may build it toward the file (builtToward), is refused, failing closed.
 import { realpathSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, resolve } from "node:path"
@@ -27,8 +27,25 @@ import { heldWord, namings, steadyNames } from "./steady"
 
 type Environment = Record<string, string | undefined>
 
-const refuse = (what: string) =>
-  `no-roster-write hook refuses ${what}: the live roster changes only through scripts/roster.ts (the roster rule), so every reader sees it whole. Write it with bun scripts/roster.ts set <name> <key>=<value>, and read it with cat, jq or grep.`
+type Guarded = { file: string; noun: string; refuse: (what: string) => string }
+
+// Each file the hook guards, its path under the data folder, the name a refusal gives it and its refusal, which names its one writer.
+const GUARDED: Guarded[] = [
+  {
+    file: "roster.json",
+    noun: "the roster",
+    refuse: (what) =>
+      `no-roster-write hook refuses ${what}: the live roster changes only through scripts/roster.ts (the roster rule), so every reader sees it whole. Write it with bun scripts/roster.ts set <name> <key>=<value>, and read it with cat, jq or grep.`,
+  },
+  {
+    file: "ops/tick/unused-approvals.jsonl",
+    noun: "the approvals log",
+    refuse: (what) =>
+      `no-roster-write hook refuses ${what}: the unused-space approvals log changes only through playground rm --approve, run by the Ops lead or a dispatcher, so each line names who approved it and nightly-clean removes only what they approved. Approve with playground rm --approve <id> <path> [--peer <machine>] [--keep], and read it with cat, jq or grep.`,
+  },
+]
+
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 // Programs that only read the files they name, so the roster as their operand stays as it is.
 const READERS = new Set([
@@ -110,7 +127,7 @@ const RECURSIVE = new Map([
   ["zstd", /^-[A-Za-z0-9]*r/],
 ])
 
-// Programs that run inline code the hook does not parse: code naming the roster, its folder and a bare roster.json apart, or a bare roster.json run from the roster's own folder, runs only when it holds no write word (WRITE_WORDS).
+// Programs that run inline code the hook does not parse: code naming a guarded file, a folder of its and the rest of its path apart, or its bare name run from its own folder, runs only when it holds no write word (WRITE_WORDS).
 const CODE_RUNNERS = new Set([
   "awk",
   "bun",
@@ -125,9 +142,9 @@ const CODE_RUNNERS = new Set([
   "ruby",
 ])
 
-// A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a remove, delete or move call, a truncate, an append, a replace (a path's one-argument replace too), a mode, owner or flags change (an l or f before it too), a copy, move or install call onto a roster.json or onto a destination that is no string literal, or a redirect's > (an arrow's => and a comparison's >= aside).
+// A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a remove, delete or move call, a truncate, an append, a replace (a path's one-argument replace too), a mode, owner or flags change (an l or f before it too), a copy, move or install call onto a guarded file's name (GUARDED's roster.json or unused-approvals.jsonl) or onto a destination that is no string literal, or a redirect's > (an arrow's => and a comparison's >= aside).
 const WRITE_WORDS =
-  /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i
+  /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*(?:roster\.json|unused-approvals\.jsonl)|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i
 // A path in the code, from its first slash, its segments up to a quote, a blank, a bracket or a shell operator: its folders (a temp folder's -rMNlX1, a no-roster-write folder) hold no write, and its last segment (/bin/rm) and the word before its first slash (writeFileSync/**/) are kept.
 const PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g
 // cp, mv or install as a shell word: a quoted list item, or a string (a quote, a backtick, perl's qx or ruby's %x) it opens with two operands, or one and a string joined on with +, % or the dot.
@@ -145,14 +162,14 @@ const writesCode = (code: string, tool: string) => {
   return WRITE_WORDS.test(cut) || (runs && SHELL_WORDS.test(cut))
 }
 
-// The live roster, as typed and as the data folder's links resolve, each in lower case, since macOS opens a path in any case.
-const targetsOf = (environment: Environment): string[] => {
+// A guarded file, as typed and as the data folder's links resolve, each in lower case, since macOS opens a path in any case.
+const targetsOf = (environment: Environment, file: string): string[] => {
   const data = dataDirOf(environment)
   let real = data
   try {
     real = realpathSync(data)
   } catch {}
-  return [...new Set([data, real].map((d) => resolve(d, "roster.json").toLowerCase()))]
+  return [...new Set([data, real].map((d) => resolve(d, file).toLowerCase()))]
 }
 
 const segments = (path: string) => resolve(path).toLowerCase().split("/").filter(Boolean)
@@ -166,36 +183,45 @@ const isRoster = (path: string, targets: string[], glob = false) =>
     return p.every((s, i) => (glob ? new Bun.Glob(s).match(t[i]!) : s === t[i]))
   })
 
-// Whether a call's text names the roster, as its path or under .playground or $PLAYGROUND_DATA_DIR, whatever reads it.
-const namesRoster = (text: string, targets: string[]) => {
+// Whether a call's text names the file, as its path or under .playground or $PLAYGROUND_DATA_DIR, whatever reads it.
+const namesRoster = (text: string, targets: string[], file: string) => {
   const plain = text.replace(/["'\\]/g, "").toLowerCase()
   return (
-    targets.some((t) =>
-      new RegExp(`${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(plain),
-    ) || /(?:\.playground|playground_data_dir\}?)\/+roster\.json(?![\w.-])/.test(plain)
+    targets.some((t) => new RegExp(`${escape(t)}(?![\\w.-])`).test(plain)) ||
+    new RegExp(
+      `(?:\\.playground|playground_data_dir\\}?)\\/+${escape(file).replaceAll("/", "\\/+")}(?![\\w.-])`,
+    ).test(plain)
   )
 }
 
-// Whether text names a bare roster.json, one no path segment comes before (a ./ aside), which is the roster from its own folder.
-const namesBare = (text: string) =>
-  /(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(
-    text
-      .replace(/["'\\]/g, "")
-      .toLowerCase()
-      .replace(/(?<![\w.-])(?:\.\/)+/g, ""),
-  )
+// Text with its quotes and backslashes gone, in lower case, a leading ./ dropped from each path
+const plainOf = (text: string) =>
+  text
+    .replace(/["'\\]/g, "")
+    .toLowerCase()
+    .replace(/(?<![\w.-])(?:\.\/)+/g, "")
 
-// Whether code names the roster's folder itself (not a deeper path in it) and a bare roster.json apart (a cd into the folder, a path join), which the code may join into the roster.
-const namesApart = (text: string, targets: string[]) => {
-  const plain = text.replace(/["'\\]/g, "").toLowerCase()
-  if (!namesBare(text)) return false
-  return (
-    targets.some((t) =>
-      new RegExp(`${dirname(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-]|/[\\w.-])`).test(
-        plain,
-      ),
-    ) || /\.playground(?![\w.-]|\/[\w.-])|playground_data_dir/.test(plain)
-  )
+// Whether text names a guarded file's bare name, one no path segment comes before (a ./ aside), which is the file from its own folder.
+const namesBare = (text: string, file: string) =>
+  new RegExp(`(?<![\\w.-]\\/)(?<![\\w.-])${escape(basename(file))}(?![\\w.-])`).test(plainOf(text))
+
+// Whether code names a folder from the data folder down to the file's own (not a deeper path in it) and the rest of the file's path apart (a cd into the folder, a path join), which the code may join into the file.
+const namesApart = (text: string, targets: string[], file: string) => {
+  const plain = plainOf(text)
+  const parts = file.split("/")
+  return parts.some((_, i) => {
+    const rest = parts.slice(i).join("/")
+    if (!new RegExp(`(?<![\\w.-]\\/)(?<![\\w.-])${escape(rest)}(?![\\w.-])`).test(plain))
+      return false
+    const up = parts.length - i
+    return (
+      targets.some((t) => {
+        let folder = t
+        for (let n = 0; n < up; n++) folder = dirname(folder)
+        return new RegExp(`${escape(folder)}(?![\\w.-]|/[\\w.-])`).test(plain)
+      }) || /\.playground(?![\w.-]|\/[\w.-])|playground_data_dir/.test(plain)
+    )
+  })
 }
 
 // The variables the call has set by then, each read as the shell gives it: one set from another (`E=$D`) is read again from its own text with the ones before it, unless a scope this one copied set it or one it reads was set again after it.
@@ -298,9 +324,15 @@ const destinationOf = (tool: string, args: Word[]): Word | undefined => {
   return args.filter((a) => !a.value.startsWith("-")).at(-1)
 }
 
-async function judgeBash(command: string, cwd: string | undefined, environment: Environment) {
-  const targets = targetsOf(environment)
-  const named = namesRoster(command, targets)
+async function judgeBash(
+  command: string,
+  cwd: string | undefined,
+  environment: Environment,
+  { file, noun, refuse }: Guarded,
+) {
+  const base = basename(file)
+  const targets = targetsOf(environment, file)
+  const named = namesRoster(command, targets, file)
   const env: Env = {
     cwd,
     cwdSure: cwd,
@@ -416,7 +448,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     for (; i < args.length && !/^[-(!,]/.test(args[i]!.value); i++) starts.push(args[i]!)
     return starts.length ? starts : [{ quoted: false, value: "." }]
   }
-  // Whether a find's search may reach the roster: a start point is or holds it, or cannot be read, and its -name and -iname tests do not all miss roster.json with none of FIND_OR's operators to let a miss through; a pattern it cannot read, or one with a backslash escape, may match.
+  // Whether a find's search may reach the file: a start point is or holds it, or cannot be read, and its -name and -iname tests do not all miss its name with none of FIND_OR's operators to let a miss through; a pattern it cannot read, or one with a backslash escape, may match.
   const reaches = (args: Word[], at: Env): boolean => {
     const start = startsOf(args).some((w) => {
       const paths = pathsOf(w, at)
@@ -432,7 +464,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     return names.some(({ insensitive, word }) => {
       const read = readOf(word, at)
       if (!read || read.value.includes("\\")) return true
-      return new Bun.Glob(insensitive ? read.value.toLowerCase() : read.value).match("roster.json")
+      return new Bun.Glob(insensitive ? read.value.toLowerCase() : read.value).match(base)
     })
   }
   const isFind = (cmd: Command | undefined) => !!cmd && FINDS.has(toolOf(cmd.words[0]?.value ?? ""))
@@ -462,7 +494,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     if (marked(out.value)) return viaXargs && unseenHolds(at)
     const items = itemsOf(out.value)
     if (items.length > ITEMS) return viaXargs && unseenHolds(at)
-    return namesRoster(out.value, targets) || items.some((w) => writes(w, at))
+    return namesRoster(out.value, targets, file) || items.some((w) => writes(w, at))
   }
   // The words an xargs hands its program, one list per run: each fed item in its -I string's place, else after the program's own words; the roster for a find that reaches it, or for input the hook cannot see (unread, or past ITEMS items) where unseenHolds, and for unseen input, a find's included, that the -I string places right after the roster's folder.
   const xargsRuns = async (cmd: Command, args: Word[], xargs: NonNullable<Xargs>, at: Env) => {
@@ -527,7 +559,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
         (c) => c.stdin === cmd && program(c.words[0]?.value ?? "") === "xargs",
       )
       if (await listsRoster(cmd, args, tool, at, xargsFed))
-        return refuse(`${tool} feeding the roster to a program that runs it as code`)
+        return refuse(`${tool} feeding ${noun} to a program that runs it as code`)
     }
     // a program xargs runs takes its input as words: its -I string's place, else after its own words
     if (xargs) {
@@ -544,7 +576,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
           return refuse(`${tool} ${a.value} onto ${shown(args[i + 1]!)}`)
       const reached = reaches(args, at)
       if (reached && args.some((a) => a.value === "-delete"))
-        return refuse(`${tool} -delete reaching the roster`)
+        return refuse(`${tool} -delete reaching ${noun}`)
       // each command find runs is read as a line of its own, an sh -c script included, with {} as the roster where the search may reach it
       for (const [i, a] of args.entries()) {
         if (!FIND_EXECS.has(a.value) || !args[i + 1]) continue
@@ -579,33 +611,33 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       CODE_RUNNERS.has(tool) &&
       args.some(
         (a) =>
-          (namesRoster(a.value, targets) ||
-            namesApart(a.value, targets) ||
+          (namesRoster(a.value, targets, file) ||
+            namesApart(a.value, targets, file) ||
             intoRoster.has(a) ||
-            (namesBare(a.value) && inOwnFolder(at))) &&
+            (namesBare(a.value, file) && inOwnFolder(at))) &&
           writesCode(a.value, tool),
       )
     )
-      return refuse(`${tool} code that names the roster and holds a write word`)
+      return refuse(`${tool} code that names ${noun} and holds a write word`)
     if (PLACERS.has(tool)) {
       const dest = destinationOf(tool, args)
       if (dest && writes(dest, at, true)) return refuse(`${tool} onto ${shown(dest)}`)
-      // a file named roster.json placed into the data folder lands on it
+      // a file of the guarded file's name placed into its folder lands on it
       const into = dest ? (pathsOf(dest, at) ?? []) : []
       const sources = args.filter((a) => a !== dest && !a.value.startsWith("-"))
       if (
-        sources.some((s) => basename(s.value).toLowerCase() === "roster.json") &&
-        into.some(({ path }) => isRoster(resolve(path, "roster.json"), targets))
+        sources.some((s) => basename(s.value).toLowerCase() === base) &&
+        into.some(({ path }) => isRoster(resolve(path, base), targets))
       )
-        return refuse(`${tool} of a roster.json into ${dest && shown(dest)}`)
+        return refuse(`${tool} of a ${base} into ${dest && shown(dest)}`)
       if (COPIERS.has(tool)) return
     }
     if (SEDS.has(tool)) {
       // a script naming the roster may write it (w, W, e, s///w with any address or delimiter), so it fails closed; the roster as an operand of its own is only read
       const script = (a: Word) =>
-        namesRoster(a.source ?? a.value, targets) &&
+        namesRoster(a.source ?? a.value, targets, file) &&
         !(pathsOf(a, at) ?? []).some(({ glob, path }) => isRoster(path, targets, glob))
-      if (args.some(script)) return refuse(`${tool} whose script names the roster`)
+      if (args.some(script)) return refuse(`${tool} whose script names ${noun}`)
       if (!inPlace(args)) return
     }
     // sort writes the file its -o names, attached or next, in a cluster (-uo) too, or its --output
@@ -640,16 +672,23 @@ async function inspect(raw: string, environment: Environment) {
     tool_name?: unknown
   }
   const folder = typeof cwd === "string" ? cwd : undefined
-  if (tool === "Bash" && typeof input?.command === "string")
-    return judgeBash(input.command, folder, environment)
-  if (typeof tool === "string" && FILE_TOOLS.has(tool)) {
-    const path = input?.file_path ?? input?.notebook_path
-    if (typeof path === "string" && isRoster(resolve(folder ?? "/", path), targetsOf(environment)))
-      return refuse(`a ${tool} of ${path}`)
+  for (const guarded of GUARDED) {
+    if (tool === "Bash" && typeof input?.command === "string") {
+      const found = await judgeBash(input.command, folder, environment, guarded)
+      if (found) return found
+    }
+    if (typeof tool === "string" && FILE_TOOLS.has(tool)) {
+      const path = input?.file_path ?? input?.notebook_path
+      if (
+        typeof path === "string" &&
+        isRoster(resolve(folder ?? "/", path), targetsOf(environment, guarded.file))
+      )
+        return guarded.refuse(`a ${tool} of ${path}`)
+    }
   }
 }
 
-// Fails closed: a call it cannot parse that names the roster is refused, and every other unread call runs.
+// Fails closed: a call it cannot parse that names a guarded file is refused, and every other unread call runs.
 export async function check(
   raw: string,
   environment: Environment = process.env,
@@ -657,8 +696,7 @@ export async function check(
   try {
     return await eachInput(raw, "no-roster-write", (one) => inspect(one, environment))
   } catch {
-    return namesRoster(raw, targetsOf(environment))
-      ? refuse("a call naming the roster that it cannot read")
-      : undefined
+    const guarded = GUARDED.find(({ file }) => namesRoster(raw, targetsOf(environment, file), file))
+    return guarded?.refuse(`a call naming ${guarded.noun} that it cannot read`)
   }
 }

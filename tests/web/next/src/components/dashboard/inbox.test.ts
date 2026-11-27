@@ -2040,6 +2040,29 @@ describe("a draft card's changed words", () => {
     expect(html).not.toContain("moves to Friday")
   })
 
+  // the owner typed over "hi", then the poster's ask edit changed it, while the card was not mounted (a reload, a shelf move) (PG-3176)
+  test("give way to the poster's newer words, the owner's kept a click away", () => {
+    saveDraft(cardDraftKey(draft.id), {
+      attachments: [],
+      base: "hi",
+      text: "hi, the ship moves to Friday",
+    })
+    const html = opened({ ...draft, preview: { ...draft.preview, text: "hi there" } } as InboxItem)
+    expect(box(html)).toBe("hi there")
+    expect(named(html, "Restore my edit")).not.toBe("")
+  })
+
+  test("stay in the box, with nothing to restore, while the poster's words are the ones they were typed over (PG-3176)", () => {
+    saveDraft(cardDraftKey(draft.id), {
+      attachments: [],
+      base: "hi",
+      text: "hi, the ship moves to Friday",
+    })
+    const html = opened(draft)
+    expect(box(html)).toBe("hi, the ship moves to Friday")
+    expect(named(html, "Restore my edit")).toBe("")
+  })
+
   test("are another card's alone: a card shows its own words when only another's are kept", () => {
     saveDraft(cardDraftKey("id-42"), { attachments: [], text: "for another card" })
     expect(box(opened(draft))).toBe("hi")

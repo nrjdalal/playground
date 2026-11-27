@@ -23,6 +23,7 @@ import {
   cwdsOf,
   envOf,
   GLM_BASE_URL,
+  IN_THREAD,
   keyOf,
   linesOf,
   loadedTree,
@@ -36,6 +37,7 @@ import {
   store,
   stored,
   sweep,
+  TAKES_LOAD,
   TAKES_MAIN,
   type Check,
   unloaded,
@@ -759,6 +761,90 @@ describe("a GLM replay", () => {
 })
 
 // A hook whose check() takes the main checkout reads it from its own folder when none is given, and canary's unpacked tree is no checkout of the repository, so the differential hands both sides the head's (PG-996)
+describe("a hook that reads the live load", () => {
+  // no-glm-heavy-path's shape, in a tree of its own: a push refused above a 5-minute load of 15, read by a named import from a stand-in for node:os whose load crosses 15 between every two reads, as a busy machine's may, and guards running its refusal()
+  const tree = (name: string) => {
+    const hooks = join(DIR, "load-gated", name, "scripts", "hooks")
+    mkdirSync(hooks, { recursive: true })
+    writeFileSync(
+      join(hooks, "load.ts"),
+      "let reads = 0\nexport const loadavg = () => (reads++ % 2 === 0 ? [10, 10, 10] : [20, 20, 20])\n",
+    )
+    writeFileSync(
+      join(hooks, "no-glm-heavy-path.ts"),
+      'import { loadavg } from "./load"\nexport const check = async (raw: string, _env: unknown, load5: number = loadavg()[1]) => (JSON.parse(raw).tool_input.command.startsWith("git push") && load5 > 15 ? "refused" : undefined)\nexport const refusal = check\n',
+    )
+    writeFileSync(
+      join(hooks, "guards.ts"),
+      'import { refusal } from "./no-glm-heavy-path"\nexport const GUARDS = [{ factory: true, name: "no-glm-heavy-path", run: (raw: string, env: unknown) => refusal(raw, env) }]\nexport const check = async (raw: string, env: unknown, guards = GUARDS) => (await Promise.all(guards.map((g) => g.run(raw, env)))).find(Boolean)\n',
+    )
+    return hooks
+  }
+  const push = [{ command: "git push origin x", cwd: "/h" }]
+  const same = { "newly allowed": 0, "newly refused": 0, same: 1 }
+
+  test("a replay hands both sides of a call one load, so equal heads read the same", async () => {
+    const hook = join(tree("replay"), "no-glm-heavy-path.ts")
+    const gated = await checkOf(hook, "no-glm-heavy-path", "/main")
+    expect((await replay(gated, gated, push, "/h")).counts).toMatchObject(same)
+  })
+
+  test("a sweep hands both sides of a case one load, so equal heads read the same", async () => {
+    const hook = join(tree("sweep"), "no-glm-heavy-path.ts")
+    const gated = await checkOf(hook, "no-glm-heavy-path", "/main")
+    const { counts } = await sweep(gated, gated, [{ command: "git push origin x" }], "/h")
+    expect(counts).toMatchObject({ cases: 3, same: 3 })
+  })
+
+  test("guards runs each TAKES_LOAD guard's refusal() with that one load", async () => {
+    const gated = await checkOf(join(tree("guards"), "guards.ts"), "guards", "/main")
+    expect((await replay(gated, gated, push, "/h")).counts).toMatchObject(same)
+  })
+
+  test("each TAKES_LOAD hook's check() and refusal() take the load third", async () => {
+    const hooks = join(import.meta.dir, "../../../../scripts/hooks")
+    for (const name of TAKES_LOAD) {
+      const text = await Bun.file(join(hooks, `${name}.ts`)).text()
+      for (const fn of ["check", "refusal"])
+        expect(text).toMatch(
+          new RegExp(
+            `export async function ${fn}\\(\\s*raw: string,\\s*environment: Environment = process\\.env,\\s*load5: number`,
+          ),
+        )
+    }
+  })
+})
+
+describe("a guard judged in this thread", () => {
+  test("guards runs each IN_THREAD guard by its check(), never its Worker entry, on both sides", async () => {
+    const side = (name: string) => {
+      const hooks = join(DIR, "guards-thread", name, "scripts", "hooks")
+      mkdirSync(hooks, { recursive: true })
+      writeFileSync(
+        join(hooks, "no-extensions-write.ts"),
+        'export const check = () => "thread"\nexport const guarded = () => "worker"\n',
+      )
+      writeFileSync(
+        join(hooks, "guards.ts"),
+        'import { guarded } from "./no-extensions-write"\nexport const GUARDS = [{ factory: true, name: "no-extensions-write", run: (raw: string, env: unknown) => guarded(raw, env) }]\nexport const check = async (raw: string, env: unknown, guards = GUARDS) => (await Promise.all(guards.map((g) => g.run(raw, env)))).find(Boolean)\n',
+      )
+      return join(hooks, "guards.ts")
+    }
+    const raw = JSON.stringify({ tool_input: { command: "ls" } })
+    for (const name of ["canary", "head"])
+      expect(await (await checkOf(side(name), "guards", "/main"))(raw, {})).toBe("thread")
+  })
+
+  test("each IN_THREAD guard's Worker runs that hook's own check() with the call's input and env", async () => {
+    const hooks = join(import.meta.dir, "../../../../scripts/hooks")
+    for (const name of IN_THREAD) {
+      const worker = await Bun.file(join(hooks, `${name}-worker.ts`)).text()
+      expect(worker).toContain(`import { check } from "./${name}"`)
+      expect(worker).toContain("check(event.data.raw, event.data.environment)")
+    }
+  })
+})
+
 describe("a hook that takes the main checkout", () => {
   // refuses a command that names its main checkout; with none given, main is the folder it would read from its own tree
   const guard =
