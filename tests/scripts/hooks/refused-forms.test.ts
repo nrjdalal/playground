@@ -145,9 +145,10 @@ writeFileSync(
   "sed 's/PORT/8080/' serve.tmpl > serve-mb.sh\nbash serve-mb.sh\n",
 )
 symlinkSync(ROOT, PATHS.LINK)
-// a dangling link into the root and one to a plain place, and a clone's hooks folder holding a hook, for #3067's rows
+// a dangling link into the root, one onto a hook path the clone's hooks folder lacks, one to a plain place, and a clone's hooks folder holding a hook, for #3067's rows
 symlinkSync(join(SCOPE, "no-such-3067"), join(HOME, "dangling"))
 symlinkSync(join(HOME, "no-such-3067"), join(HOME, "dangling-plain"))
+symlinkSync(join(HOME, "hooked", ".git", "hooks", "pre-push"), join(HOME, "dangling-hook"))
 mkdirSync(join(HOME, "hooked", ".git", "hooks"), { recursive: true })
 writeFileSync(join(HOME, "hooked", ".git", "hooks", "pre-commit"), "#!/bin/sh\n")
 // the main checkout's worktree a, by its .git file, holding a link into the main checkout, and a plain folder beside it that no worktree holds, for #1663's rows

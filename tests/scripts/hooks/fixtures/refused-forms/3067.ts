@@ -242,6 +242,10 @@ const linked = ({ DATA, HOME }: Paths): Row[] => [
   ["a redirect through a dangling link into the root", `cat payload > ${HOME}/dangling`],
   ["a cp through a dangling link into the root", `cp payload ${HOME}/dangling`],
   ["a tee through a dangling link into the root", `cat payload | tee ${HOME}/dangling`],
+  [
+    "an echo naming the root through a dangling link onto a hook",
+    `echo 'touch ${SCRIPT}' > ${HOME}/dangling-hook`,
+  ],
 ]
 // what part 2 leaves running: a script written and not run is data, a plain script runs, a glob that matches no hook, a dangling link to a plain place, and sed's scripts that run nothing
 const runControls = (): Row[] => [
@@ -273,6 +277,10 @@ const worktreeControls = (): Row[] => [
 ]
 const linkControls = ({ HOME }: Paths): Row[] => [
   ["a touch through a dangling link to a plain place", `touch ${HOME}/dangling-plain`],
+  [
+    "an echo naming the root through a dangling link to a plain place",
+    `echo 'touch ${SCRIPT}' > ${HOME}/dangling-plain`,
+  ],
 ]
 
 export const allowed: string[] = [
