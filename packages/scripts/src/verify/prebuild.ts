@@ -340,9 +340,33 @@ export const slotted = (
     ? [runSlot, who, "--", ...argv]
     : argv
 
-// The name the build asks its slot under: the session run-slot records as the worktree's owner (`run-slot.owner/<worktree>`, written by each named run from it), so the build takes that session's class, priority pick and focus, where run-slot knows no `prebuild-<worktree>`; else `prebuild-<worktree>`.
-export const slotWho = (root: string, ops: string): string => {
+// Whether this run is inside a commit's hook in this checkout: for pre-commit git sets GIT_INDEX_FILE to an index in the checkout's own git folder (`index`, or a partial commit's `next-index-<pid>.lock`), where a script's scratch index lies elsewhere and `rebase --exec` sets none (measured, 27 Nov).
+export const inCommitHook = (root: string, env: Record<string, string | undefined>): boolean => {
+  if (!env.GIT_INDEX_FILE) return false
+  try {
+    const dotGit = join(root, ".git")
+    const gitDir = statSync(dotGit).isDirectory()
+      ? dotGit
+      : resolve(
+          root,
+          readFileSync(dotGit, "utf8")
+            .replace(/^gitdir:\s*/, "")
+            .trim(),
+        )
+    return realpathSync(dirname(resolve(root, env.GIT_INDEX_FILE))) === realpathSync(gitDir)
+  } catch {
+    return false
+  }
+}
+
+// The name the build asks its slot under: inside a commit's hook in a worktree under `.claude/worktrees/` (inCommitHook), `commit-<worktree>`, which run-slot gives `run-slot-commit` under RUN_SLOT_COMMIT_STEP=1 as it does commit-slot.ts' steps, since lefthook's `bun run test:file` steps reach prebuild outside commit-slot.ts (PG-3235); else the session run-slot records as the worktree's owner (`run-slot.owner/<worktree>`, written by each named run from it), so the build takes that session's class, priority pick and focus, where run-slot knows no `prebuild-<worktree>`; else `prebuild-<worktree>`.
+export const slotWho = (
+  root: string,
+  ops: string,
+  env: Record<string, string | undefined>,
+): string => {
   const tree = basename(root).replace(/[^A-Za-z0-9._#-]/g, "-")
+  if (/\/\.claude\/worktrees\/[^/]+$/.test(root) && inCommitHook(root, env)) return `commit-${tree}`
   const record = join(ops, "run-slot.owner", tree)
   const owner = existsSync(record) ? readFileSync(record, "utf8").trim() : ""
   return /^[A-Za-z0-9._-]+$/.test(owner) && !/^(commit|prebuild)-/.test(owner)
@@ -392,30 +416,30 @@ const prebuild = (target: string, missing: string[]): number => {
     ),
   ]
   // turbo's output goes to stderr, so `verify --json` keeps stdout to itself
+  const turbo = [
+    join(ROOT, "node_modules/.bin/turbo"),
+    "run",
+    "build",
+    ...packages.map((name) => `--filter=${name}`),
+    "--output-logs=errors-only",
+  ]
+  const who = slotWho(ROOT, ops, process.env)
+  const build = slotted(turbo, who, process.env, runSlotScript(ops))
   const steps = [
-    ...(packages.length > 0
-      ? [
-          slotted(
-            [
-              join(ROOT, "node_modules/.bin/turbo"),
-              "run",
-              "build",
-              ...packages.map((name) => `--filter=${name}`),
-              "--output-logs=errors-only",
-            ],
-            slotWho(ROOT, ops),
-            process.env,
-            runSlotScript(ops),
-          ),
-        ]
-      : []),
+    ...(packages.length > 0 ? [build] : []),
     ...(step.build.some((specifier) => specifier.startsWith("generated/"))
       ? [[process.execPath, join(SRC, "data-table-metrics.ts")]]
       : []),
   ]
   const started = new Date()
   for (const argv of steps) {
-    const run = Bun.spawnSync(argv, { cwd: ROOT, env, stdio: ["ignore", 2, "inherit"] })
+    // a commit's build asked under commit-<worktree> carries commit-slot.ts's mark, which run-slot reads to give it run-slot-commit
+    const marked = argv !== turbo && argv === build && who.startsWith("commit-")
+    const run = Bun.spawnSync(argv, {
+      cwd: ROOT,
+      env: marked ? { ...env, RUN_SLOT_COMMIT_STEP: "1" } : env,
+      stdio: ["ignore", 2, "inherit"],
+    })
     if (run.exitCode !== 0) return run.exitCode ?? 1
   }
   // a turbo cache hit leaves a dist at the mtime it had, older than the src that sent it here, though its inputs' hash says it matches that src; so each dist the build covered takes the build's start, which reads current on the next run while a src saved during the build still reads newer
