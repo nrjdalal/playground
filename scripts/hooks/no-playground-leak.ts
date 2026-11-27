@@ -5,7 +5,12 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, join } from "node:path"
 
 import { dataDir, dataDirOf } from "../../packages/env/src/data-dir"
-import { heldBy, pushRemote, withLiveBudget } from "../../packages/safe-delete/src/live-refs"
+import {
+  heldBy,
+  liveDefault,
+  pushRemote,
+  withLiveBudget,
+} from "../../packages/safe-delete/src/live-refs"
 import { guardedOrgs } from "../../packages/settings/src/ext"
 import { coreDir, readPolicy, readPolicySync } from "../../packages/settings/src/rendered"
 import { gatedSendsSchema } from "../../packages/settings/src/slack"
@@ -1390,18 +1395,8 @@ function branchOnly(flags: Flag[], positionals: Word[], dir: string): boolean {
       config.value.split("\n").some((line) => line.startsWith(`remote.${remote.value}.push=`))
     )
       return false
-    const head = gitText(
-      dir,
-      ["symbolic-ref", "--short", `refs/remotes/${remote.value}/HEAD`],
-      "the remote's default branch",
-    )
-    if (!head.unknown)
-      defaults.add(
-        head.value
-          .trim()
-          .slice(remote.value.length + 1)
-          .toLowerCase(),
-      )
+    const head = remoteDefault(dir, remote.value)
+    if (head) defaults.add(head)
   }
   return specs.every((spec) => {
     if (unreadable(spec) || /[*?[\\\s]/.test(spec.value)) return false
@@ -1432,20 +1427,28 @@ function branchHead(dir: string): boolean {
   if (remotes.unknown) return false
   const defaults = new Set(["main", "master"])
   for (const remote of remotes.value.split("\n").filter(Boolean)) {
-    const ref = gitText(
-      dir,
-      ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`],
-      "the remote's default branch",
-    )
-    if (!ref.unknown)
-      defaults.add(
-        ref.value
-          .trim()
-          .slice(remote.length + 1)
-          .toLowerCase(),
-      )
+    const ref = remoteDefault(dir, remote)
+    if (ref) defaults.add(ref)
   }
   return !defaults.has(name)
+}
+
+// The default branch, lower case, of the remote a clone names: its local refs/remotes/<remote>/HEAD, and when that names a branch other than main or master, which stay refused anyway, the configured remote's own HEAD (liveDefault), since a clone of a local copy takes the copy's checked-out branch as that ref (issue 3185); the local one stands when no remote of that name is configured or it cannot be read, and none when the local ref is unset.
+export function remoteDefault(dir: string, remote: string): string | undefined {
+  const local = gitText(
+    dir,
+    ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`],
+    "the remote's default branch",
+  )
+  if (local.unknown) return undefined
+  const name = local.value
+    .trim()
+    .slice(remote.length + 1)
+    .toLowerCase()
+  if (name === "main" || name === "master") return name
+  const url = gitText(dir, ["config", "--get", `remote.${remote}.url`], "the remote's URL")
+  const remoteHead = url.unknown ? null : liveDefault(dir, remote)
+  return remoteHead ? remoteHead.toLowerCase() : name
 }
 
 // git push publishes the names of the refs it pushes and the messages of every commit the remote it pushes to (the one it names, else git's push remote) holds no live branch of (heldBy), each one when that remote cannot be read.

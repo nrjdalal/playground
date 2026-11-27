@@ -72,7 +72,7 @@ var dataDir = (env = process.env) => dataDirOf(env);
 import { AsyncLocalStorage } from "async_hooks";
 var budget = new AsyncLocalStorage;
 function withLiveBudget(body, ms = 6000) {
-  return budget.getStore() ? body() : budget.run({ reads: new Map, until: performance.now() + ms }, body);
+  return budget.getStore() ? body() : budget.run({ heads: new Map, reads: new Map, until: performance.now() + ms }, body);
 }
 var run = (at, args, env, timeout) => {
   const proc = Bun.spawnSync(["git", "-C", at, ...args], {
@@ -85,11 +85,7 @@ var run = (at, args, env, timeout) => {
   return { ok: proc.exitCode === 0, out: proc.stdout.toString() };
 };
 function liveHeads(at, remote, timeout) {
-  const command = process.env.GIT_SSH_COMMAND || run(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
-  const env = { GIT_TERMINAL_PROMPT: "0" };
-  if (command)
-    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
-  const live = run(at, ["ls-remote", "--heads", "--", remote], env, timeout);
+  const live = run(at, ["ls-remote", "--heads", "--", remote], quiet(at), timeout);
   if (!live.ok)
     return null;
   const tips = [];
@@ -100,6 +96,13 @@ function liveHeads(at, remote, timeout) {
       tips.push({ ref: `${remote}/${name.slice("refs/heads/".length)}`, sha });
   }
   return tips;
+}
+function quiet(at) {
+  const command = process.env.GIT_SSH_COMMAND || run(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
+  const env = { GIT_TERMINAL_PROMPT: "0" };
+  if (command)
+    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
+  return env;
 }
 function present(at, tips) {
   if (!tips.length)
