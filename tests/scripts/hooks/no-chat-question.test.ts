@@ -423,6 +423,29 @@ describe("what passes", () => {
     expect(await stop(last)).toBeUndefined()
   })
 
+  // a lead's stop was refused three turns in a row on a status line after its card was approved, each asking him nothing (PG-3213)
+  test.each([
+    [
+      "an until clause before it yourself",
+      "The PR stays a draft until you merge it yourself.",
+      false,
+    ],
+    [
+      "nothing else from me waiting on him",
+      "There's no open question for you. #i1217 is approved and settled, and nothing else from me is waiting on you.",
+      false,
+    ],
+    [
+      "nothing of mine waiting on him",
+      "Nothing of mine is waiting on you, so I posted nothing.",
+      false,
+    ],
+    ["is waiting on you still asks", "The ship is waiting on you.", true],
+    ["then <verb> it yourself still asks", "Then merge it yourself.", true],
+  ])("a status line asks only when it puts work on him: %s", (_name, line, asks) => {
+    expect(asksDecision(line)).toBe(asks)
+  })
+
   // 16 Nov: a lead's reports naming a done item were refused, while its real question was not (PG-2404)
   test.each([
     [
