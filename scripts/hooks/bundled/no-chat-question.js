@@ -5908,6 +5908,11 @@ var answerPayloadSchema = strictObject({
     label: string2().min(1),
     letter: string2().length(1)
   }).optional(),
+  options: array(strictObject({
+    index: number2().int().min(0).max(5),
+    label: string2().min(1),
+    letter: string2().length(1)
+  })).optional(),
   owned: ranSchema.optional(),
   picks: array(strictObject({
     index: number2().int().min(0).max(5),

@@ -5,6 +5,7 @@ export type AskPicks = {
   picks: (number | null)[]
   sig: string
   step: number
+  ticks?: number[]
 }
 export type PicksStore = Record<string, AskPicks>
 

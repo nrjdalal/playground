@@ -480,7 +480,7 @@ export function picksKey(questions: AskQuestion[]): string {
 }
 
 // A signature of a single-question ask's choice rows, so the card drops its kept pick when an in-place edit changes, reorders or rewords them, since the pick is held by position; picksKey does the same for a multi-question ask.
-export function choicesKey(choices: Choices | null): string {
+export function choicesKey(choices: Choices | null, _ticking?: boolean): string {
   if (!choices) return "[]"
   return JSON.stringify([choices.shape, choices.rows.map((r) => [r.label, r.letter, r.go])])
 }

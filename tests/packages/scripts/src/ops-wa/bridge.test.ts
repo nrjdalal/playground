@@ -1176,6 +1176,53 @@ describe("Inbox cards on WhatsApp", () => {
   })
 })
 
+describe("a multiSelect ask on WhatsApp (PG-3177)", () => {
+  const ticks = () =>
+    card(
+      7,
+      {},
+      {
+        approve: undefined,
+        deny: undefined,
+        multiSelect: true,
+        options: [{ label: "Nudge Ana" }, { label: "Nudge Bo" }, { label: "Nudge Cy" }],
+      },
+    )
+
+  test("its poll takes several answers", async () => {
+    const h = await withCards([ticks()])
+    expect(h.polls()[0]!.content.poll).toMatchObject({
+      selectableCount: 0,
+      values: ["1. Nudge Ana", "2. Nudge Bo", "3. Nudge Cy", "4. None of these"],
+    })
+  })
+
+  test("a vote for several rows approves it with every one", async () => {
+    const h = await withCards([ticks()])
+    expect(await vote(h, ["1. Nudge Ana", "3. Nudge Cy"])).toEqual([
+      "Answered #i7: Nudge Ana · Nudge Cy.",
+    ])
+    expect(h.answers).toEqual([{ answer: { action: "approve", options: [0, 2] }, id: "id-7" }])
+  })
+
+  test("a reply of several numbers counts as the same picks, and None of these beside a pick answers nothing", async () => {
+    const h = await withCards([ticks()])
+    expect(await say(h, "4 1 #i7")).toEqual([
+      "#i7 takes None of these on its own, so this answers nothing: reply with it alone, or with the rows you pick.",
+    ])
+    expect(await say(h, "1 3 #i7")).toEqual(["Answered #i7: Nudge Ana · Nudge Cy."])
+    expect(h.answers).toEqual([{ answer: { action: "approve", options: [0, 2] }, id: "id-7" }])
+  })
+
+  test("a one-pick card takes one number, so several answer nothing", async () => {
+    const h = await withCards([card(12)])
+    expect(await say(h, "1 2 #i12")).toEqual([
+      "#i12 takes one choice, so this answers nothing: reply with one number and its id.",
+    ])
+    expect(h.answers).toEqual([])
+  })
+})
+
 describe("an Inbox card as a poll (#2752)", () => {
   test("a card with choices goes as its text, then as a poll of its numbered choices, paced and counted as any send", async () => {
     const h = await withCards([card(12)])

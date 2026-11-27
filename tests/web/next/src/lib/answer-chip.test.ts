@@ -45,6 +45,18 @@ describe("answerChipOf", () => {
     })
   })
 
+  test("a multiSelect answer shows every ticked option (PG-3177)", () => {
+    const line = answerLine(
+      payload({
+        options: [
+          { index: 0, label: "Nudge Ana", letter: "A" },
+          { index: 2, label: "Nudge Cy", letter: "C" },
+        ],
+      }),
+    )
+    expect(answerChipOf(line)).toMatchObject({ label: "A. Nudge Ana · C. Nudge Cy" })
+  })
+
   test("a verb with no option shows the verb", () => {
     const line = answerLine(payload({ kind: "draft", next: "close", verb: "send" }))
     expect(answerChipOf(line)).toMatchObject({ label: "send", note: null, ref: "#i343" })

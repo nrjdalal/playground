@@ -61,6 +61,7 @@ import {
   shelfRow,
   shelfToOpen,
   STUCK_QUEUED_MS,
+  tickRow,
   updatedSince,
   upfrontLink,
   slackPlaced,
@@ -1722,6 +1723,38 @@ describe("a decision's options", () => {
     expect(picked({ options: [{ label: "Port it" }] }, { choice: "edit" })).toBe(
       "Approve · Port it · With your changes",
     )
+  })
+})
+
+describe("a multiSelect ask's ticks (PG-3177)", () => {
+  const OPTIONS = [{ label: "Nudge Ana" }, { label: "Nudge Bo" }, { label: "Nudge Cy" }]
+  const ask = (preview: object, answer: object) =>
+    item({
+      answer,
+      kind: "decision",
+      preview: { text: "Who gets a nudge?", type: "ask", ...preview },
+      status: "approved",
+    } as never)
+  const rows = decisionChoices(ask({ multiSelect: true, options: OPTIONS }, {}))!.rows
+
+  test("ticking a go row adds or takes it away, and None of these clears the rest, as a go row clears None of these", () => {
+    expect(tickRow(rows, [], 2)).toEqual([2])
+    expect(tickRow(rows, [2], 0)).toEqual([0, 2])
+    expect(tickRow(rows, [0, 2], 2)).toEqual([0])
+    expect(tickRow(rows, [0, 2], 3)).toEqual([3])
+    expect(tickRow(rows, [3], 1)).toEqual([1])
+  })
+
+  test("the result line names every ticked option by its letter and label", () => {
+    expect(
+      outcomeLine({
+        ...ask(
+          { multiSelect: true, options: OPTIONS },
+          { at: "x", choice: "approve", options: [0, 2] },
+        ),
+        delivery: { status: "pending" },
+      } as InboxItem),
+    ).toBe(`A. ${OPTIONS[0]!.label} · C. ${OPTIONS[2]!.label}`)
   })
 })
 

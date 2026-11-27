@@ -304,3 +304,34 @@ describe("reading a reply", () => {
 test("the repo list its origin rows read names the stub repo, so a clone with no origin still checks them", () => {
   expect(REPOS.public).toEqual(["example-owner/example-repo"])
 })
+
+describe("a multiSelect ask on WhatsApp (PG-3177)", () => {
+  const several = ask(
+    {},
+    { multiSelect: true, options: [{ label: "Nudge Ana" }, { label: "Nudge Bo" }] },
+  )
+
+  test("its card says several numbers pick more than one, and its poll takes several answers", () => {
+    const { multi, poll, text } = cardOf(several, TERMS)
+    expect(multi).toBe(true)
+    expect(text).toEndWith(
+      "Reply 1 #i12 to Nudge Ana\nReply 2 #i12 to Nudge Bo\nReply 3 #i12 to None of these\nReply several numbers, as 1 2 #i12, to pick more than one.",
+    )
+    expect(poll?.values).toEqual(["1. Nudge Ana", "2. Nudge Bo", "3. None of these"])
+    expect(
+      cardOf(ask({}, { options: [{ label: "A" }, { label: "B" }] }), TERMS),
+    ).not.toHaveProperty("multi")
+  })
+
+  test.each([
+    ["1 3 #i12", { numbers: [1, 3], ref: 12 }],
+    ["1,3 #i12", { numbers: [1, 3], ref: 12 }],
+    ["#i12 1, 2, 3", { numbers: [1, 2, 3], ref: 12 }],
+  ])("%s reads as several numbers for one card", (text, reply) => {
+    expect(replyOf(text)).toEqual(reply)
+  })
+
+  test("several numbers with no card id are no card reply", () => {
+    expect(replyOf("1 3")).toBeNull()
+  })
+})

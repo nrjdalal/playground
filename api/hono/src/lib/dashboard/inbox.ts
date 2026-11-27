@@ -643,6 +643,7 @@ export const previewSchema = z.discriminatedUnion("type", [
     attachments,
     checked: oneLine(LIMITS.line).optional(),
     deny: oneLine(LIMITS.line).optional(),
+    multiSelect: z.literal(true).optional(),
     options: z
       .array(askOption)
       .min(1, OPTIONS_MESSAGE)

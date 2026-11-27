@@ -94,6 +94,15 @@ export const answerPayloadSchema = z.strictObject({
       letter: z.string().length(1),
     })
     .optional(),
+  options: z
+    .array(
+      z.strictObject({
+        index: z.number().int().min(0).max(5),
+        label: z.string().min(1),
+        letter: z.string().length(1),
+      }),
+    )
+    .optional(),
   owned: ranSchema.optional(),
   picks: z
     .array(
@@ -169,6 +178,7 @@ export type ChoicePreview =
   | {
       approve?: string
       deny?: string
+      multiSelect?: boolean
       options?: { description?: string; label: string }[]
       questions?: {
         options: { description?: string; label: string }[]
@@ -319,6 +329,27 @@ export function picksOf(
     })
   }
   return picks
+}
+
+// Pure: whether an ask takes several ticked options at once (multiSelect) rather than one pick.
+export const multiSelect = (_preview: ChoicePreview): boolean => {
+  throw new Error("not built yet")
+}
+
+// Pure: every option ticked on a multiSelect ask, by its letter and label, in the card's order.
+export function ticksOf(
+  _preview: ChoicePreview,
+  _options: number[],
+): { index: number; label: string; letter: string }[] | null {
+  throw new Error("not built yet")
+}
+
+// Pure: the answer a multiSelect ask's ticks give.
+export function ticksAnswer(
+  _rows: { go: boolean }[],
+  _ticks: number[],
+): { action: "approve"; options: number[] } | { action: "deny" } | null {
+  throw new Error("not built yet")
 }
 
 // The two fields a card's place reads: pinned when pinnedAt is set, placed by hand when rank is.

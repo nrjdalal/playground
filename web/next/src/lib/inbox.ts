@@ -532,6 +532,11 @@ export function cardKey(
 export const sendWhy = (pick: ChoiceRow | null): string | null =>
   pick === null ? "Pick an option first" : null
 
+// Pure: a multiSelect ask's ticks once the owner ticks or unticks a row.
+export const tickRow = (_rows: ChoiceRow[], _ticks: number[], _index: number): number[] => {
+  throw new Error("not built yet")
+}
+
 // Pure: whether Dismiss is offered: an answered decision or draft, one that failed to send included, one he replied to, which stays open, or any update, read or not, still in the list; dismissing an update marks it read.
 export const dismissable = (item: InboxItem): boolean =>
   (item.kind === "update" || item.status !== "open" || chosen(item)?.choice === "replied") &&

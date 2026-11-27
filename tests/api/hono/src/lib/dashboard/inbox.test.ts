@@ -33,6 +33,7 @@ import {
   checkAnswer,
   closedPayload,
   type CloneRun,
+  getPickLine,
   inboxCount,
   inboxInputSchema,
   type Delivery,
@@ -7499,5 +7500,87 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(calls).toEqual([])
       expect(existsSync(scopeDir(data, ME))).toBe(false)
     })
+  })
+})
+
+describe("a multiSelect ask takes several ticked options (PG-3177)", () => {
+  const ticks = { ...PREVIEWS.ask, multiSelect: true, options: OPTIONS }
+  const ticked = item({ id: "tik", kind: "decision", preview: ticks as never, ref: 49 })
+
+  test("an ask sets multiSelect over 2 to 5 lettered options, and never beside questions, approve or a single option", () => {
+    const ask = (over: object) => inboxInputSchema.safeParse(decision({ ...PREVIEWS.ask, ...over }))
+    expect(ask({ multiSelect: true, options: OPTIONS }).success).toBe(true)
+    const refusals = [
+      { multiSelect: true },
+      { multiSelect: true, options: [{ label: "Port it" }] },
+      { approve: "Port it", multiSelect: true },
+      {
+        multiSelect: true,
+        questions: [
+          { options: [{ label: "Yes" }], question: "One?" },
+          { options: [{ label: "Yes" }], question: "Two?" },
+        ],
+      },
+    ]
+    for (const over of refusals) {
+      const parsed = ask(over)
+      expect(parsed.success, JSON.stringify(over)).toBe(false)
+    }
+    expect(JSON.stringify(ask({ multiSelect: true }).error?.issues)).toContain(
+      "A multiSelect ask ticks among 2 to 5 options",
+    )
+  })
+
+  test("its Approve takes every ticked option, at least one, each once and within its options", () => {
+    expect(checkAnswer(ticked, { action: "approve", options: [2, 0] })).toEqual({
+      answer: { choice: "approve", options: [0, 2] },
+      status: "approved",
+    })
+    expect(checkAnswer(ticked, { action: "approve", options: [1] })).toEqual({
+      answer: { choice: "approve", options: [1] },
+      status: "approved",
+    })
+    expect(checkAnswer(ticked, { action: "deny" })).toEqual({
+      answer: { choice: "deny" },
+      status: "denied",
+    })
+    const refused: Parameters<typeof checkAnswer>[1][] = [
+      { action: "approve" },
+      { action: "approve", option: 0 },
+      { action: "approve", options: [0, 0] },
+      { action: "approve", options: [3] },
+    ]
+    for (const input of refused) {
+      expect(checkAnswer(ticked, input), JSON.stringify(input)).toEqual({
+        message: "Tick one or more of its 3 options, 0 to 2, each once",
+      })
+    }
+    // a one-pick ask still refuses a list of picks
+    const lettered = item({
+      kind: "decision",
+      preview: { ...PREVIEWS.ask, options: OPTIONS } as never,
+    })
+    expect(checkAnswer(lettered, { action: "approve", options: [0, 1] })).toHaveProperty("message")
+    expect(answerInputSchema.safeParse({ action: "approve", options: [1] }).success).toBe(true)
+  })
+
+  test("its poster's line names every ticked option by its letter and label, and ask get prints each", () => {
+    const answer = { at: AT, choice: "approve" as const, options: [0, 2] }
+    const payload = answerPayload(ticked, answer)
+    expect(payload).toMatchObject({
+      go: true,
+      next: "carry-out",
+      options: [
+        { index: 0, label: "Port to staging, then main", letter: "A" },
+        { index: 2, label: "Wait for the next ship", letter: "C" },
+      ],
+      verb: "pick",
+    })
+    expect(payload).not.toHaveProperty("option")
+    expect(payload).not.toHaveProperty("picks")
+    expect(payloadOf(answerLine(payload))?.options).toHaveLength(2)
+    expect(getPickLine({ ...ticked, answer, status: "approved" } as never)).toBe(
+      "A: Port to staging, then main · C: Wait for the next ship",
+    )
   })
 })

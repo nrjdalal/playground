@@ -22,6 +22,7 @@ export type Card = {
     deny?: string
     // a draft's place: its thread's link, and who it goes to by a short name
     link?: string
+    multiSelect?: boolean
     options?: { description?: string; label: string }[]
     questions?: unknown[]
     scope?: string
@@ -127,7 +128,7 @@ const tag = (ref: number) => `#i${ref}`
 export function cardOf(
   card: Card,
   terms: Terms,
-): { poll: ReturnType<typeof pollOf>; rows: Sent["rows"]; text: string } {
+): { multi?: true; poll: ReturnType<typeof pollOf>; rows: Sent["rows"]; text: string } {
   const files = card.preview.attachments?.length ?? 0
   const lines = [`*${card.title}*`, card.preview.text ?? ""]
   if (files > 0)
@@ -170,7 +171,7 @@ export const waitingLine = (cards: Pick<Card, "title">[], terms: Terms | undefin
 }
 
 // What a message is, read as an answer to a card: a number and a card's id in either order, a number alone, or an id alone; null for any other message, which goes to the dispatcher.
-export type Reply = { number?: number; ref?: number }
+export type Reply = { number?: number; numbers?: number[]; ref?: number }
 
 export const replyOf = (text: string): Reply | null => {
   const t = text.trim()
