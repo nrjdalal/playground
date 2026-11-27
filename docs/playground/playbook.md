@@ -50,6 +50,7 @@ then to the Builder, whose workers build, review and merge it; then to Ops, whic
 The Optimizer runs retros over everything the factory did and routes each lesson to the dispatcher as a fix, parking later ideas in its icebox, and never builds.
 The Assistant runs the owner's personal errands and the dispatcher's tracker, and reports to the dispatcher.
 The Builder and Ops send merges, ETA moves, new PRs, staffing and plan updates to the Planner directly, and the dispatcher only what the owner must see or decide: the status of the owner's own asks, any org work, a blocker or slip on something the owner waits for, a decision only the owner can make, and a finding for the playbook.
+While a card on a PR's merge is open, its lead takes the PR to its gates and to ready, and gives the merge go once the owner's answer arrives, since a go sent beside an open card races his reply.
 Each manager is found by what it does, its kind (the builder, ops, the planner and the optimizer), not by a fixed name, so a manager started again under a new name gets its reports, its alerts and the Dashboard's place for it at once:
 `roster.ts who builder` prints whoever holds the builder's seat, and every script, hook and Dashboard read that looks for a manager follows the same rule, falling back to today's names.
 Four routes skip the planner, which hears after: two fast lanes (a live break or a tiny fix the owner points at, straight to the Builder; a machine or ops incident, straight to Ops), a backlog fix a free slot takes, and a task the owner calls priority.
