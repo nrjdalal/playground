@@ -212,6 +212,58 @@ const runsRoot = (): Row[] => [
     "command printf 'touch ~/.playground/ext\\x65nsions/login/x\\n' > run.sh; sh run.sh",
   ],
 ]
+// a script the line writes by a form other than a redirect or tee (another case, >&, dd, sort -o, a copy, move or link to its run name), then runs, is walked as written, or refused as unread
+const writesRun = (): Row[] => [
+  ["a script written in another case, then run", `echo 'touch ${SCRIPT}' > Run.sh; sh run.sh`],
+  [
+    "a script run by its own path in another case",
+    `echo 'touch ${SCRIPT}' > run.sh; chmod +x run.sh; ./RUN.sh`,
+  ],
+  ["a script written by >& to a name, then run", `echo 'touch ${SCRIPT}' >& run.sh; sh run.sh`],
+  ["a script dd writes, then run", `echo 'touch ${SCRIPT}' | dd of=run.sh; sh run.sh`],
+  ["a script sort -o writes, then run", `echo 'touch ${SCRIPT}' | sort -o run.sh; sh run.sh`],
+  [
+    "a script cp copies from stdin, then run",
+    `echo 'touch ${SCRIPT}' | cp /dev/stdin run.sh; sh run.sh`,
+  ],
+  [
+    "a script moved to its run name, then run",
+    `echo 'touch ${SCRIPT}' > a.sh; mv a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script copied to its run name, then run",
+    `echo 'touch ${SCRIPT}' > a.sh; cp a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script linked to its run name, then run",
+    `echo 'touch ${SCRIPT}' > a.sh; ln -s a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script sort -o writes, run by its own path",
+    `echo 'touch ${SCRIPT}' | sort -o run.sh; chmod +x run.sh; ./run.sh`,
+  ],
+]
+const writeControls = (): Row[] => [
+  ["a plain script written in another case, then run", `echo 'touch out.log' > Run.sh; sh run.sh`],
+  ["a plain script written by >& to a name, then run", `echo 'touch out.log' >& run.sh; sh run.sh`],
+  ["a plain script dd writes, then run", `echo 'touch out.log' | dd of=run.sh; sh run.sh`],
+  [
+    "a plain script cp copies from stdin, then run",
+    `echo 'touch out.log' | cp /dev/stdin run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script moved to its run name, then run",
+    `echo 'touch out.log' > a.sh; mv a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script copied to its run name, then run",
+    `echo 'touch out.log' > a.sh; cp a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script linked to its run name, then run",
+    `echo 'touch out.log' > a.sh; ln -s a.sh run.sh; sh run.sh`,
+  ],
+]
 // shell.ts reads a script's ~ as the process's homedir() while this test sets the root's home by env HOME, so the ~ glob row is judged in the process worktree alone, where the two are one home
 const worktreeRuns = (): Row[] => [
   [
@@ -242,6 +294,11 @@ const linked = ({ DATA, HOME }: Paths): Row[] => [
   ["a redirect through a dangling link into the root", `cat payload > ${HOME}/dangling`],
   ["a cp through a dangling link into the root", `cp payload ${HOME}/dangling`],
   ["a tee through a dangling link into the root", `cat payload | tee ${HOME}/dangling`],
+  ["a touch through a relative dangling link in a linked folder", `touch ${HOME}/linked-sub/rel`],
+  [
+    "a redirect through a relative dangling link in a linked folder",
+    `cat payload > ${HOME}/linked-sub/rel`,
+  ],
   [
     "an echo naming the root through a dangling link onto a hook",
     `echo 'touch ${SCRIPT}' > ${HOME}/dangling-hook`,
@@ -278,6 +335,10 @@ const worktreeControls = (): Row[] => [
 const linkControls = ({ HOME }: Paths): Row[] => [
   ["a touch through a dangling link to a plain place", `touch ${HOME}/dangling-plain`],
   [
+    "an echo naming the root into a glob onto a file named with *",
+    `echo 'touch ${SCRIPT}' > ${HOME}/starred/a*`,
+  ],
+  [
     "an echo naming the root through a dangling link to a plain place",
     `echo 'touch ${SCRIPT}' > ${HOME}/dangling-plain`,
   ],
@@ -287,6 +348,7 @@ export const allowed: string[] = [
   ...controls(),
   dotGit,
   ...runControls(),
+  ...writeControls(),
   ...worktreeControls(),
   ...linkControls({ HOME: "" } as Paths),
 ].map(([what]) => what)
@@ -307,7 +369,7 @@ export const groups: Group[] = [
   {
     folders: ["data folder", "home", "process worktree"],
     guards: ["no-extensions-write"],
-    rows: () => [...runsRoot(), ...runControls()],
+    rows: () => [...runsRoot(), ...runControls(), ...writesRun(), ...writeControls()],
   },
   {
     folders: ["process worktree"],

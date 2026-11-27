@@ -4230,10 +4230,20 @@ async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Prom
   return scripts
 }
 
-// The text a redirect or a tee earlier on the line wrote to the file a word names (`echo … > run.sh; sh run.sh`), so the script a shell, a source or a ./ runs is walked as it was written; undefined for a file the line did not write
+// The text the line wrote to the file a word names (record: `echo … > run.sh; sh run.sh`), so the script a shell, a source or a ./ runs is walked as it was written; undefined for a file the line did not write
 const writtenScript = (word: Word, env: Env): Text | undefined => {
   const path = pathOf(word, env)
-  return path === undefined ? undefined : env.files.get(path)
+  return path === undefined ? undefined : writtenFile(path, env)
+}
+
+// The text the line wrote to a path, matched in any case off Linux, since macOS's filesystem reads a path in any case; undefined for a file the line did not write
+export function writtenFile(path: string, env: Env): Text | undefined {
+  const exact = env.files.get(path)
+  if (exact || process.platform === "linux") return exact
+  const lower = path.toLowerCase()
+  let found: Text | undefined
+  for (const [each, text] of env.files) if (each.toLowerCase() === lower) found = text
+  return found
 }
 
 // The output of a list of commands run in order, unknown when any part is.
@@ -4243,7 +4253,9 @@ async function outputs(cmds: Command[], env: Env): Promise<Text> {
 
 async function record(cmd: Command, name: string, args: Word[], env: Env): Promise<void> {
   for (const r of cmd.redirects) {
-    if (r.op !== ">" && r.op !== ">>" && r.op !== ">|") continue
+    // a >& to a name, not a descriptor, writes stdout there, as &> does
+    const named = r.op === ">&" && !/^(?:\d+|-)$/.test(r.target?.value ?? "")
+    if (r.op !== ">" && r.op !== ">>" && r.op !== ">|" && !named) continue
     const path = r.target && pathOf(r.target, env)
     if (!path) continue
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&"
@@ -4252,6 +4264,10 @@ async function record(cmd: Command, name: string, args: Word[], env: Env): Promi
       : unknown(`what ${name || "a command"} writes to stderr`)
     env.files.set(path, held(r.op === ">>" ? join([await existing(path, env), out]) : out))
   }
+  for (const [path, text, moved] of await toolWrites(cmd, name, args, env)) {
+    env.files.set(path, held(text))
+    if (moved) env.files.delete(moved)
+  }
   if (name !== "tee") return
   const input = await stdinOf(cmd, env)
   const append = args.some((a) => a.value === "-a" || a.value === "--append")
@@ -4259,6 +4275,101 @@ async function record(cmd: Command, name: string, args: Word[], env: Env): Promi
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env)
     if (path) env.files.set(path, held(append ? join([await existing(path, env), input]) : input))
   }
+}
+
+const TOOL_WRITERS = /^g?(cp|dd|install|ln|mv|sort|uniq)$/
+// A copy's option letters that take a value (install's group, mode, owner, suffix and target folder; the others' suffix and target folder)
+const COPY_VALUES: Record<string, string> = { cp: "St", install: "gmoSt", ln: "St", mv: "St" }
+
+// The files a writer program other than a redirect or tee writes, each with the text it holds after and, for a move, the path it moved from: a copy's, move's or link's its source's (stdin's for /dev/stdin, a symbolic link's read from the link's folder), dd's its input's, and sort's output file and uniq's output operand text the hook cannot read
+async function toolWrites(
+  cmd: Command,
+  name: string,
+  args: Word[],
+  env: Env,
+): Promise<[string, Text, string?][]> {
+  const tool = TOOL_WRITERS.exec(name)?.[1]
+  if (!tool) return []
+  const at = (value: string) => pathOf({ value }, env)
+  const unread = unknown(`what ${name} writes`)
+  if (tool === "dd") {
+    const of = args.find((a) => a.value.startsWith("of="))
+    const path = of && at(of.value.slice(3))
+    if (!path) return []
+    const input = args.find((a) => a.value.startsWith("if="))
+    const from = input && at(input.value.slice(3))
+    return [[path, input ? (from ? await existing(from, env) : unread) : await stdinOf(cmd, env)]]
+  }
+  if (tool === "sort") {
+    const paths: string[] = []
+    for (const [i, a] of args.entries()) {
+      const v = a.value
+      const long = /^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(=.*)?$/.exec(v)
+      const value = long
+        ? long[1]
+          ? long[1].slice(1)
+          : args[i + 1]?.value
+        : /^-[^-]*o/.test(v)
+          ? v.slice(v.indexOf("o") + 1) || args[i + 1]?.value
+          : undefined
+      const path = value && at(value)
+      if (path) paths.push(path)
+    }
+    return paths.map((path) => [path, unread])
+  }
+  const operands: Word[] = []
+  let ended = false
+  if (tool === "uniq") {
+    for (const a of args)
+      if (ended || !a.value.startsWith("-") || a.value === "-") operands.push(a)
+      else if (a.value === "--") ended = true
+    const path = operands[1] && at(operands[1].value)
+    return path ? [[path, unread]] : []
+  }
+  let target: string | undefined
+  let symbolic = false
+  for (let i = 0; i < args.length; i++) {
+    const v = args[i].value
+    if (ended || !v.startsWith("-") || v === "-") {
+      operands.push(args[i])
+      continue
+    }
+    if (v === "--") ended = true
+    else if (v.startsWith("--target-directory=")) target = v.slice(19)
+    else if (v === "--target-directory") target = args[++i]?.value
+    else if (v === "--symbolic") symbolic = true
+    else if (!v.startsWith("--"))
+      for (let k = 1; k < v.length; k++) {
+        if (v[k] === "s") symbolic = true
+        if (!COPY_VALUES[tool].includes(v[k])) continue
+        const value = v.slice(k + 1) || args[++i]?.value
+        if (v[k] === "t") target = value
+        break
+      }
+  }
+  const folder = target ?? (operands.length > 2 ? operands.at(-1)?.value : undefined)
+  const sources = target ? operands : operands.slice(0, -1)
+  const last = folder ? undefined : operands.at(-1)
+  const base = at(folder ?? last?.value ?? "")
+  if (!base || sources.length === 0) return []
+  let into = !!folder
+  if (!into)
+    try {
+      into = statSync(base).isDirectory()
+    } catch {}
+  const writes: [string, Text, string?][] = []
+  for (const source of sources) {
+    const dest = into ? resolve(base, basename(source.value)) : base
+    const stdin = /^\/dev\/(?:stdin|fd\/0)$/.test(source.value)
+    const from = stdin
+      ? undefined
+      : tool === "ln" && symbolic && !isAbsolute(source.value)
+        ? resolve(dirname(dest), source.value)
+        : at(source.value)
+    const text = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread
+    writes.push([dest, text, tool === "mv" && from ? from : undefined])
+  }
+  return writes
 }
 
 async function existing(path: string, env: Env): Promise<Text> {

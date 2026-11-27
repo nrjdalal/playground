@@ -150,6 +150,12 @@ symlinkSync(join(SCOPE, "no-such-3067"), join(HOME, "dangling"))
 symlinkSync(join(HOME, "no-such-3067"), join(HOME, "dangling-plain"))
 symlinkSync(join(HOME, "hooked", ".git", "hooks", "pre-push"), join(HOME, "dangling-hook"))
 mkdirSync(join(HOME, "hooked", ".git", "hooks"), { recursive: true })
+// a linked folder holding a relative dangling link whose .. the kernel reads from the folder's real place, the data folder, and a folder holding a file whose name is a glob
+mkdirSync(join(DATA, "sub"))
+symlinkSync(join(DATA, "sub"), join(HOME, "linked-sub"))
+symlinkSync("../extensions/login/new", join(DATA, "sub", "rel"))
+mkdirSync(join(HOME, "starred"))
+writeFileSync(join(HOME, "starred", "a*"), "")
 writeFileSync(join(HOME, "hooked", ".git", "hooks", "pre-commit"), "#!/bin/sh\n")
 // the main checkout's worktree a, by its .git file, holding a link into the main checkout, and a plain folder beside it that no worktree holds, for #1663's rows
 writeFileSync(join(PATHS.MAIN, ".claude", "worktrees", "a", ".git"), "gitdir: x\n")

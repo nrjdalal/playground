@@ -8122,14 +8122,26 @@ async function scriptOf(operand, cmd, env) {
 }
 var writtenScript = (word, env) => {
   const path = pathOf(word, env);
-  return path === undefined ? undefined : env.files.get(path);
+  return path === undefined ? undefined : writtenFile(path, env);
 };
+function writtenFile(path, env) {
+  const exact = env.files.get(path);
+  if (exact || process.platform === "linux")
+    return exact;
+  const lower = path.toLowerCase();
+  let found;
+  for (const [each, text] of env.files)
+    if (each.toLowerCase() === lower)
+      found = text;
+  return found;
+}
 async function outputs(cmds, env) {
   return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record2(cmd, name, args, env) {
   for (const r of cmd.redirects) {
-    if (r.op !== ">" && r.op !== ">>" && r.op !== ">|")
+    const named = r.op === ">&" && !/^(?:\d+|-)$/.test(r.target?.value ?? "");
+    if (r.op !== ">" && r.op !== ">>" && r.op !== ">|" && !named)
       continue;
     const path = r.target && pathOf(r.target, env);
     if (!path)
@@ -8137,6 +8149,11 @@ async function record2(cmd, name, args, env) {
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
     env.files.set(path, held2(r.op === ">>" ? join4([await existing(path, env), out]) : out));
+  }
+  for (const [path, text, moved] of await toolWrites(cmd, name, args, env)) {
+    env.files.set(path, held2(text));
+    if (moved)
+      env.files.delete(moved);
   }
   if (name !== "tee")
     return;
@@ -8147,6 +8164,95 @@ async function record2(cmd, name, args, env) {
     if (path)
       env.files.set(path, held2(append ? join4([await existing(path, env), input]) : input));
   }
+}
+var TOOL_WRITERS = /^g?(cp|dd|install|ln|mv|sort|uniq)$/;
+var COPY_VALUES = { cp: "St", install: "gmoSt", ln: "St", mv: "St" };
+async function toolWrites(cmd, name, args, env) {
+  const tool = TOOL_WRITERS.exec(name)?.[1];
+  if (!tool)
+    return [];
+  const at = (value) => pathOf({ value }, env);
+  const unread = unknown(`what ${name} writes`);
+  if (tool === "dd") {
+    const of = args.find((a) => a.value.startsWith("of="));
+    const path = of && at(of.value.slice(3));
+    if (!path)
+      return [];
+    const input = args.find((a) => a.value.startsWith("if="));
+    const from = input && at(input.value.slice(3));
+    return [[path, input ? from ? await existing(from, env) : unread : await stdinOf(cmd, env)]];
+  }
+  if (tool === "sort") {
+    const paths = [];
+    for (const [i, a] of args.entries()) {
+      const v = a.value;
+      const long = /^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(=.*)?$/.exec(v);
+      const value = long ? long[1] ? long[1].slice(1) : args[i + 1]?.value : /^-[^-]*o/.test(v) ? v.slice(v.indexOf("o") + 1) || args[i + 1]?.value : undefined;
+      const path = value && at(value);
+      if (path)
+        paths.push(path);
+    }
+    return paths.map((path) => [path, unread]);
+  }
+  const operands = [];
+  let ended = false;
+  if (tool === "uniq") {
+    for (const a of args)
+      if (ended || !a.value.startsWith("-") || a.value === "-")
+        operands.push(a);
+      else if (a.value === "--")
+        ended = true;
+    const path = operands[1] && at(operands[1].value);
+    return path ? [[path, unread]] : [];
+  }
+  let target;
+  let symbolic = false;
+  for (let i = 0;i < args.length; i++) {
+    const v = args[i].value;
+    if (ended || !v.startsWith("-") || v === "-") {
+      operands.push(args[i]);
+      continue;
+    }
+    if (v === "--")
+      ended = true;
+    else if (v.startsWith("--target-directory="))
+      target = v.slice(19);
+    else if (v === "--target-directory")
+      target = args[++i]?.value;
+    else if (v === "--symbolic")
+      symbolic = true;
+    else if (!v.startsWith("--"))
+      for (let k = 1;k < v.length; k++) {
+        if (v[k] === "s")
+          symbolic = true;
+        if (!COPY_VALUES[tool].includes(v[k]))
+          continue;
+        const value = v.slice(k + 1) || args[++i]?.value;
+        if (v[k] === "t")
+          target = value;
+        break;
+      }
+  }
+  const folder = target ?? (operands.length > 2 ? operands.at(-1)?.value : undefined);
+  const sources = target ? operands : operands.slice(0, -1);
+  const last = folder ? undefined : operands.at(-1);
+  const base = at(folder ?? last?.value ?? "");
+  if (!base || sources.length === 0)
+    return [];
+  let into = !!folder;
+  if (!into)
+    try {
+      into = statSync(base).isDirectory();
+    } catch {}
+  const writes = [];
+  for (const source of sources) {
+    const dest = into ? resolve3(base, basename(source.value)) : base;
+    const stdin = /^\/dev\/(?:stdin|fd\/0)$/.test(source.value);
+    const from = stdin ? undefined : tool === "ln" && symbolic && !isAbsolute3(source.value) ? resolve3(dirname(dest), source.value) : at(source.value);
+    const text = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread;
+    writes.push([dest, text, tool === "mv" && from ? from : undefined]);
+  }
+  return writes;
 }
 async function existing(path, env) {
   return env.files.get(path) ?? await readFile(path) ?? { value: "" };

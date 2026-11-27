@@ -79,6 +79,7 @@ import {
   withDeadline,
   type Word,
   WRAPPERS,
+  writtenFile,
 } from "./shell"
 import {
   held,
@@ -2224,16 +2225,16 @@ function outputFiles(tool: "sort" | "uniq", args: Word[]): { files: Word[]; stdi
   }
 }
 // Whether a path is a hook file: one in a .git/hooks folder in any case, since macOS's filesystem reads a path in any case, or in the folder its repo's hooks run from, or, unless `sure`, any file in a folder git could not answer for; never a device under /dev
-function hookFile(path: string | undefined, sure = false): boolean {
+function hookFile(path: string | undefined, sure = false, literal = false): boolean {
   if (!path) return false
   if (/(?:^|\/)\.git\/hooks\//i.test(path)) return true
-  // a glob the shell expands on the filesystem (`.git/hook?/pre-commit`) counts by each file it matches (hookGlobFiles), and as a file the hook cannot read past GLOB_MATCHES of them
-  if (/[*?[]/.test(path) && isAbsolute(path)) {
+  // a glob the shell expands on the filesystem (`.git/hook?/pre-commit`) counts by each file it matches (hookGlobFiles), each a literal path, since a file's own name may hold a glob character, and as a file the hook cannot read past GLOB_MATCHES of them
+  if (!literal && /[*?[]/.test(path) && isAbsolute(path)) {
     const matches = hookGlobFiles(path)
-    return matches === undefined ? !sure : matches.some((each) => hookFile(each, sure))
+    return matches === undefined ? !sure : matches.some((each) => hookFile(each, sure, true))
   }
   const end = linkEnd(path)
-  if (end && hookFile(end, sure)) return true
+  if (end && hookFile(end, sure, true)) return true
   if (resolve(path).startsWith("/dev/")) return false
   const dir = dirname(path)
   if (!hookFolders.has(dir)) hookFolders.set(dir, readHookFolder(dir))
@@ -2241,13 +2242,13 @@ function hookFile(path: string | undefined, sure = false): boolean {
   return (!sure && folder === true) || folder === real(dir)
 }
 const LINK_HOPS = 40
-// Where a link whose target does not exist yet lands, by its readlink chain, which realpath cannot follow; undefined for a path that is no link, or a chain past LINK_HOPS
+// Where a link's readlink chain lands, which realpath cannot follow once the target is missing, each hop read from the real folder the link sits in, as the kernel reads it; undefined for a path that is no link, or a chain past LINK_HOPS
 function linkEnd(path: string): string | undefined {
   let at = resolve(path)
   for (let hop = 0; hop <= LINK_HOPS; hop++) {
     try {
       if (!lstatSync(at).isSymbolicLink()) return hop > 0 ? at : undefined
-      at = resolve(dirname(at), readlinkSync(at))
+      at = resolve(real(dirname(at)), readlinkSync(at))
     } catch {
       return hop > 0 ? at : undefined
     }
@@ -3015,6 +3016,13 @@ async function inspect(
       }
       return (await visit(own, parse(own), env)) ?? run(remote, at, visit, true)
     }
+    // a file this line wrote with text the hook cannot read, run by its own path (`./run.sh`), is refused as a shell running it is (below)
+    const ownPath = parsed.first?.value.includes("/") ? pathOf(parsed.first, env) : undefined
+    const ownScript = ownPath === undefined ? undefined : writtenFile(ownPath, env)
+    if (ownScript && (ownScript.unknown || marked(ownScript.value)))
+      return refuse(
+        `${shown(parsed.first!)}, a script this line wrote with text the hook cannot read; run its commands as calls of their own`,
+      )
     // the reader walks the script a shell or a source runs, so the hook judges only one it cannot read: a -c script it reads none of, or a file this line wrote with such text
     if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
       const shellCall = SHELLS.has(parsed.name)
@@ -3029,7 +3037,7 @@ async function inspect(
       if (inline && operand && evaluatedParts(operand.value).some((part) => touches(part, env)))
         return refuse(EVALUATES_ROOT)
       const path = !inline && operand ? pathOf(operand, env) : undefined
-      const written = path === undefined ? undefined : env.files.get(path)
+      const written = path === undefined ? undefined : writtenFile(path, env)
       if (written && (written.unknown || marked(written.value)))
         return refuse(
           `${parsed.name} ${shown(operand!)}, a script this line wrote with text the hook cannot read; run its commands as calls of their own`,
