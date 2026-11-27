@@ -4,8 +4,8 @@ import { attachmentUrl, isAttachmentId } from "@/lib/attachments"
 import type { OutboxAttachment } from "@/lib/outbox"
 import { withRef } from "@/lib/reply"
 
-// What the composer holds for a session and has not sent, its words and the files already uploaded for them, or an Inbox draft card's changed words (cardDraftKey).
-export type Draft = { attachments: OutboxAttachment[]; text: string }
+// What the composer holds for a session and has not sent, its words and the files already uploaded for them, or an Inbox draft card's changed words (cardDraftKey) with base, the poster's words they were typed over.
+export type Draft = { attachments: OutboxAttachment[]; base?: string; text: string }
 export type Drafts = Record<string, Draft>
 
 export const DRAFTS_KEY = "dashboard.composer.drafts.v1"
@@ -157,3 +157,10 @@ export function takeHanded<Handed extends { ref?: number; text: string; to: stri
       ? typed
       : handed.text
 }
+
+// Pure: a draft card's box once its poster's words change from base to posted. Stub for the red-first commit (PG-3176).
+export const posterEdit = (
+  owner: string,
+  _base: string,
+  _posted: string,
+): { draft: string; replaced: string | null } => ({ draft: owner, replaced: null })

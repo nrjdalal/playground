@@ -7,6 +7,7 @@ import {
   draftSaver,
   keptAttachments,
   parseDrafts,
+  posterEdit,
   putDraft,
   readDrafts,
   takeHanded,
@@ -31,6 +32,14 @@ describe("parseDrafts", () => {
   test("reads each session's words and files back", () => {
     const stored = { [TO]: { attachments: [ref(PNG, "image")], text: "half a thought" } }
     expect(parseDrafts(JSON.stringify(stored))).toEqual(stored)
+  })
+
+  test("keeps a card edit's base, the poster's words it was typed over, and drops one that is not words (PG-3176)", () => {
+    const card = { attachments: [], base: "hi", text: "hi, the ship moves to Friday" }
+    expect(parseDrafts(JSON.stringify({ "inbox:id-1": card }))).toEqual({ "inbox:id-1": card })
+    expect(parseDrafts(JSON.stringify({ "inbox:id-1": { ...card, base: 7 } }))).toEqual({
+      "inbox:id-1": { attachments: [], text: "hi, the ship moves to Friday" },
+    })
   })
 
   test("a missing, broken or foreign value reads as no drafts", () => {
@@ -209,5 +218,20 @@ describe("takeHanded", () => {
     expect(takeHanded("re #i40: hold it", reply, "dispatcher", null)).toBe("re #i41: hold it")
     expect(takeHanded("hold it", reply, "builder", null)).toBeNull()
     expect(takeHanded("re #i41: ", reply, "dispatcher", reply)).toBeNull()
+  })
+})
+
+// A poster's edit always takes the box, and the owner's words typed over the earlier text wait to be restored (PG-3176).
+describe("posterEdit", () => {
+  test("the poster's new words take the box, and the owner's own wait to be restored", () => {
+    expect(posterEdit("hi, the ship moves to Friday", "hi", "hi there")).toEqual({
+      draft: "hi there",
+      replaced: "hi, the ship moves to Friday",
+    })
+  })
+
+  test("nothing waits when the owner had not changed the box, or had typed the poster's new words", () => {
+    expect(posterEdit("hi", "hi", "hi there")).toEqual({ draft: "hi there", replaced: null })
+    expect(posterEdit("hi there", "hi", "hi there")).toEqual({ draft: "hi there", replaced: null })
   })
 })
