@@ -935,6 +935,10 @@ var setVar = (vars, key, value) => {
   else
     setLog.set(vars, [key]);
 };
+function varsSince(vars, cursor) {
+  const log = setLog.get(vars) ?? [];
+  return [cursor === undefined ? [...vars.keys()] : log.slice(cursor), log.length];
+}
 var merge = (out, part) => {
   out.value += part.value;
   if (part.splits)
@@ -3705,11 +3709,13 @@ var namesApart = (text, targets) => {
 };
 var knownOf = (at) => {
   const known = { ...at.known };
+  const [order] = varsSince(at.vars, 0);
   for (const [key, text] of at.vars) {
+    const raw = text.raw;
     if (!marked(text.value))
       known[key] = text.value;
-    else if (text.raw?.startsWith(`${key}=`)) {
-      const { commands } = lex(text.raw.slice(key.length + 1), known);
+    else if (raw?.startsWith(`${key}=`) && order.includes(key) && ![...raw.matchAll(/\$\{?(\w+)/g)].some(([, name]) => order.lastIndexOf(name) > order.lastIndexOf(key))) {
+      const { commands } = lex(raw.slice(key.length + 1), known);
       const again = commands.length === 1 && commands[0].words.length === 1 ? commands[0].words[0] : undefined;
       if (again && !marked(again.value))
         known[key] = again.value;

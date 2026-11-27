@@ -17,6 +17,7 @@ import {
   stdinOf,
   type Env,
   UNKNOWN,
+  varsSince,
   type Visit,
   visible,
   type Word,
@@ -196,13 +197,21 @@ const namesApart = (text: string, targets: string[]) => {
   )
 }
 
-// The variables the call has set by then, each read as the shell gives it: one set from another (`E=$D`) is read again from its own text with the ones before it.
+// The variables the call has set by then, each read as the shell gives it: one set from another (`E=$D`) is read again from its own text with the ones before it, unless a scope this one copied set it or one it reads was set again after it.
 const knownOf = (at: Env): Record<string, string> => {
   const known = { ...at.known }
+  const [order] = varsSince(at.vars, 0)
   for (const [key, text] of at.vars) {
+    const raw = (text as Word).raw
     if (!marked(text.value)) known[key] = text.value
-    else if ((text as Word).raw?.startsWith(`${key}=`)) {
-      const { commands } = lex((text as Word).raw!.slice(key.length + 1), known)
+    else if (
+      raw?.startsWith(`${key}=`) &&
+      order.includes(key) &&
+      ![...raw.matchAll(/\$\{?(\w+)/g)].some(
+        ([, name]) => order.lastIndexOf(name!) > order.lastIndexOf(key),
+      )
+    ) {
+      const { commands } = lex(raw.slice(key.length + 1), known)
       const again =
         commands.length === 1 && commands[0]!.words.length === 1 ? commands[0]!.words[0] : undefined
       if (again && !marked(again.value)) known[key] = again.value

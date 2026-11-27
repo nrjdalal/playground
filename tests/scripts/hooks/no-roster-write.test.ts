@@ -100,6 +100,9 @@ describe("a write to the live roster is refused, naming roster.ts", () => {
     `watch -n5 cat ${ROSTER}`,
     `yq . ${ROSTER}`,
     `fx ${ROSTER}`,
+    // #3130's review: a variable copied from one holding the data folder still holds it after that one is set again
+    `D=${DATA}; E=$D; D=/tmp; ls ${DATA} | while read f; do rm $E/$f; done`,
+    `D=${DATA}; E=$D; D=/tmp; (ls ${DATA} | while read f; do rm $E/$f; done)`,
   ])("%s", async (command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-roster-write hook refuses")
@@ -280,6 +283,7 @@ describe("roster.ts and every read run", () => {
     `chown -R x ${DATA}/scratch/w`,
     "D=/tmp/w; echo x > $D/$f",
     "D=/tmp/w; E=$D; rm $E/$f",
+    `D=/tmp/w; E=$D; D=${DATA}; rm $E/$f`,
     `cd ${DATA} && python3 -c "print(open('./roster.json').read())"`,
     `cd ${DATA}/scratch/w && python3 -c "import os; os.remove('./roster.json')"`,
     `python3 -c "import shutil; p='/tmp/y'; shutil.copy('/tmp/x', p)"`,
