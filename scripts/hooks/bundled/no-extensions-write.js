@@ -6457,7 +6457,7 @@ function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
   if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
-  return script.replaceAll(mark, value);
+  return script.replaceAll(mark, () => value);
 }
 var held2 = (text) => text.value.length > MAX_BYTES ? unknown2(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
@@ -8366,7 +8366,7 @@ function viaRunner(parsed, state, budget) {
     xargs: parsed.xargs && { ...parsed.xargs }
   }, key, budget);
   if (!reading.first)
-    return;
+    return reading.xargs?.wrapped ? { ...reading, via: key } : undefined;
   const file = reading.first.value;
   if (key === "bun run" && (file.includes("/") || SCRIPT_FILE.test(file)))
     return;
@@ -9100,7 +9100,7 @@ async function xargsFilled(cmd, xargs, env) {
           return [w];
         if (text === undefined)
           return [{ ...w, ...unknown2(`the program xargs puts in place of ${held.join(" or ")}`) }];
-        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, text), w.value));
+        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, () => text), w.value));
       }),
       ...!wrapped ? [] : text === undefined ? [{ quoted: false, ...unknown2("the program xargs hands its wrapper") }] : wordsOf(text)
     ]
@@ -9659,12 +9659,27 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     return;
   const { inline, operand } = shellOperand(args, name);
   if (operand && inline) {
-    let script = operand.value;
-    if (xargs?.replace && script.includes(xargs.replace)) {
-      const fed = await stdinOf(cmd, env);
-      script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
+    const script = operand.value;
+    if (!xargs?.replace || !script.includes(xargs.replace))
+      return run(lexScript(script, env), subshell(env), visit, builtins);
+    const fed = await stdinOf(cmd, env);
+    const texts = new Set;
+    for (const split of [null, ...xargs.delimiters ?? []]) {
+      const items = itemsOf(fed, split);
+      if (!items || items.length > READINGS)
+        texts.add(UNKNOWN);
+      else
+        for (const text of items)
+          if (text.trim())
+            texts.add(text.trim());
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins);
+    for (const text of texts.size > 0 ? texts : [""]) {
+      const lexed = lexScript(filled(script, xargs.replace, text), env);
+      const verdict = await run(lexed, subshell(env), visit, builtins);
+      if (verdict)
+        return verdict;
+    }
+    return;
   }
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script);
@@ -13710,7 +13725,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     const putIn = (word) => args.map((arg) => {
       if (!replace || !arg.value.includes(replace))
         return arg;
-      const put = { ...arg, value: arg.value.replaceAll(replace, word.value) };
+      const put = { ...arg, value: arg.value.replaceAll(replace, () => word.value) };
       fromStdin.add(put);
       if (fromArgFile.has(word))
         fromArgFile.add(put);
