@@ -13,7 +13,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs"
-import { tmpdir } from "node:os"
+import os, { tmpdir } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 
 import {
@@ -23,6 +23,7 @@ import {
   cwdsOf,
   envOf,
   GLM_BASE_URL,
+  IN_THREAD,
   keyOf,
   linesOf,
   loadedTree,
@@ -759,6 +760,81 @@ describe("a GLM replay", () => {
 })
 
 // A hook whose check() takes the main checkout reads it from its own folder when none is given, and canary's unpacked tree is no checkout of the repository, so the differential hands both sides the head's (PG-996)
+describe("a hook that reads the live load", () => {
+  // no-glm-heavy-path's shape: a push refused above a 5-minute load of 15
+  const gated: Check = (raw) =>
+    JSON.parse(raw).tool_input.command.startsWith("git push") && os.loadavg()[1] > 15
+      ? "refused"
+      : undefined
+  // a load that crosses 15 between every two reads, as a busy machine's may
+  const crossing = (run: () => Promise<unknown>) => async () => {
+    const live = os.loadavg
+    let reads = 0
+    os.loadavg = () => (reads++ % 2 === 0 ? [10, 10, 10] : [20, 20, 20])
+    try {
+      await run()
+    } finally {
+      os.loadavg = live
+    }
+  }
+
+  test(
+    "a replay judges both sides of a call under one load, so equal heads read the same",
+    crossing(async () => {
+      const list = [{ command: "git push origin x", cwd: "/h" }]
+      expect((await replay(gated, gated, list, "/h")).counts).toMatchObject({
+        "newly allowed": 0,
+        "newly refused": 0,
+        same: 1,
+      })
+    }),
+  )
+
+  test(
+    "a sweep judges both sides of a case under one load, so equal heads read the same",
+    crossing(async () => {
+      const { counts } = await sweep(gated, gated, [{ command: "git push origin x" }], "/h")
+      expect(counts).toMatchObject({ cases: 3, same: 3 })
+    }),
+  )
+
+  test("the run puts the live load back after each call", async () => {
+    const live = os.loadavg
+    await replay(gated, gated, [{ command: "git push origin x", cwd: "/h" }], "/h")
+    expect(os.loadavg).toBe(live)
+  })
+})
+
+describe("a guard judged in this thread", () => {
+  test("guards runs each IN_THREAD guard by its check(), never its Worker entry, on both sides", async () => {
+    const side = (name: string) => {
+      const hooks = join(DIR, "guards-thread", name, "scripts", "hooks")
+      mkdirSync(hooks, { recursive: true })
+      writeFileSync(
+        join(hooks, "no-extensions-write.ts"),
+        'export const check = () => "thread"\nexport const guarded = () => "worker"\n',
+      )
+      writeFileSync(
+        join(hooks, "guards.ts"),
+        'import { guarded } from "./no-extensions-write"\nexport const GUARDS = [{ factory: true, name: "no-extensions-write", run: (raw: string, env: unknown) => guarded(raw, env) }]\nexport const check = async (raw: string, env: unknown, guards = GUARDS) => (await Promise.all(guards.map((g) => g.run(raw, env)))).find(Boolean)\n',
+      )
+      return join(hooks, "guards.ts")
+    }
+    const raw = JSON.stringify({ tool_input: { command: "ls" } })
+    for (const name of ["canary", "head"])
+      expect(await (await checkOf(side(name), "guards", "/main"))(raw, {})).toBe("thread")
+  })
+
+  test("each IN_THREAD guard's Worker runs that hook's own check() with the call's input and env", async () => {
+    const hooks = join(import.meta.dir, "../../../../scripts/hooks")
+    for (const name of IN_THREAD) {
+      const worker = await Bun.file(join(hooks, `${name}-worker.ts`)).text()
+      expect(worker).toContain(`import { check } from "./${name}"`)
+      expect(worker).toContain("check(event.data.raw, event.data.environment)")
+    }
+  })
+})
+
 describe("a hook that takes the main checkout", () => {
   // refuses a command that names its main checkout; with none given, main is the folder it would read from its own tree
   const guard =
