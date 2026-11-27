@@ -19873,7 +19873,7 @@ var CODE_RUNNERS = new Set([
   "python3",
   "ruby"
 ]);
-var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|(?<![\w.$-])(?:cp|mv|install)(?:\s|["']\s*,)|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i;
+var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|(?<![\w.$-])(?:cp|mv|install)["']\s*,|["'`](?:cp|mv|install)\s+[^\s"'`)]+\s+(?:[^\s"'`)]|["'`]\s*[+%.])|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i;
 var PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g;
 var writesCode = (code) => WRITE_WORDS.test(code.replace(PATHS, (path) => path.slice(path.lastIndexOf("/") + 1)));
 var targetsOf = (environment) => {

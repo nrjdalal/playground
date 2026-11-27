@@ -125,7 +125,7 @@ const CODE_RUNNERS = new Set([
 
 // A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a remove, delete or move call, a truncate, an append, a replace (a path's one-argument replace too), a mode, owner or flags change (an l or f before it too), a copy, move or install call onto a roster.json or onto a destination that is no string literal, cp, mv or install as a shell word, or a redirect's > (an arrow's => and a comparison's >= aside).
 const WRITE_WORDS =
-  /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|(?<![\w.$-])(?:cp|mv|install)(?:\s|["']\s*,)|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i
+  /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|(?<![\w.$-])(?:cp|mv|install)["']\s*,|["'`](?:cp|mv|install)\s+[^\s"'`)]+\s+(?:[^\s"'`)]|["'`]\s*[+%.])|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i
 // A path in the code, from its first slash, its segments up to a quote, a blank, a bracket or a shell operator: its folders (a temp folder's -rMNlX1, a no-roster-write folder) hold no write, and its last segment (/bin/rm) and the word before its first slash (writeFileSync/**/) are kept.
 const PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g
 const writesCode = (code: string) =>
