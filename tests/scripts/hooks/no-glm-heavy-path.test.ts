@@ -1696,3 +1696,14 @@ describe("its registration", () => {
     }
   })
 })
+
+// #3130: a -c script that moves its positional parameters binds none of them, so one whose commands name no parameter runs, as does a bound one on the temp folder
+describe("a -c script's moved positional parameters", () => {
+  test.each([
+    `bash -c 'shift; cd /tmp && git status' _ /tmp /tmp/w`,
+    `sh -c 'set -- /tmp/w; cd /tmp && git status' sh /tmp`,
+    `bash -c 'cd "$1" && git status' _ /tmp`,
+  ])("%s runs", async (command) => {
+    expect(await bash(command, "/tmp")).toBeUndefined()
+  })
+})

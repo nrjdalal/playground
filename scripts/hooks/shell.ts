@@ -4209,7 +4209,8 @@ async function shell(
     const after = args.slice(args.indexOf(operand) + 1)
     const { replace } = xargs ?? {}
     if (!replace || ![operand, ...after].some((w) => w.value.includes(replace))) {
-      const inner = withPositionals(env, after, (value) => value)
+      // xargs with no -I adds its items after the words (`xargs sh -c 'rm "$@"' sh`)
+      const inner = withPositionals(env, script, after, (value) => value, !!xargs && !replace)
       return run(lexScript(script, inner), inner, visit, builtins)
     }
     // the script and its positional parameters are filled with each text xargsTexts reads from stdin and -a's files, so an item -0 or -d splits off runs as xargs runs it (`printf 'x\0pkill node'`), and one it cannot read as unknown
@@ -4217,8 +4218,15 @@ async function shell(
       [...(await xargsTexts(cmd, [xargs!], env))].map((text) => text ?? UNKNOWN),
     )
     for (const text of texts.size > 0 ? texts : [""]) {
-      const inner = withPositionals(env, after, (value) => filled(value, replace, text))
-      const lexed = lexScript(filled(script, replace, text), inner)
+      const body = filled(script, replace, text)
+      const inner = withPositionals(
+        env,
+        body,
+        after,
+        (value) => filled(value, replace, text),
+        false,
+      )
+      const lexed = lexScript(body, inner)
       const verdict = await run(lexed, inner, visit, builtins)
       if (verdict) return verdict
     }
@@ -4231,13 +4239,31 @@ async function shell(
   }
 }
 
-// A `-c` script's subshell, its positional parameters read as the words after the script (`$0`, `$1` and on, and `"$@"` or `"$*"` when one word follows `$0`), each filled as the script is
-function withPositionals(env: Env, after: Word[], fill: (value: string) => string): Env {
+// The positional parameters a `-c` script's words bind, `$0` to `$9`; one past `$9` stays unread
+const DIGIT_PARAMETERS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const
+
+// A script text that may move its positional parameters or read them in a function of its own: shift, set, getopts, a text it runs (eval, source, `.`), zsh's `argv` or `N=`, or a definition
+const MOVES_POSITIONALS =
+  /(?:^|[\s;&|(){}`])(?:shift|set|getopts|eval|source|\.)(?=$|[\s;&|()`])|\bargv\b|(?:^|[\s;&|(){}`])\d+\+?=|\(\s*\)|\bfunction\b/
+
+// A `-c` script's subshell, its positional parameters read as the words after the script (`$0`, `$1` and on, and `"$@"` or `"$*"` when one word follows `$0` and no xargs adds its items after them), each filled as the script is, and all unread when the script may move them (MOVES_POSITIONALS)
+function withPositionals(
+  env: Env,
+  script: string,
+  after: Word[],
+  fill: (value: string) => string,
+  appended: boolean,
+): Env {
   const known = { ...env.known }
   // a function's own parameters, which a guard may bind, are not the script's
-  for (const key of ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "@", "*"]) delete known[key]
-  for (const [k, w] of after.slice(0, 10).entries()) known[String(k)] = fill(w.value)
-  if (after.length === 2) known["@"] = known["*"] = known["1"]!
+  for (const key of [...DIGIT_PARAMETERS, "@", "*"]) delete known[key]
+  if (!MOVES_POSITIONALS.test(script)) {
+    for (const [k, w] of after.slice(0, DIGIT_PARAMETERS.length).entries())
+      known[DIGIT_PARAMETERS[k]!] = fill(w.value)
+    // `$0` and one word after it: `"$@"` and `"$*"` are that one word
+    const oneWord = after.length === 2
+    if (oneWord && !appended) known["@"] = known["*"] = known["1"]!
+  }
   return { ...subshell(env), known }
 }
 

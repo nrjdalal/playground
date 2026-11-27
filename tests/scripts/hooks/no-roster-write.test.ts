@@ -297,6 +297,16 @@ describe("roster.ts and every read run", () => {
     // a quoted ~ in an assignment stays literal, as the shell keeps it, so the cd lands in a folder named ~ under the shell's own
     "D='~/.playground'; cd $D && rm roster.json",
     'D="~/.playground"; cd $D && rm roster.json',
+    `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'rm -f $*' _ /tmp/w/{}`,
+    `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'echo x > "$1"' _ /tmp/w/{}`,
+    'D=/tmp/w; cd "$D"; rm -f roster.json',
+    "D=/tmp/w; cd ${D} && echo x > roster.json",
+    "export D=/tmp/w; cd $D && mv /tmp/x roster.json",
+    // a script that moves its positional parameters on a scratch folder
+    `bash -c 'shift; rm -f "$1"' _ /tmp/a /tmp/w/roster.json`,
+    `bash -c 'shift 1; echo x > "$1"' _ /tmp/a /tmp/w/roster.json`,
+    "zsh -c 'argv=(/tmp/w/roster.json); rm -f $1' _ /tmp/a",
+    "zsh -c '1=/tmp/w/roster.json; rm -f $1' _ /tmp/a",
     `cd ${DATA} && python3 -c "print(open('./roster.json').read())"`,
     `cd ${DATA}/scratch/w && python3 -c "import os; os.remove('./roster.json')"`,
     `python3 -c "import shutil; p='/tmp/y'; shutil.copy('/tmp/x', p)"`,

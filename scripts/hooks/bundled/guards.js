@@ -3555,13 +3555,14 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     const after = args.slice(args.indexOf(operand) + 1);
     const { replace } = xargs ?? {};
     if (!replace || ![operand, ...after].some((w) => w.value.includes(replace))) {
-      const inner = withPositionals(env, after, (value) => value);
+      const inner = withPositionals(env, script, after, (value) => value, !!xargs && !replace);
       return run2(lexScript(script, inner), inner, visit, builtins);
     }
     const texts = new Set([...await xargsTexts(cmd, [xargs], env)].map((text) => text ?? UNKNOWN));
     for (const text of texts.size > 0 ? texts : [""]) {
-      const inner = withPositionals(env, after, (value) => filled(value, replace, text));
-      const lexed = lexScript(filled(script, replace, text), inner);
+      const body = filled(script, replace, text);
+      const inner = withPositionals(env, body, after, (value) => filled(value, replace, text), false);
+      const lexed = lexScript(body, inner);
       const verdict = await run2(lexed, inner, visit, builtins);
       if (verdict)
         return verdict;
@@ -3575,14 +3576,19 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
       return verdict;
   }
 }
-function withPositionals(env, after, fill) {
+var DIGIT_PARAMETERS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+var MOVES_POSITIONALS = /(?:^|[\s;&|(){}`])(?:shift|set|getopts|eval|source|\.)(?=$|[\s;&|()`])|\bargv\b|(?:^|[\s;&|(){}`])\d+\+?=|\(\s*\)|\bfunction\b/;
+function withPositionals(env, script, after, fill, appended) {
   const known = { ...env.known };
-  for (const key of ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "@", "*"])
+  for (const key of [...DIGIT_PARAMETERS, "@", "*"])
     delete known[key];
-  for (const [k, w] of after.slice(0, 10).entries())
-    known[String(k)] = fill(w.value);
-  if (after.length === 2)
-    known["@"] = known["*"] = known["1"];
+  if (!MOVES_POSITIONALS.test(script)) {
+    for (const [k, w] of after.slice(0, DIGIT_PARAMETERS.length).entries())
+      known[DIGIT_PARAMETERS[k]] = fill(w.value);
+    const oneWord = after.length === 2;
+    if (oneWord && !appended)
+      known["@"] = known["*"] = known["1"];
+  }
   return { ...subshell(env), known };
 }
 var known = (script) => script.value.replaceAll(UNKNOWN, `

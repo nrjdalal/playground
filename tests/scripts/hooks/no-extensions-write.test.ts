@@ -4267,3 +4267,25 @@ describe("a write target is read as the shell expands it", () => {
     expect(await bash(command)).toBeUndefined()
   })
 })
+
+// #3130: a -c script that moves its positional parameters, reads them in a function of its own, or runs under xargs with no -I binds none of them, so a read through one on a scratch folder runs
+describe("a -c script's moved positional parameters", () => {
+  test.each([
+    `bash -c 'shift; cat "$1"' _ /tmp/a /tmp/w/x`,
+    "zsh -c 'argv=(/tmp/w/x); cat $1' _ /tmp/a",
+    "zsh -c '1=/tmp/w/x; cat $1' _ /tmp/a",
+    `bash -c 'shift; cat "$1"' _ /tmp/a /tmp/w`,
+    `bash -c 'set -- /tmp/w/x; cat "$1"' _ /tmp/a`,
+    `bash -c 'set /tmp/w/x; cat "$1"' _ /tmp/a`,
+    `sh -c 'f() { cat "$1"; }; f /tmp/w/x' _ /tmp/a`,
+    `bash -c 'shift; cd "$1" && cat x' _ /tmp /tmp/w`,
+    `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'shift; cat "$1"' _ /tmp/a /tmp/w/{}`,
+    `bash -c 'shift; cd "$1" && git status' _ /tmp /tmp/w`,
+    `sh -c 'set -- /tmp/w; cd "$1" && git status' sh /tmp`,
+    `cat /tmp/no-such-names.txt | xargs sh -c 'cat "$@"' sh /tmp/w`,
+    "cat /tmp/no-such-names.txt | xargs sh -c 'cat $*' sh /tmp/a",
+    `echo /tmp/w/x | xargs sh -c 'cat "$@"' sh /tmp/a`,
+  ])("%s runs", async (command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+})
