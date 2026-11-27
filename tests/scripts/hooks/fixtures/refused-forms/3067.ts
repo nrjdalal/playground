@@ -270,6 +270,14 @@ const writesRun = (): Row[] => [
     "a script in a folder moved, then run",
     `mkdir d; echo 'touch ${SCRIPT}' > d/run.sh; mv d e; sh e/run.sh`,
   ],
+  [
+    "a script in a folder moved to a new name with a /, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > d/run.sh; mv d e/; sh e/run.sh`,
+  ],
+  [
+    "a script in a folder copied by -r to a new name with a /, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > d/run.sh; cp -r d e/; sh e/run.sh`,
+  ],
 ]
 const writeControls = (): Row[] => [
   ["a plain script written in another case, then run", `echo 'touch out.log' > Run.sh; sh run.sh`],
@@ -312,6 +320,14 @@ const writeControls = (): Row[] => [
     `mkdir d; echo 'touch out.log' > d/run.sh; mv d e; sh e/run.sh`,
   ],
   ["a plain copy to a file, then run", `echo 'touch out.log' > a.sh; cp a.sh d; sh d`],
+  [
+    "a plain script in a folder moved to a new name with a /, then run",
+    `mkdir d; echo 'touch out.log' > d/run.sh; mv d e/; sh e/run.sh`,
+  ],
+  [
+    "a plain script in a folder copied by -r to a new name with a /, then run",
+    `mkdir d; echo 'touch out.log' > d/run.sh; cp -r d e/; sh e/run.sh`,
+  ],
 ]
 // shell.ts reads a script's ~ as the process's homedir() while this test sets the root's home by env HOME, so the ~ glob row is judged in the process worktree alone, where the two are one home
 const worktreeRuns = (): Row[] => [

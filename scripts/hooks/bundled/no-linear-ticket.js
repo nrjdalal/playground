@@ -3607,7 +3607,7 @@ async function toolWrites(cmd, name, args, env) {
   const base = at(folder ?? last?.value ?? "");
   if (!base || sources.length === 0)
     return [];
-  let into = !!folder || (folder ?? last?.value ?? "").endsWith("/");
+  let into = !!folder;
   if (!into)
     try {
       into = statSync(base).isDirectory();

@@ -4370,7 +4370,7 @@ async function toolWrites(
   const last = folder ? undefined : operands.at(-1)
   const base = at(folder ?? last?.value ?? "")
   if (!base || sources.length === 0) return []
-  let into = !!folder || (folder ?? last?.value ?? "").endsWith("/")
+  let into = !!folder
   if (!into)
     try {
       into = statSync(base).isDirectory()
