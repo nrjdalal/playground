@@ -239,6 +239,10 @@ const writesRun = (): Row[] => [
     `echo 'touch ${SCRIPT}' > a.sh; ln -s a.sh run.sh; sh run.sh`,
   ],
   [
+    "a script linked from a value the hook cannot read, then run",
+    `echo 'touch out.log' > a.sh; ln -s "$S" run.sh; sh run.sh`,
+  ],
+  [
     "a script sort -o writes, run by its own path",
     `echo 'touch ${SCRIPT}' | sort -o run.sh; chmod +x run.sh; ./run.sh`,
   ],

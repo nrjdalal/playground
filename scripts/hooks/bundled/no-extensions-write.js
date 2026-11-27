@@ -9713,7 +9713,7 @@ async function record2(cmd, name, args, env) {
     const out = stdout ? await outputOf(cmd, env) : unknown2(`what ${name || "a command"} writes to stderr`);
     env.files.set(path, held2(r.op === ">>" ? join5([await existing(path, env), out]) : out));
   }
-  for (const [path, text, moved] of await toolWrites(cmd, name, args, env)) {
+  for (const [path, text, moved] of await toolWrites(cmd, name, args, env).catch(() => [])) {
     env.files.set(path, held2(text));
     if (moved)
       env.files.delete(moved);
@@ -9811,7 +9811,7 @@ async function toolWrites(cmd, name, args, env) {
   for (const source of sources) {
     const dest = into ? resolve3(base, basename2(source.value)) : base;
     const stdin = /^\/dev\/(?:stdin|fd\/0)$/.test(source.value);
-    const from = stdin ? undefined : tool === "ln" && symbolic && !isAbsolute3(source.value) ? resolve3(dirname2(dest), source.value) : at(source.value);
+    const from = stdin ? undefined : tool === "ln" && symbolic && !isAbsolute3(source.value) && !marked(source.value) ? resolve3(dirname2(dest), source.value) : at(source.value);
     const text = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread;
     writes.push([dest, text, tool === "mv" && from ? from : undefined]);
   }
