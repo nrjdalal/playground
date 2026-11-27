@@ -8185,6 +8185,13 @@ async function toolWrites(cmd, name, args, env) {
     return [];
   const at = (value) => marked(value) ? undefined : pathOf({ value }, env);
   const unread = unknown(`what ${name} writes`);
+  const kept = async (dest) => {
+    const written = writtenFile(dest, env);
+    if (written)
+      return written;
+    const old = await readFile(dest).catch(() => unread) ?? { value: "" };
+    return old.unknown || marked(old.value) ? { value: "" } : old;
+  };
   if (tool === "dd") {
     const of = args.find((a) => a.value.startsWith("of="));
     const path = of && at(of.value.slice(3));
@@ -8193,8 +8200,9 @@ async function toolWrites(cmd, name, args, env) {
     const input = args.find((a) => a.value.startsWith("if="));
     const from = input && at(input.value.slice(3));
     const text = input ? from ? await existing(from, env) : unread : await stdinOf(cmd, env);
-    const keeps = args.some((a) => /^(?:conv=.*notrunc|o?seek=|oflag=.*append)/.test(a.value));
-    return [[path, keeps ? join4([await existing(path, env), text]) : text]];
+    const missing = !!from && !writtenFile(from, env) && !await readFile(from);
+    const keeps = missing || args.some((a) => /^(?:conv=.*notrunc|o?seek=|oflag=.*append)/.test(a.value));
+    return [[path, keeps ? join4([await kept(path), text]) : text]];
   }
   if (tool === "sort") {
     const paths = [];
@@ -8291,8 +8299,7 @@ async function toolWrites(cmd, name, args, env) {
         continue;
       const copied = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread;
       const mayKeep = keeps || tool === "ln" && !forced || from !== undefined && !written && !disk;
-      const before = mayKeep ? await existing(dest, env).catch(() => unread) : undefined;
-      const text = before ? join4([before, copied]) : copied;
+      const text = mayKeep ? join4([await kept(dest), copied]) : copied;
       const moved = tool === "mv" && from && !mayKeep ? from : undefined;
       writes.push([dest, text, moved]);
       if (from) {

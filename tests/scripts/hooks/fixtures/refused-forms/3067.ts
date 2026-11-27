@@ -323,6 +323,10 @@ const writesRun = (): Row[] => [
     `echo 'touch ${SCRIPT}' > run.sh; echo ':' | dd of=run.sh conv=notrunc; sh run.sh`,
   ],
   [
+    "a script the hook cannot read, kept by a dd from an input not there, then run",
+    `echo "$(cat payload)" > a.sh; dd if=no-such-3067.in of=a.sh; sh a.sh`,
+  ],
+  [
     "a script uniq -f 1 writes, then run",
     `echo 'touch ${SCRIPT}' > in.txt; uniq -f 1 in.txt run.sh; sh run.sh`,
   ],
@@ -419,6 +423,10 @@ const writeControls = (): Row[] => [
   [
     "a plain script kept by a cp from a source not there, then run",
     `echo 'touch out.log' > run.sh; cp no-such-3067.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script kept by a dd from an input not there, then run",
+    `echo 'touch out.log' > a.sh; dd if=no-such-3067.in of=a.sh; sh a.sh`,
   ],
   [
     "a plain script whose tail a dd conv=notrunc keeps, then run",
@@ -532,6 +540,14 @@ const linkControls = ({ HOME }: Paths): Row[] => [
   [
     "an echo naming the root through a dangling link to a plain place",
     `echo 'touch ${SCRIPT}' > ${HOME}/dangling-plain`,
+  ],
+  [
+    "a build not made yet copied over an old program, then the program run",
+    `cp ${HOME}/build/app ${HOME}/oldbin/app; ${HOME}/oldbin/app --version`,
+  ],
+  [
+    "a build not made yet copied by -f over an old program, then the program run",
+    `cp -f ${HOME}/build/app ${HOME}/oldbin/app && ${HOME}/oldbin/app`,
   ],
   [
     "a plain script written into a folder on disk, the folder copied by -r, then run",

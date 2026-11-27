@@ -4315,6 +4315,13 @@ async function toolWrites(
   // a value holding a part the hook cannot read names no path it can read, so its file reads as unread
   const at = (value: string) => (marked(value) ? undefined : pathOf({ value }, env))
   const unread = unknown(`what ${name} writes`)
+  // the text a write that may not land leaves at its target: what the line wrote there, else its text on disk, which a file the hook cannot read (a binary) leaves out, as canary reads it
+  const kept = async (dest: string): Promise<Text> => {
+    const written = writtenFile(dest, env)
+    if (written) return written
+    const old = (await readFile(dest).catch(() => unread)) ?? { value: "" }
+    return old.unknown || marked(old.value) ? { value: "" } : old
+  }
   if (tool === "dd") {
     const of = args.find((a) => a.value.startsWith("of="))
     const path = of && at(of.value.slice(3))
@@ -4322,8 +4329,11 @@ async function toolWrites(
     const input = args.find((a) => a.value.startsWith("if="))
     const from = input && at(input.value.slice(3))
     const text = input ? (from ? await existing(from, env) : unread) : await stdinOf(cmd, env)
-    const keeps = args.some((a) => /^(?:conv=.*notrunc|o?seek=|oflag=.*append)/.test(a.value))
-    return [[path, keeps ? join([await existing(path, env), text]) : text]]
+    // an input not there fails dd before it writes, so the target keeps its text too
+    const missing = !!from && !writtenFile(from, env) && !(await readFile(from))
+    const keeps =
+      missing || args.some((a) => /^(?:conv=.*notrunc|o?seek=|oflag=.*append)/.test(a.value))
+    return [[path, keeps ? join([await kept(path), text]) : text]]
   }
   if (tool === "sort") {
     const paths: string[] = []
@@ -4413,11 +4423,10 @@ async function toolWrites(
       // a regular file the line did not write and the hook cannot read from disk (a binary) leaves its target as canary read it, while a folder still carries the files the line wrote in it
       if (file && disk && (disk.unknown || marked(disk.value))) continue
       const copied = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread
-      // a write that may not land (no clobber, a link not forced, a source not there) keeps the target's old text beside the new, unread when the target's name cannot be read
+      // a write that may not land (no clobber, a link not forced, a source not there) keeps the target's old text beside the new (kept)
       const mayKeep =
         keeps || (tool === "ln" && !forced) || (from !== undefined && !written && !disk)
-      const before = mayKeep ? await existing(dest, env).catch(() => unread) : undefined
-      const text = before ? join([before, copied]) : copied
+      const text = mayKeep ? join([await kept(dest), copied]) : copied
       // a move that may not land leaves its source in place too
       const moved = tool === "mv" && from && !mayKeep ? from : undefined
       writes.push([dest, text, moved])
