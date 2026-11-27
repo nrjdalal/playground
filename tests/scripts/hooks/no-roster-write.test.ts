@@ -296,6 +296,10 @@ describe("roster.ts and every read run", () => {
     `python3 -c "import pathlib; print(pathlib.Path('${ROSTER}').read_text())"`,
     `python3 -c "import pathlib; pathlib.Path('/tmp/x').replace('/tmp/y')"`,
     `ruby -e "require 'fileutils'; FileUtils.mv('/tmp/x', '/tmp/y')"`,
+    `python3 -c "import json, datetime; r = json.load(open('${ROSTER}')); print(datetime.datetime.fromisoformat(r[0]['eta']).replace(tzinfo=None))"`,
+    `python3 -c "import json, datetime; rows = json.load(open('${ROSTER}')); print([datetime.datetime.fromisoformat(x['eta']).replace(tzinfo=datetime.timezone.utc) for x in rows])"`,
+    `python3 -c "print(open('${ROSTER}').read().count('install'))"`,
+    `python3 -c "import json; print([x for x in json.load(open('${ROSTER}')) if 'mv' in x.get('task', '')])"`,
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })
