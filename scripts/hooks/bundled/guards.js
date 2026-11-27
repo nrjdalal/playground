@@ -18889,11 +18889,15 @@ var scriptStaysText = (cmd, args, browserOnly) => browserOnly.has(cmd) && browse
 var BROWSER_FLAGS = new Set(["--ignore-https-errors", "--json"]);
 var BROWSER_VALUES = new Set(["--args", "--session"]);
 var BROWSER_SELECTORS = new Set(["click", "dblclick", "fill", "focus", "hover", "scrollintoview"]);
+var optionsAfterAreText = (rest) => rest.find(({ value }, i) => {
+  const [name, attached] = value.split(/=(.*)/s);
+  return BROWSER_VALUES.has(name) && /\s/.test(attached ?? rest[i + 1]?.value ?? "");
+});
 var browserEval = (args) => {
   for (let k = 0;k < args.length; k++) {
     const { value } = args[k];
     if (value === "eval" || BROWSER_SELECTORS.has(value))
-      return true;
+      return optionsAfterAreText(args.slice(k + 1)) === undefined;
     const [name, attached] = value.split(/=(.*)/s);
     const own = BROWSER_VALUES.has(name) ? attached ?? args[++k]?.value : undefined;
     if (!BROWSER_FLAGS.has(value) && (own === undefined || /\s/.test(own)))

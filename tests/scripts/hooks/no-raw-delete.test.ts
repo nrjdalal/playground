@@ -262,6 +262,8 @@ describe("agent-browser's selector is text, never a shell command line (PG-3221)
     `agent-browser --args "--renderer-cmd-prefix=r? -rf x" click '[a] [b]'`,
     "agent-browser snapshot '[a] [b]'",
     "some-tool '[a] [b]'",
+    `agent-browser click '[a] [b]' --args "--renderer-cmd-prefix=r? -rf x"`,
+    `agent-browser eval 'x' --args "--renderer-cmd-prefix=r? -rf x"`,
   ])("%s is still refused", async (command) => {
     expect(await check(input(command))).toContain("no-raw-delete hook ")
   })
