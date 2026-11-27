@@ -31,6 +31,44 @@ export const groups: Group[] = [
       ["a kill of every process xargs reads from a here-string", "xargs kill -9 <<< -1"],
       ["a kill of every process xargs reads from a pipe", "echo -1 | xargs kill -9"],
       ["a kill of every process xargs fills in for -I", "echo -1 | xargs -I{} kill -9 {}"],
+      ["a kill of every process xargs splits at a NUL", "printf '1234\\0-1\\0' | xargs -0 kill"],
+      [
+        "a kill of every process xargs splits at a NUL after a word",
+        "printf 'x\\0-1\\0' | xargs -0 kill",
+      ],
+      [
+        "a kill of a process group xargs splits at a NUL",
+        "printf '1234\\0-99999999\\0' | xargs -0 kill",
+      ],
+      [
+        "a kill of every process xargs splits at a NUL after a signal",
+        "printf '1234\\0-1\\0' | xargs -0 kill -9",
+      ],
+      ["a kill of the caller's own group xargs reads at a NUL", "printf '0\\0' | xargs -0 kill -9"],
+      [
+        "a kill of the caller's own group printf's format splits at a NUL",
+        "printf '%s\\0' 1234 0 | xargs -0 kill -9",
+      ],
+      [
+        "a kill of every process xargs fills in for -I at a NUL",
+        "printf '1234\\0-1\\0' | xargs -0 -I{} kill -9 {}",
+      ],
+      [
+        "a kill of every process xargs splits at --null",
+        "printf '1234\\0-1\\0' | xargs --null kill -9",
+      ],
+      [
+        "a kill of every process xargs splits at a NUL one at a time",
+        "printf '1234\\0-1\\0' | xargs -0 -n1 kill -9",
+      ],
+      [
+        "a kill of every process xargs splits at -d's comma",
+        "printf '1234,-1' | xargs -d , kill -9",
+      ],
+      [
+        "a kill of every process xargs splits at --delimiter's comma",
+        "printf '1234,-1' | xargs --delimiter=, kill -9",
+      ],
       ["a kill of the caller's own group beside a pid", "kill -9 1234 0"],
       ["a kill of a process group the hook cannot read", "kill -9 -$PGID"],
       ["a kill of every process behind a leading blank", 'kill -9 " -1"'],
