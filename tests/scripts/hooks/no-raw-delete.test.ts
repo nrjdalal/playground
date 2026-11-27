@@ -238,3 +238,33 @@ describe("agent-browser eval's script is JavaScript, never a shell command line 
     expect(await check(input(command))).toContain("no-raw-delete hook ")
   })
 })
+
+describe("agent-browser's selector is text, never a shell command line (PG-3221)", () => {
+  test.each([
+    "agent-browser click '[a] [b]'",
+    "agent-browser click '[data-x] [data-y]:nth-child(1)'",
+    "agent-browser click '[data-x] [data-slot=choice]'",
+    "agent-browser click '[data-z7-card] [data-slot=questionnaire-choice]:nth-child(1)'",
+    "agent-browser --session t click '[a] [b]'",
+    `agent-browser --args "--mute-audio" --session t scrollintoview '[a] [b]'`,
+    "agent-browser hover '[a] [b]'",
+    "agent-browser fill '[a] [b]' 'text'",
+    "agent-browser open http://x.localhost && agent-browser click '[a] [b]'",
+  ])("%s runs", async (command) => {
+    expect(await check(input(command))).toBeUndefined()
+  })
+
+  test.each([
+    "agent-browser click '[a] [b]' && r? -rf x",
+    `agent-browser click "$(rm -rf ${NEVER_MADE})"`,
+    `agent-browser click '[a] [b]' rm -rf ${NEVER_MADE}`,
+    "agent-browser --profile p click '[a] [b]'",
+    `agent-browser --args "--renderer-cmd-prefix=r? -rf x" click '[a] [b]'`,
+    "agent-browser snapshot '[a] [b]'",
+    "some-tool '[a] [b]'",
+    `agent-browser click '[a] [b]' --args "--renderer-cmd-prefix=r? -rf x"`,
+    `agent-browser eval 'x' --args "--renderer-cmd-prefix=r? -rf x"`,
+  ])("%s is still refused", async (command) => {
+    expect(await check(input(command))).toContain("no-raw-delete hook ")
+  })
+})
