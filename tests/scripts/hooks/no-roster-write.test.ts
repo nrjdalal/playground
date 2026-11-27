@@ -450,6 +450,30 @@ describe("the unused-space approvals log", () => {
     expect(reason).toContain("playground rm --approve")
   })
 
+  // a copy call onto its name, and its bare name written from its own folder, as for the roster
+  test.each([
+    [
+      `node -e "require('fs').copyFileSync('/tmp/x', 'unused-approvals.jsonl')"`,
+      join(DATA, "ops", "tick"),
+    ],
+    [
+      `node -e "require('fs').appendFileSync('./unused-approvals.jsonl', 'x')"`,
+      join(DATA, "ops", "tick"),
+    ],
+    [`python3 -c "import shutil; shutil.copy('/tmp/x', '${LOG}')"`, root],
+  ])("refuses %s from %s", async (command, cwd) => {
+    const reason = await check(
+      JSON.stringify({
+        cwd,
+        hook_event_name: "PreToolUse",
+        tool_input: { command },
+        tool_name: "Bash",
+      }),
+      environment,
+    )
+    expect(reason).toContain("playground rm --approve")
+  })
+
   test.each([
     ["Edit", { file_path: LOG, new_string: "b", old_string: "a" }],
     ["Write", { content: LINE, file_path: LOG }],
