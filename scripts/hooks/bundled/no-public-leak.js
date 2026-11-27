@@ -12171,12 +12171,13 @@ function commitTexts(dir, range, what, after = "") {
   }
   return texts;
 }
-function gitText(dir, args, what) {
+function gitText(dir, args, what, timeout) {
   if (!dir)
     return unknown2(`${what}, in a checkout the hook cannot resolve`);
   const proc = Bun.spawnSync(["git", "-C", dir, ...args], {
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
-    stderr: "ignore"
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
+    stderr: "ignore",
+    timeout
   });
   return proc.exitCode === 0 ? { value: proc.stdout.toString() } : unknown2(what);
 }
@@ -12390,9 +12391,9 @@ function branchOnly(flags, positionals, dir) {
     if (config.unknown || config.value.split(`
 `).some((line) => line.startsWith(`remote.${remote.value}.push=`)))
       return false;
-    const head = gitText(dir, ["symbolic-ref", "--short", `refs/remotes/${remote.value}/HEAD`], "the remote's default branch");
-    if (!head.unknown)
-      defaults.add(head.value.trim().slice(remote.value.length + 1).toLowerCase());
+    const head = remoteDefault(dir, remote.value);
+    if (head)
+      defaults.add(head);
   }
   return specs.every((spec) => {
     if (unreadable(spec) || /[*?[\\\s]/.test(spec.value))
@@ -12420,11 +12421,22 @@ function branchHead(dir) {
   const defaults = new Set(["main", "master"]);
   for (const remote of remotes.value.split(`
 `).filter(Boolean)) {
-    const ref = gitText(dir, ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`], "the remote's default branch");
-    if (!ref.unknown)
-      defaults.add(ref.value.trim().slice(remote.length + 1).toLowerCase());
+    const ref = remoteDefault(dir, remote);
+    if (ref)
+      defaults.add(ref);
   }
   return !defaults.has(name);
+}
+function remoteDefault(dir, remote) {
+  const local = gitText(dir, ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`], "the remote's default branch");
+  if (local.unknown)
+    return;
+  const name = local.value.trim().slice(remote.length + 1).toLowerCase();
+  if (name === "main" || name === "master")
+    return name;
+  const own = gitText(dir, ["ls-remote", "--symref", remote, "HEAD"], "the remote's own HEAD", 5000);
+  const head = own.unknown ? undefined : /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(own.value)?.[1];
+  return head ? head.toLowerCase() : name;
 }
 async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
   const { flags, positionals } = parseFlags(rest, takes);
