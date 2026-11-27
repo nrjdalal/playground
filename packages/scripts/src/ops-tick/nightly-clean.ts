@@ -3,7 +3,6 @@ import { appendFile, lstat, mkdir, readdir, realpath, unlink } from "node:fs/pro
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
-import { managerOf } from "@packages/config/kinds"
 import { configDirOf } from "@packages/env/data-dir"
 import {
   archiveUnlanded,
@@ -27,9 +26,9 @@ import { writeAtomic } from "../write-atomic"
 import { CWDS, cwdsOf, endOrphans, orphansOf, procsOf, PS } from "./orphans"
 import type { Context } from "./tick"
 import { aged, linesOf, livePlaces, type Machine, unusedEverywhere } from "./unused"
-import { cardNight, type CardState, type Kept } from "./unused-card"
+import { APPROVALS, approvalsOf, cardNight, type CardState, type Kept } from "./unused-card"
 
-// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone and of test runs whose sandbox is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders and loose scratch files of sessions that are gone (trashed, each restorable), branches (each not useful kept in a git bundle in the trash first, each other unmerged head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old, each invitee rehearsal's marked folder over a day old (ship:rehearsal's backstop for a rehearsal that died before its clear), then each machine's unused space, listed (unused.ts) and removed only as the owner's Remove on its one Inbox card names it (unused-card.ts); then one log line with the free disk before and after and each machine's unused total, which the System page also shows, and one outbox line to ops naming each removal and each machine's unused items. The card is its one decision: each container or volume no rule removes is kept and named as kept.
+// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone and of test runs whose sandbox is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders and loose scratch files of sessions that are gone (trashed, each restorable), branches (each not useful kept in a git bundle in the trash first, each other unmerged head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old, each invitee rehearsal's marked folder over a day old (ship:rehearsal's backstop for a rehearsal that died before its clear), then each machine's unused space, listed (unused.ts) and removed only as an approval from Ops or a dispatcher on that night's list names it, the list sent to ops as one outbox line and never to the owner's Inbox (unused-card.ts); then one log line with the free disk before and after and each machine's unused total, which the System page also shows, and one outbox line to ops naming each removal and each machine's unused items. The list is its one decision: each container or volume no rule removes is kept and named as kept.
 
 const GB = 1024 ** 3
 const TURBO_CACHE = join(homedir(), ".cache", "turbo", "playground")
@@ -68,7 +67,7 @@ export type NightDeps = {
   unused: (ctx: Context) => Promise<Machine[]>
 }
 
-// The beat's own record: the last run's time, the night each image with no age docker knows was first read unused, by `<machine> <path>` (unused.ts's aged), the unused card while it stands and each item the owner kept (unused-card.ts); a decision or denied key an older run wrote is read past and dropped on the next write.
+// The beat's own record: the last run's time, the night each image with no age docker knows was first read unused, by `<machine> <path>` (unused.ts's aged), the unused list the approvals name and each item kept (unused-card.ts); a decision or denied key an older run wrote is read past and dropped on the next write.
 type State = { at?: string; card?: CardState; imagesSeen?: Record<string, string>; kept?: Kept }
 
 const lines = (out: string): string[] => out.split("\n").filter((l) => l.trim())
@@ -823,9 +822,6 @@ export const nightlyClean =
       unused.push(...found.flatMap((m) => m.item ?? []))
       const totals = found.map((m) => m.total).join("; ") || "none read"
       if (!judged.found.length) return totals
-      const roster = (await Bun.file(join(data, "roster.json"))
-        .json()
-        .catch(() => null)) as { agents?: unknown } | null
       const tags = new Set(lines((await git(["tag", "-l", "v0.0.*"])).out).map((t) => t.trim()))
       const rmCard = (path: string, id: string) =>
         ctx.run([
@@ -844,11 +840,16 @@ export const nightlyClean =
         homedir(),
         { card, kept: keptItems },
         {
-          ask: (args, stdin) =>
-            ctx.run(["bun", "run", "--silent", "--cwd", ctx.repo, "ask", ...args], 120_000, stdin),
-          from: managerOf(roster?.agents, "ops"),
+          approvals: async () =>
+            approvalsOf(
+              await Bun.file(join(ctx.ops, "tick", APPROVALS))
+                .text()
+                .catch(() => ""),
+            ),
           // unusedEverywhere lists this machine first
           here: judged.found[0]!.machine,
+          id: () => crypto.randomUUID(),
+          now: () => ctx.now.toISOString(),
           out: (path) => tags.has(`v0.0.${/rehearse(\d+)$/.exec(path)?.[1]}`),
           remove: async (item, id) => {
             if (item.kind === "image") return ctx.run(["docker", "image", "rm", item.id ?? ""])
