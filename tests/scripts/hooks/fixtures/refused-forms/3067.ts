@@ -192,10 +192,6 @@ const runsRoot = (): Row[] => [
   ],
   ["a script written by tee then run", `echo 'touch ${SCRIPT}' | tee run.sh; sh run.sh`],
   [
-    "a script naming the root by a glob, then run",
-    "echo 'touch ~/.playground/ext*/login/x' > run.sh; sh run.sh",
-  ],
-  [
     "a script printf builds from parts, then run",
     "printf '%s/%s\\n' 'touch ~/.playground' 'extensions/login/x' > run.sh; sh run.sh",
   ],
@@ -216,7 +212,12 @@ const runsRoot = (): Row[] => [
     "command printf 'touch ~/.playground/ext\\x65nsions/login/x\\n' > run.sh; sh run.sh",
   ],
 ]
-const runsHook = (): Row[] => [
+// shell.ts reads a script's ~ as the process's homedir() while this test sets the root's home by env HOME, so the ~ glob row is judged in the process worktree alone, where the two are one home
+const worktreeRuns = (): Row[] => [
+  [
+    "a script naming the root by a glob, then run",
+    "echo 'touch ~/.playground/ext*/login/x' > run.sh; sh run.sh",
+  ],
   [
     "a script written then run, writing the git hook",
     `echo 'cat payload > ${HOOK}' > run.sh; bash run.sh`,
@@ -226,8 +227,12 @@ const runsHook = (): Row[] => [
     "printf '%s/%s\\n' 'cat payload > .git' 'hooks/pre-commit' > run.sh; sh run.sh",
   ],
 ]
-// a clone's hooks folder holding a hook, and a dangling link into the root, that refused-forms.test.ts makes in the scratch home
-const linked = ({ HOME }: Paths): Row[] => [
+// a clone's hooks folder holding a hook, and a dangling link into the root, that refused-forms.test.ts makes in the scratch home, and the glob row by the scratch home's absolute path
+const linked = ({ DATA, HOME }: Paths): Row[] => [
+  [
+    "a script naming the root by an absolute glob, then run",
+    `echo 'touch ${DATA}/ext*/login/x' > run.sh; sh run.sh`,
+  ],
   ["a cat's output into a hook by a ? glob", `cat payload > ${HOME}/hooked/.git/hook?/pre-commit`],
   [
     "a script written then run, writing a hook by a * glob",
@@ -299,7 +304,7 @@ export const groups: Group[] = [
   {
     folders: ["process worktree"],
     guards: ["no-extensions-write"],
-    rows: () => [...runsHook(), ...worktreeControls()],
+    rows: () => [...worktreeRuns(), ...worktreeControls()],
   },
   {
     folders: ["data folder", "home"],
