@@ -323,7 +323,8 @@ The bot's token reads and posts only in that DM; hand the bot [Connect a bot](/d
 `playground orgs resolve --repo <folder>` writes the one skill set a session in that folder loads, less each skill whose `SKILL.md` the folder's own `.claude/skills` already holds byte for byte, and prints its folder; spawning a session runs it, so you rarely need to.
 `playground orgs home` writes the home set, the one a session you start yourself gets, and installs it in Claude Code for your user; `scripts/link-skills.sh` runs it.
 `playground ext which <skill> [--repo <folder> | --org <org>]` prints the folder of the copy of a skill a session in that folder, or in a repo of that org, loads, so a job can run a skill's script from whichever scope holds it.
-`playground ext why <skill> [--repo <folder> | --org <org>]` prints that copy with its scope and each scope whose copy it shadows.
+With neither flag it prints the home set's copy, and when the home set holds none, the folder of the one org scope that holds it; when two or more org scopes hold it, it exits 2 naming each with its `--org`.
+`playground ext why <skill> [--repo <folder> | --org <org>]` prints the copy that session loads, the home set's alone with neither flag, with its scope and each scope whose copy it shadows.
 [Skills and orgs](/docs/skills#which-skill-wins) has the order a skill is taken in.
 
 ## Scripts: `playground ask`, `changelog`, `dm`, `ingest`, `queues`, `thread` and `wa`

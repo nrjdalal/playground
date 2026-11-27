@@ -44,7 +44,7 @@ var applyEnvAliases = (env = process.env) => {
 applyEnvAliases();
 
 // scripts/hooks/no-extension-repo-write.ts
-import { existsSync as existsSync3, statSync as statSync3 } from "fs";
+import { existsSync as existsSync3 } from "fs";
 import { join as join7 } from "path";
 
 // packages/env/src/data-dir.ts
@@ -10562,6 +10562,11 @@ var slotSettings = defineSettings({
     default: [],
     description: "The ops folders of other factories on this machine, each an absolute path: run-slot counts each live holder of their run slots against this factory's load units, and spawn.sh's load gate counts their starts beside its own, both reading only.",
     schema: array(string2().regex(/^\/.+/, "an absolute path"))
+  },
+  "slots.windowJob": {
+    default: "",
+    description: "The jobs.json row whose config.hours and daysOff hold an org's window, empty for none: while it stands, run-slot keeps an org's runs a free lane and spawn.sh gives a start in an org's checkout the priority path, though not focus.",
+    schema: string2().regex(/^(?:[a-z0-9][a-z0-9-]*)?$/, "a job's name, or empty")
   }
 });
 // packages/settings/src/whatsapp.ts
@@ -12564,18 +12569,6 @@ var GUARD = "no-extension-repo-write";
 var OWNER_ROUTE = "Only the owner changes one, typing the command as a ! command in the dispatcher's terminal window: tell your lead what it should do, and the dispatcher hands the owner the command.";
 var REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 var decoded = (text) => text.replace(/%([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)));
-var origins2 = new Map;
-function originUrl(config) {
-  const mtime = existsSync3(config) ? statSync3(config).mtimeMs : -1;
-  const known = origins2.get(config);
-  if (known?.mtime === mtime)
-    return known.url;
-  const url = Bun.spawnSync(["git", "config", "--file", config, "--get", "remote.origin.url"], {
-    stderr: "ignore"
-  }).stdout.toString();
-  origins2.set(config, { mtime, url });
-  return url;
-}
 function guardedRepos(data, values, environment) {
   const given = values["ext.repos"];
   const named = new Map;
@@ -12587,7 +12580,11 @@ function guardedRepos(data, values, environment) {
   const repos = new Set(named.values());
   const scopes = scopesIn(data);
   for (const scope of scopes) {
-    const repo = remoteRepo(originUrl(join7(extensionsDir(data), scope, ".git", "config")));
+    const config = join7(extensionsDir(data), scope, ".git", "config");
+    const url = Bun.spawnSync(["git", "config", "--file", config, "--get", "remote.origin.url"], {
+      stderr: "ignore"
+    });
+    const repo = remoteRepo(url.stdout.toString());
     if (repo)
       repos.add(`${repo.owner}/${repo.repo}`.toLowerCase());
   }
@@ -12658,6 +12655,5 @@ if (import.meta.main) {
 }
 export {
   check,
-  guardedRepos,
-  originUrl
+  guardedRepos
 };

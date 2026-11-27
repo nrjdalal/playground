@@ -102,6 +102,7 @@ describe("defineSettings", () => {
       "slack.sendServer",
       "slots.modelBound",
       "slots.peers",
+      "slots.windowJob",
       "tickets.tracker",
       "unstick.escalateMinutes",
       "usage.accounts",
