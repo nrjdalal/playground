@@ -23,6 +23,7 @@ import {
   type Word,
   type Xargs,
 } from "./shell"
+import { heldWord, namings, steadyNames } from "./steady"
 
 type Environment = Record<string, string | undefined>
 
@@ -379,6 +380,15 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       ),
     ) ?? false
   const lexed = lex(command, env.known)
+  // a cd through a steady variable, a bare export's too, is read by the folder that variable names (`D=~/.playground; cd $D`)
+  const steadyAt = steadyNames(namings(command), lexed.commands)
+  env.hold = (word, cmd, here) => {
+    const steady = steadyAt(cmd)
+    return heldWord(word, here, {
+      ...steady,
+      has: (key) => steady.has(key) || !!steady.exported?.(key),
+    })
+  }
   // Whether the shell may be in the roster's own folder, where a bare name may be the roster.
   const inOwnFolder = (at: Env) =>
     places(at).some(

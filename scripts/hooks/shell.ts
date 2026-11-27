@@ -1893,7 +1893,10 @@ function dollar(lx: Lexer, plain = false): Text {
   // a positional parameter is one digit unbraced (`$10` is `$1` then `0`), read only from a value a guard binds in `known`
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2
-    return /\d/.test(next) ? variable(next) : unknown("a shell variable")
+    // `$@` and `$*` read only as the one word a `-c` script's positional parameters bind (withPositionals)
+    return /\d/.test(next) || ((next === "@" || next === "*") && lx.known[next] !== undefined)
+      ? variable(next)
+      : unknown("a shell variable")
   }
   lx.i++
   return { value: "$" }
@@ -3532,7 +3535,7 @@ function relexedValue(raw: string, known: Record<string, string>): string | unde
 }
 
 // The home an unquoted assignment expands the value's leading ~ to (`S=~/x`), which the held value keeps as written; a quoted value (`S="~/x"`) keeps its ~ literal, as bash does, so a quoted assignment passes quoted true; splitValue still reads each split word's leading ~ as the home, which errs toward refusing.
-const tildeHome = (value: string, quoted = false): string =>
+export const tildeHome = (value: string, quoted = false): string =>
   quoted || marked(value) ? value : value.replace(/^~(?=\/|$)/, homedir())
 
 // The variables the line set whose value the reader can build, each resolved through those set before it and an unread part kept, over the base environment; a copy's raw holds `key=value`, so its value is read after the first `=`. A copy's value captured where it was set (heldResolved) overrides this read, so a later reassignment of its source does not leak in; the read stands alone across a scope copy, whose fresh vars map carries no capture.
@@ -4203,13 +4206,20 @@ async function shell(
   const { inline, operand } = shellOperand(args, name)
   if (operand && inline) {
     const script = operand.value
-    if (!xargs?.replace || !script.includes(xargs.replace))
-      return run(lexScript(script, env), subshell(env), visit, builtins)
-    // the script is filled with each text xargsTexts reads from stdin and -a's files, so an item -0 or -d splits off runs as xargs runs it (`printf 'x\0pkill node'`), and one it cannot read as unknown
-    const texts = new Set([...(await xargsTexts(cmd, [xargs], env))].map((text) => text ?? UNKNOWN))
+    const after = args.slice(args.indexOf(operand) + 1)
+    const { replace } = xargs ?? {}
+    if (!replace || ![operand, ...after].some((w) => w.value.includes(replace))) {
+      const inner = withPositionals(env, after, (value) => value)
+      return run(lexScript(script, inner), inner, visit, builtins)
+    }
+    // the script and its positional parameters are filled with each text xargsTexts reads from stdin and -a's files, so an item -0 or -d splits off runs as xargs runs it (`printf 'x\0pkill node'`), and one it cannot read as unknown
+    const texts = new Set(
+      [...(await xargsTexts(cmd, [xargs!], env))].map((text) => text ?? UNKNOWN),
+    )
     for (const text of texts.size > 0 ? texts : [""]) {
-      const lexed = lexScript(filled(script, xargs.replace, text), env)
-      const verdict = await run(lexed, subshell(env), visit, builtins)
+      const inner = withPositionals(env, after, (value) => filled(value, replace, text))
+      const lexed = lexScript(filled(script, replace, text), inner)
+      const verdict = await run(lexed, inner, visit, builtins)
       if (verdict) return verdict
     }
     return
@@ -4219,6 +4229,16 @@ async function shell(
     const verdict = await run(lexScript(text, env), subshell(env), visit, builtins)
     if (verdict) return verdict
   }
+}
+
+// A `-c` script's subshell, its positional parameters read as the words after the script (`$0`, `$1` and on, and `"$@"` or `"$*"` when one word follows `$0`), each filled as the script is
+function withPositionals(env: Env, after: Word[], fill: (value: string) => string): Env {
+  const known = { ...env.known }
+  // a function's own parameters, which a guard may bind, are not the script's
+  for (const key of ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "@", "*"]) delete known[key]
+  for (const [k, w] of after.slice(0, 10).entries()) known[String(k)] = fill(w.value)
+  if (after.length === 2) known["@"] = known["*"] = known["1"]!
+  return { ...subshell(env), known }
 }
 
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.

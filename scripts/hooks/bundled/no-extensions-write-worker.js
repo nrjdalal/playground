@@ -7914,7 +7914,7 @@ function dollar(lx, plain = false) {
   }
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2;
-    return /\d/.test(next) ? variable(next) : unknown2("a shell variable");
+    return /\d/.test(next) || (next === "@" || next === "*") && lx.known[next] !== undefined ? variable(next) : unknown2("a shell variable");
   }
   lx.i++;
   return { value: "$" };
@@ -9639,12 +9639,17 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   const { inline, operand } = shellOperand(args, name);
   if (operand && inline) {
     const script = operand.value;
-    if (!xargs?.replace || !script.includes(xargs.replace))
-      return run(lexScript(script, env), subshell(env), visit, builtins);
+    const after = args.slice(args.indexOf(operand) + 1);
+    const { replace } = xargs ?? {};
+    if (!replace || ![operand, ...after].some((w) => w.value.includes(replace))) {
+      const inner = withPositionals(env, after, (value) => value);
+      return run(lexScript(script, inner), inner, visit, builtins);
+    }
     const texts = new Set([...await xargsTexts(cmd, [xargs], env)].map((text) => text ?? UNKNOWN));
     for (const text of texts.size > 0 ? texts : [""]) {
-      const lexed = lexScript(filled(script, xargs.replace, text), env);
-      const verdict = await run(lexed, subshell(env), visit, builtins);
+      const inner = withPositionals(env, after, (value) => filled(value, replace, text));
+      const lexed = lexScript(filled(script, replace, text), inner);
+      const verdict = await run(lexed, inner, visit, builtins);
       if (verdict)
         return verdict;
     }
@@ -9656,6 +9661,16 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     if (verdict)
       return verdict;
   }
+}
+function withPositionals(env, after, fill) {
+  const known = { ...env.known };
+  for (const key of ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "@", "*"])
+    delete known[key];
+  for (const [k, w] of after.slice(0, 10).entries())
+    known[String(k)] = fill(w.value);
+  if (after.length === 2)
+    known["@"] = known["*"] = known["1"];
+  return { ...subshell(env), known };
 }
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
@@ -10485,11 +10500,11 @@ function heldVars(env, steady, raw) {
     if (key === "TMPDIR" || !held)
       continue;
     if (!text.unknown && !marked(text.value))
-      known[key] = text.value;
+      known[key] = tildeHome(text.value, "quoted" in text && text.quoted === true);
     else if ("raw" in text && typeof text.raw === "string") {
       const again = relexed(text.raw, known)?.value;
       if (again?.startsWith(`${key}=`))
-        known[key] = again.slice(key.length + 1);
+        known[key] = tildeHome(again.slice(key.length + 1));
     }
   }
   return known;
