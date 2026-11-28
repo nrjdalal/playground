@@ -12,9 +12,12 @@ import {
   CLOCKS_STOPPED_AT,
   HEX64,
   MAX_OPTIONS,
+  multiSelect,
   picksOf,
   ROOT_NAMES,
   rowOfAnswer,
+  ticksAnswer,
+  ticksOf,
 } from "@packages/config/inbox"
 import { cloneOf, type Peer, peerSchema } from "@packages/config/org"
 import type { ActivityActor, Database } from "@packages/db"
@@ -643,6 +646,7 @@ export const previewSchema = z.discriminatedUnion("type", [
     attachments,
     checked: oneLine(LIMITS.line).optional(),
     deny: oneLine(LIMITS.line).optional(),
+    multiSelect: z.literal(true).optional(),
     options: z
       .array(askOption)
       .min(1, OPTIONS_MESSAGE)
@@ -787,6 +791,16 @@ export const inboxInputSchema = z
         (input.preview.options || input.preview.approve || input.preview.deny)
       ),
     "An ask holds either a single question's options, approve or deny, or a questions list, not both",
+  )
+  .refine(
+    (input) =>
+      input.kind !== "decision" ||
+      input.preview.type !== "ask" ||
+      !input.preview.multiSelect ||
+      ((input.preview.options?.length ?? 0) >= 2 &&
+        !input.preview.approve &&
+        !input.preview.questions),
+    `A multiSelect ask ticks among 2 to ${MAX_OPTIONS} options, so it takes an options list of 2 or more and no approve or questions`,
   )
 
 // Pure: whether an item's preview names a place it lands, so it carries a link or a noLink.
@@ -1031,7 +1045,7 @@ export const answerInputSchema = z.strictObject({
         .min(0)
         .max(MAX_OPTIONS - 1),
     )
-    .min(MIN_QUESTIONS)
+    .min(1)
     .max(MAX_QUESTIONS)
     .optional(),
   seen: z.iso.datetime().optional(),
@@ -1112,16 +1126,20 @@ function answerOf(
       message: "A multi-question ask's approve names a pick for each question, not a single option",
     }
   }
+  const ticking = item.kind === "decision" && multiSelect(item.preview)
   if (
     options !== undefined &&
     !(
       item.kind === "decision" &&
       action === "approve" &&
       item.preview.type === "ask" &&
-      !!item.preview.questions
+      (!!item.preview.questions || ticking)
     )
   ) {
-    return { message: "Only a multi-question ask's approve names a pick for each question" }
+    return {
+      message:
+        "Only a multi-question ask's approve names a pick for each question, and a multiSelect ask's its ticks",
+    }
   }
   // Dismiss on what still waits sets it aside as the old `clear` did, its poster told so, and sends it to Done; a secret ask takes it too, since no value travels
   if (action === "dismiss") return { answer: { choice: "clear" }, status: "cleared" }
@@ -1143,6 +1161,19 @@ function answerOf(
         return { message: `Pick one of each of its ${questions.length} questions` }
       }
       return { answer: { choice: "approve", options }, status: "approved" }
+    }
+    // a multiSelect ask is approved with every option the owner ticked, at least one and each once, and denied or set aside as a whole
+    if (ticking) {
+      if (action === "clear") return { answer: { choice: "clear" }, status: "cleared" }
+      if (action === "deny") return { answer: { choice: "deny" }, status: "denied" }
+      const go = choicesOf(item.preview)?.rows.filter((row) => row.go) ?? []
+      const ticks =
+        action === "approve" && options && option === undefined ? ticksAnswer(go, options) : null
+      return ticks?.action === "approve"
+        ? { answer: { choice: "approve", options: ticks.options }, status: "approved" }
+        : {
+            message: `Tick one or more of its ${go.length} options, 0 to ${go.length - 1}, each once`,
+          }
     }
     // a lettered decision's go names which of its go rows the owner picked, and takes no Edit, which names none; a yes or no has one
     const go = choicesOf(item.preview)?.rows.filter((row) => row.go).length ?? 1
@@ -1230,7 +1261,8 @@ export function getPickLine(item: InboxItem): string | null {
     "options" in item.answer &&
     item.answer.options
   ) {
-    const picks = picksOf(item.preview, item.answer.options)
+    const picks =
+      ticksOf(item.preview, item.answer.options) ?? picksOf(item.preview, item.answer.options)
     return picks?.length ? picks.map((p) => `${p.letter}: ${p.label}`).join(" · ") : null
   }
   const single = pickOf(item)
@@ -1323,7 +1355,9 @@ export function answerPayload(
         go: true,
         next: "carry-out",
         ...(answer.options
-          ? { picks: picksFor(item, answer.options) }
+          ? item.kind === "decision" && multiSelect(item.preview)
+            ? { options: ticksOf(item.preview, answer.options) ?? undefined }
+            : { picks: picksFor(item, answer.options) }
           : { option: optionOf(item, answer) }),
         verb: "pick",
       }

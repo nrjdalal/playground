@@ -94,6 +94,15 @@ export const answerPayloadSchema = z.strictObject({
       letter: z.string().length(1),
     })
     .optional(),
+  options: z
+    .array(
+      z.strictObject({
+        index: z.number().int().min(0).max(5),
+        label: z.string().min(1),
+        letter: z.string().length(1),
+      }),
+    )
+    .optional(),
   owned: ranSchema.optional(),
   picks: z
     .array(
@@ -169,6 +178,7 @@ export type ChoicePreview =
   | {
       approve?: string
       deny?: string
+      multiSelect?: boolean
       options?: { description?: string; label: string }[]
       questions?: {
         options: { description?: string; label: string }[]
@@ -319,6 +329,37 @@ export function picksOf(
     })
   }
   return picks
+}
+
+// Pure: whether an ask takes several ticked options at once (multiSelect) rather than one pick.
+export const multiSelect = (preview: ChoicePreview): boolean =>
+  preview.type === "ask" && preview.multiSelect === true
+
+// Pure: every option ticked on a multiSelect ask, by its letter and label, in the card's order, for the poster's payload and the result line; null for an ask that takes one pick, no tick, a repeat or a tick past its options.
+export function ticksOf(
+  preview: ChoicePreview,
+  options: number[],
+): { index: number; label: string; letter: string }[] | null {
+  if (!multiSelect(preview) || options.length === 0) return null
+  if (new Set(options).size !== options.length) return null
+  const go = (choicesOf(preview)?.rows ?? []).filter((row) => row.go)
+  const rows = [...options].sort((a, b) => a - b).map((at) => go[at])
+  if (rows.some((row) => !row)) return null
+  return rows.map((row) => ({ index: row!.index, label: row!.label, letter: row!.letter }))
+}
+
+// Pure: the answer a multiSelect ask's ticks give, read the same on the card and on WhatsApp: go rows alone approve with every one, in order, the no-go row alone denies, and none, a repeat, a row past the rows or the no-go row beside a go row give none.
+export function ticksAnswer(
+  rows: { go: boolean }[],
+  ticks: number[],
+): { action: "approve"; options: number[] } | { action: "deny" } | null {
+  if (ticks.length === 0 || new Set(ticks).size !== ticks.length) return null
+  if (ticks.some((at) => !rows[at])) return null
+  const go = ticks.filter((at) => rows[at]!.go)
+  if (go.length === 0) return ticks.length === 1 ? { action: "deny" } : null
+  return go.length === ticks.length
+    ? { action: "approve", options: go.sort((a, b) => a - b) }
+    : null
 }
 
 // The two fields a card's place reads: pinned when pinnedAt is set, placed by hand when rank is.

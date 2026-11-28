@@ -1,15 +1,23 @@
-// What an ask card holds for an answer not yet sent: the option index picked for a single-question ask, one index per question for a multi-question ask, the question in sight, and the Note, each entry stamped with a signature of its questions (picksKey) or, for a single-question ask, of its choice rows (choicesKey), so a set changed under an unmounted card drops the stale pick(s) and step while the Note stands on its own. A list refresh or a shelf move that remounts the card gives them back, as a draft card's words come back under cardDraftKey.
+// What an ask card holds for an answer not yet sent: the option index picked for a single-question ask, every row ticked on a multiSelect ask, one index per question for a multi-question ask, the question in sight, and the Note, each entry stamped with a signature of its questions (picksKey) or, for a single-question ask, of its choice rows (choicesKey), so a set changed under an unmounted card drops the stale pick(s) and step while the Note stands on its own. A list refresh or a shelf move that remounts the card gives them back, as a draft card's words come back under cardDraftKey.
 export type AskPicks = {
   note: string
   pick: number | null
   picks: (number | null)[]
   sig: string
   step: number
+  ticks: number[]
 }
 export type PicksStore = Record<string, AskPicks>
 
 // A cleared entry: no pick, no picks, no note, so putPicks drops it from the store; the card writes it once answered, settled or archived.
-export const EMPTY_PICKS: AskPicks = { note: "", pick: null, picks: [], sig: "[]", step: 0 }
+export const EMPTY_PICKS: AskPicks = {
+  note: "",
+  pick: null,
+  picks: [],
+  sig: "[]",
+  step: 0,
+  ticks: [],
+}
 
 export const PICKS_KEY = "dashboard.inbox.picks.v1"
 
@@ -17,7 +25,10 @@ const EMPTY: PicksStore = {}
 
 // An entry with no pick made and no note typed is dropped, as an empty draft is, so an untouched card leaves nothing behind; step alone never holds an entry, since a step past the first needs a pick.
 const isEmpty = (entry: AskPicks) =>
-  entry.pick === null && entry.picks.every((p) => p === null) && entry.note.trim() === ""
+  entry.pick === null &&
+  entry.picks.every((p) => p === null) &&
+  entry.ticks.length === 0 &&
+  entry.note.trim() === ""
 
 const isIndex = (value: unknown): value is number | null =>
   value === null || (typeof value === "number" && Number.isInteger(value) && value >= 0)
@@ -38,11 +49,20 @@ export function parsePicks(raw: string | null): PicksStore {
   const store: PicksStore = {}
   for (const [id, entry] of Object.entries(value)) {
     if (!entry || typeof entry !== "object") continue
-    const { note, pick, picks, sig, step } = entry as Record<string, unknown>
+    const { note, pick, picks, sig, step, ticks = [] } = entry as Record<string, unknown>
     if (typeof sig !== "string" || typeof note !== "string" || !isStep(step)) continue
     if (!isIndex(pick)) continue
     if (!Array.isArray(picks) || !picks.every(isIndex)) continue
-    const parsed: AskPicks = { note, pick, picks: picks as (number | null)[], sig, step }
+    // an entry kept before multiSelect holds no ticks
+    if (!Array.isArray(ticks) || !ticks.every(isStep)) continue
+    const parsed: AskPicks = {
+      note,
+      pick,
+      picks: picks as (number | null)[],
+      sig,
+      step,
+      ticks: ticks as number[],
+    }
     if (!isEmpty(parsed)) store[id] = parsed
   }
   return store

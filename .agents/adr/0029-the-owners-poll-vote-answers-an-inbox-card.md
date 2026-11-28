@@ -1,5 +1,7 @@
 # The owner's poll vote answers an Inbox card
 
+> Superseded in part by [ADR 0043](./0043-a-multiselect-asks-poll-takes-several-answers.md): a multiSelect ask's poll takes several answers, and a reply of several numbers counts as the same picks.
+
 [ADR 0024](0024-the-owners-whatsapp-answers-an-inbox-card.md) let the owner answer a card from WhatsApp by typing its number and id (`1 #i12`).
 The owner then asked to answer with WhatsApp's poll instead of typing.
 A vote is a second way to give the same answer, and the owner also asked to see which cards wait, not only how many.
