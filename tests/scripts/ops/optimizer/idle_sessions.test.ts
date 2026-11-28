@@ -719,6 +719,69 @@ describe("collect: a session's PRs, from the roster first, then its transcript",
     )
     expect(whys(rows)).toEqual([["checker-pr-done (merged)"]])
   })
+
+  // issue 3209: each message to a checker wakes it, so its quiet clock rarely reaches 10 minutes
+  test("checker-pr-done: an idle checker quiet 2 minutes is flagged, and the same checker busy is kept", async () => {
+    const checker = (status: string) =>
+      collect(
+        deps({
+          prState,
+          roster: { "w3kq7d-reviewer": { kind: "reviewer", name: "w3kq7d-reviewer", pr: MERGED } },
+          sessions: {
+            "w3kq7d-reviewer": entry({
+              name: "w3kq7d-reviewer",
+              status,
+              statusUpdatedAt: (NOW - 2 * 60) * 1000,
+            }),
+          },
+          workerPrs: async (name) => (name === "w3kq7d-reviewer" ? [MERGED] : []),
+        }),
+      )
+    expect(whys(await checker("idle"))).toEqual([["checker-pr-done (merged)"]])
+    expect(await checker("busy")).toEqual([])
+  })
+
+  test("worker-prs-done: a worker quiet 2 minutes is kept, whatever its PRs", async () => {
+    const rows = await collect(
+      deps({
+        prState,
+        roster: { "w3kq7d-worker": { kind: "worker", name: "w3kq7d-worker", pr: MERGED } },
+        sessions: {
+          "w3kq7d-worker": entry({
+            name: "w3kq7d-worker",
+            statusUpdatedAt: (NOW - 2 * 60) * 1000,
+          }),
+        },
+        workerPrs: async () => [MERGED],
+      }),
+    )
+    expect(rows).toEqual([])
+  })
+
+  test("an idle checker quiet 2 minutes is read for checker-pr-done alone", async () => {
+    const rows = await collect(
+      deps({
+        prState,
+        roster: {
+          "w3kq7d-reviewer": {
+            kind: "reviewer",
+            name: "w3kq7d-reviewer",
+            pr: OPEN,
+            status: "paused",
+            worker: "w3kq7d-worker",
+          },
+        },
+        sessions: {
+          "w3kq7d-reviewer": entry({
+            name: "w3kq7d-reviewer",
+            statusUpdatedAt: (NOW - 2 * 60) * 1000,
+          }),
+        },
+        workerPrs: async (name) => (name === "w3kq7d-reviewer" ? [OPEN] : []),
+      }),
+    )
+    expect(rows).toEqual([])
+  })
 })
 
 describe("collect: a checker's prs list (#706)", () => {
