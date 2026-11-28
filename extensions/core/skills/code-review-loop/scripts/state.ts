@@ -119,10 +119,34 @@ export const timeoutPlugin = (clone: string): boolean => {
 
 // The skill's whole-suite chunk: one call on more files misses the test sandbox's 1200 s deadline.
 const CHUNK = 200
-export const chunksOf = (files: string[]): string[][] =>
-  Array.from({ length: Math.ceil(files.length / CHUNK) }, (_, i) =>
-    files.slice(i * CHUNK, (i + 1) * CHUNK),
-  )
+// A chunk's summed expected time, the deadline's own 1200 s: the sandbox's 4-worker pass ran a chunk in 0.4 to 0.45 of its sum under load (501 s for 1277 s, 630 s for 1411 s, measured 28 Nov), so about 540 s, under half the deadline, where a 200-file chunk summing 2697 s was cut
+const BUDGET_MS = 1_200_000
+// The suite's own timings, tests/timings.json's files, each file's last passing time in ms; none for a clone without the file
+export const timingsOf = (clone: string): Record<string, number> => {
+  try {
+    const files = JSON.parse(readFileSync(join(clone, "tests", "timings.json"), "utf8")).files
+    return files && typeof files === "object" ? files : {}
+  } catch {
+    return {}
+  }
+}
+// Chunks in the list's order, each at most CHUNK files and BUDGET_MS of expected time, a file with no timing costing 1/CHUNK of the budget, so an untimed list keeps 200-file chunks; a file past the budget runs alone
+export const chunksOf = (files: string[], timings: Record<string, number> = {}): string[][] => {
+  const chunks: string[][] = []
+  let spent = 0
+  for (const file of files) {
+    const ms = typeof timings[file] === "number" ? timings[file] : BUDGET_MS / CHUNK
+    const last = chunks.at(-1)
+    if (last && last.length < CHUNK && spent + ms <= BUDGET_MS) {
+      last.push(file)
+      spent += ms
+    } else {
+      chunks.push([file])
+      spent = ms
+    }
+  }
+  return chunks
+}
 
 // The test sandbox's exit on its deadline (timeout(1)'s code).
 const DEADLINE = 124
@@ -1281,7 +1305,7 @@ export const cmdMerge = (...args: string[]): void => {
     return files
   }
   const red = (files: string[], stage: string): string[] => {
-    const chunks = chunksOf(files)
+    const chunks = chunksOf(files, timingsOf(clone))
     return chunks.flatMap((c, i) => chunkRed(c, stage, `chunk ${i + 1} of ${chunks.length}`))
   }
   const treeOf = (sha: string): Set<string> =>
