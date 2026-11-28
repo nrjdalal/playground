@@ -13,9 +13,12 @@ source: https://github.com/nrjdalal/zerostarter
 
 ## The two files are mirrors
 
-`.gitignore` is the source of truth and `.dockerignore` follows it byte-for-byte. Every ignore rule and every shared `!` un-ignore (e.g. `!.yarn/patches`) lives in the shared body of both: same entry, same section, same order, same commit.
+`.gitignore` is the source of truth and `.dockerignore` follows it line for line. Every ignore rule and every shared `!` un-ignore (e.g. `!.yarn/patches`) lives in the shared body of both: same entry, same section, same order, same commit.
 
-The one sanctioned divergence is the labeled override block, for a git-only or docker-only override. There the label is all that differs, `# git overrides` versus `# docker overrides`, and today each block carries only `!.env.example`.
+Two divergences are sanctioned:
+
+- **The `**/` prefix.** Docker matches each pattern from the build context's root, while git matches a pattern with no slash before its end at any depth ([Build context](https://docs.docker.com/build/concepts/context/)). So `.dockerignore` writes each folder pattern git matches at any depth with a `**/` prefix (`node_modules/` becomes `**/node_modules/`), which keeps every workspace's `.next`, `dist` and `node_modules` out of the context. A pattern git anchors to the root, one with a slash before its end (`.claude/worktrees/`), stays as written.
+- **The labeled override block**, for a git-only or docker-only override. There the label is all that differs, `# git overrides` versus `# docker overrides`, and today each block carries only `!.env.example`.
 
 ## .env stays out of the context
 
@@ -24,10 +27,11 @@ Real `.env*` files never enter the Docker context. Each build mounts the host fi
 ## Audit
 
 ```bash
-diff -u .gitignore .dockerignore
+diff -u .gitignore <(sed 's#^\*\*/##' .dockerignore)
+grep -nE '^[^#!/*][^/]*/$' .dockerignore
 ```
 
-Done when the only difference is the override block's label:
+Done when the grep prints nothing (a folder pattern without its `**/`) and the diff's only difference is the override block's label:
 
 ```diff
 -# git overrides
