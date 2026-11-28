@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -15,8 +15,12 @@ import { extensionsDir } from "../../../../../packages/settings/src/rendered"
 const scratch = mkdtempSync(join(tmpdir(), "setting-cli-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
-const render = (name: string, values: Record<string, unknown>): string => {
-  const text = JSON.stringify({ orgs: {}, schemaVersion: 1, values })
+const render = (
+  name: string,
+  values: Record<string, unknown>,
+  orgs: Record<string, Record<string, unknown>> = {},
+): string => {
+  const text = JSON.stringify({ orgs, schemaVersion: 1, values })
   writeRoot(extensionsDir(join(scratch, name)), new Map([["policy.json", text]]))
   return join(scratch, name)
 }
@@ -159,4 +163,73 @@ test("--guarded-orgs prints every org ext.links links, none with no store, and e
   )
   expect(refused.code).toBe(2)
   expect(refused.err).toContain("ext.links cannot be read")
+})
+
+describe("slots.windowJob, which run-slot and spawn.sh read an org's window by", () => {
+  const LINKS = { "ext.links": { acme: ["acme-co"] } }
+  const job = async (data: string) => await exit(["slots.windowJob"], data)
+  // a data folder whose login is made-up-me, with each scope a clone holding its own settings.json, or none where its text is undefined
+  const scoped = async (name: string, scopes: Record<string, string | undefined>, values = {}) => {
+    const data = render(name, values)
+    await Bun.write(join(extensionsDir(data), "login"), "made-up-me\n")
+    for (const [scope, text] of Object.entries({ "made-up-me": "{}", ...scopes })) {
+      mkdirSync(join(extensionsDir(data), scope, ".git"), { recursive: true })
+      if (text !== undefined)
+        await Bun.write(join(extensionsDir(data), scope, "settings.json"), text)
+    }
+    return data
+  }
+
+  test("an org's value in policy.json reaches the reader when the login's scope leaves it empty", async () => {
+    const data = render("window-org", LINKS, { "acme-co": { "slots.windowJob": "acme-start" } })
+    expect(await job(data)).toEqual({ code: 0, err: "", out: '"acme-start"' })
+  })
+
+  test("of two orgs that set it, the first A to Z wins", async () => {
+    const data = render(
+      "window-two",
+      { "ext.links": { acme: ["beta-co"], zeta: ["alpha-co"] } },
+      {
+        "beta-co": { "slots.windowJob": "beta-start" },
+        "alpha-co": { "slots.windowJob": "alpha-start" },
+      },
+    )
+    expect((await job(data)).out).toBe('"alpha-start"')
+  })
+
+  test("an org extension's own settings.json reaches the reader when policy.json's orgs leave it out", async () => {
+    const data = await scoped("window-scope", {
+      acme: JSON.stringify({ "slots.windowJob": "acme-start" }),
+    })
+    expect((await job(data)).out).toBe('"acme-start"')
+  })
+
+  test("a scope whose settings.json is missing or does not parse is skipped, and a later one A to Z is read", async () => {
+    const zeta = JSON.stringify({ "slots.windowJob": "zeta-start" })
+    for (const [name, acme] of [
+      ["window-missing-first", undefined],
+      ["window-unparsed-first", "{"],
+    ] as const)
+      expect((await job(await scoped(name, { acme, zeta }))).out).toBe('"zeta-start"')
+  })
+
+  test("the login's value wins over every org's", async () => {
+    const data = render(
+      "window-login",
+      { ...LINKS, "slots.windowJob": "my-start" },
+      { "acme-co": { "slots.windowJob": "acme-start" } },
+    )
+    expect((await job(data)).out).toBe('"my-start"')
+  })
+
+  test("it is empty, so no window stands, when no scope sets it or a read fails", async () => {
+    expect(await job(join(scratch, "none"))).toEqual({ code: 0, err: "", out: '""' })
+    expect((await job(render("window-unset", LINKS))).out).toBe('""')
+    expect(
+      (await job(render("window-bad-links", { "ext.links": { acme: ["Acme Co"] } }))).out,
+    ).toBe('""')
+    expect((await job(await scoped("window-unparsed", { acme: "{" }))).out).toBe('""')
+    const invalid = JSON.stringify({ "slots.windowJob": "Not A Job" })
+    expect((await job(await scoped("window-invalid", { acme: invalid }))).out).toBe('""')
+  })
 })

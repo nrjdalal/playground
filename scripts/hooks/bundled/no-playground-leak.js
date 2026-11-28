@@ -46,7 +46,7 @@ applyEnvAliases();
 // scripts/hooks/no-playground-leak.ts
 import { AsyncLocalStorage as AsyncLocalStorage3 } from "async_hooks";
 import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync3, statSync as statSync2 } from "fs";
-import { basename as basename2, join as join6 } from "path";
+import { basename as basename2, join as join7 } from "path";
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
@@ -10056,7 +10056,7 @@ async function check(raw, environment = process.env) {
 }
 
 // packages/scripts/src/playground/setting.ts
-import { resolve as resolve3 } from "path";
+import { join as join6, resolve as resolve3 } from "path";
 
 // packages/settings/src/accounts.ts
 var email2 = string2().email();
@@ -12021,9 +12021,9 @@ function chipsSigned(blocks, signature) {
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var HANDLE = /^[a-z\d][\w.-]{1,63}$/i;
 var MAX_ROSTER_BYTES = 1048576;
-var CHECKOUT2 = join6(__CHECKOUT + "/scripts/hooks", "..", "..");
+var CHECKOUT2 = join7(__CHECKOUT + "/scripts/hooks", "..", "..");
 function rosterNames(environment) {
-  const path = join6(dataDirOf(environment), "roster.json");
+  const path = join7(dataDirOf(environment), "roster.json");
   try {
     if (statSync2(path).size > MAX_ROSTER_BYTES)
       return [];
@@ -12040,9 +12040,9 @@ function rosterNames(environment) {
 }
 var notEveryday = (name) => HANDLE.test(name) && !terms.everyday.some((w) => w.toLowerCase() === name.toLowerCase());
 function skillNames(checkout = CHECKOUT2) {
-  const ours = join6(checkout, "skills", "playground");
+  const ours = join7(checkout, "skills", "playground");
   try {
-    return readdirSync2(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync3(join6(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
+    return readdirSync2(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync3(join7(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
   } catch {
     return [];
   }
@@ -13189,18 +13189,18 @@ function candidate(command) {
   const maybe = state().policy.anyWrite ? MAYBE_ANY : MAYBE;
   return command.includes("$'") || maybe.test(command.replace(/[\\'"]/g, ""));
 }
-async function factoryTerms(environment = process.env, checkout = CHECKOUT2, lists = join6(coreDir(), "lists")) {
-  const loaded = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join6(lists, "playground-terms.json"));
+async function factoryTerms(environment = process.env, checkout = CHECKOUT2, lists = join7(coreDir(), "lists")) {
+  const loaded = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join7(lists, "playground-terms.json"));
   if (loaded.refusal !== undefined)
     return { refusal: loaded.refusal };
   terms = loaded.list;
   return { pattern: pattern(environment, checkout) };
 }
-async function check3(raw, environment = process.env, checkout = CHECKOUT2, lists = join6(coreDir(), "lists")) {
+async function check3(raw, environment = process.env, checkout = CHECKOUT2, lists = join7(coreDir(), "lists")) {
   const loadedTerms = await factoryTerms(environment, checkout, lists);
   if (loadedTerms.refusal !== undefined)
     return refusedList(raw, loadedTerms.refusal);
-  const loadedCleared = await guardList("no-playground-leak", "slack-cleared", isCleared, {}, environment, join6(lists, "slack-cleared.json"));
+  const loadedCleared = await guardList("no-playground-leak", "slack-cleared", isCleared, {}, environment, join7(lists, "slack-cleared.json"));
   if (loadedCleared.refusal !== undefined)
     return refusedList(raw, loadedCleared.refusal);
   const read = await readPolicy(dataDir(environment));

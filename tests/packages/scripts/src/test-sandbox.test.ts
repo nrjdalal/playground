@@ -84,6 +84,37 @@ test("a parallel pass past its deadline fails, naming the file still running", a
   expect(Date.now() - started).toBeLessThan(10_000)
 }, 20_000)
 
+// PG-3254: a test:file call over 867 files hit its deadline with about 186 run, and was read as 867 files with 0 fail, since the message named only the files still running
+test("a deadline counts the files that ran and the files that never started, out of the pass's total", async () => {
+  const dir = join(DIR, "never-started")
+  mkdirSync(dir)
+  const files = Array.from({ length: 8 }, (_, i) => `./stuck-${i}.test.ts`)
+  for (const file of files)
+    writeFileSync(
+      join(dir, file),
+      'import { test } from "bun:test"\ntest("stuck", () => { Bun.sleepSync(20_000) }, 60_000)\n',
+    )
+  const run = Bun.spawn(["bun", SCRIPT, ...files], {
+    cwd: dir,
+    env: { ...process.env, TEST_PARALLEL_DEADLINE_MS: "5000" },
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 15_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(run.signalCode).toBeNull()
+  expect(code).toBe(124)
+  const counts =
+    /(\d+) of 8 files ran \(0 finished, (\d+) still running: [^)]+\); (\d+) never started/.exec(
+      stderr,
+    )
+  expect(counts).not.toBeNull()
+  const [ran, running, never] = counts!.slice(1).map(Number)
+  expect(running).toBe(ran!)
+  expect(ran! + never!).toBe(8)
+  expect(never).toBeGreaterThanOrEqual(4)
+}, 25_000)
+
 // A stub's subshell that loops writing (a bare wait did so on GitHub's runner, 31 Oct) outlives bun's own kill of its test, so only the deadline's stop of the whole group ends it
 test("the deadline also stops a child a stuck test leaves looping, so the run ends and the loop stops writing", async () => {
   const beat = join(DIR, "beat")
