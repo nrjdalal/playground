@@ -44,6 +44,7 @@ import {
   CARD_ID,
   type CardPick,
   type CardState,
+  listOf,
 } from "../ops-tick/unused-card"
 import { sessionName } from "../trash"
 import { liveBranch } from "./probe"
@@ -159,7 +160,7 @@ export const freedOf = (
 
 // What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, the default branch gh names for a worktree's repo, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR read by its --pr or else its branch (PrRead), and the session's name.
 export type RmDeps = {
-  // Each Remove approved on a nightly-clean list, read from the approvals file against the list nightly-clean saved, or why none counts; absent where none is read, which refuses every --card.
+  // Each Remove approved on a nightly-clean list, read from the approvals file against the list nightly-clean saved or the last list's items it sent to Ops for a peer (listOf), or why none counts; absent where none is read, which refuses every --card.
   approvals?: (card: string) => Promise<CardPick[] | string>
   clones: () => Clone[]
   data: string
@@ -381,7 +382,7 @@ export const rmDeps = (repo: string): RmDeps => ({
   prState,
   procs: processes,
   session: sessionName,
-  // the list's approved Removes, counted only against the list as nightly-clean saved it in its state file
+  // the list's approved Removes, counted only against the list as nightly-clean saved it in its state file, tonight's or the last one's items sent to Ops for a peer (listOf)
   approvals: async (id) => {
     try {
       const counted = approvalPicks(
@@ -390,7 +391,7 @@ export const rmDeps = (repo: string): RmDeps => ({
             .text()
             .catch(() => ""),
         ),
-        savedList(dataDir()),
+        listOf(savedLists(dataDir()), id),
         id,
       )
       return typeof counted === "string" ? counted : counted.remove
@@ -684,13 +685,12 @@ export const strayRefusal = (path: string, main: string): string | null => {
   return null
 }
 
-// The unused list nightly-clean saved in its state file, under data; it throws when the file does not read.
-const savedList = (data: string): CardState | undefined =>
-  (
-    JSON.parse(readFileSync(join(data, "ops", "tick", "nightly-clean.json"), "utf8")) as {
-      card?: CardState
-    }
-  ).card
+// The unused lists nightly-clean saved in its state file, under data: tonight's `card`, which --approve reads alone, and `sent`, the last list's items sent to Ops for a peer; it throws when the file does not read.
+const savedLists = (data: string): { card?: CardState; sent?: CardState } =>
+  JSON.parse(readFileSync(join(data, "ops", "tick", "nightly-clean.json"), "utf8")) as {
+    card?: CardState
+    sent?: CardState
+  }
 
 // playground rm --approve: one item of the saved unused list approved for removal, or with --keep kept, from the roster's ops seat or a seated dispatcher alone, as one line in the approvals file naming who approved it, at the bytes the list holds; the next nightly-clean carries it out under its own checks.
 async function approveItem(
@@ -709,7 +709,7 @@ async function approveItem(
     agents = (
       JSON.parse(readFileSync(join(deps.data, "roster.json"), "utf8")) as { agents?: unknown }
     ).agents
-    list = savedList(deps.data)
+    list = savedLists(deps.data).card
   } catch (error) {
     return refuse(`${(error as Error).message}, so nothing is approved`)
   }

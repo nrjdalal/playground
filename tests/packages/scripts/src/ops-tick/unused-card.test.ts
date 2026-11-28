@@ -11,6 +11,7 @@ import {
   cardNight,
   keptAfter,
   listLine,
+  listOf,
   offered,
   peerCommand,
 } from "../../../../../packages/scripts/src/ops-tick/unused-card"
@@ -247,6 +248,50 @@ test("an approved list removes each Remove still listed at its size here, sends 
   )
   expect(night.kept).toEqual({ "here docker image old:1": image.bytes })
   expect(night.card).toBeUndefined()
+})
+
+// A list whose one peer item, weights on `peer`, Ops was sent to remove, and the night that saves the next list after it.
+const peerWeights = async (tonight: Machine[], lines?: Approval[]) => {
+  const items = offered([here(image), { items: [weights], machine: "peer" }], HOME, out, {})
+  const sentItem = items.find((i) => i.machine === "peer")!
+  const approved = lines ?? [approval(sentItem)]
+  const { deps } = factory(approved)
+  const night = await cardNight(tonight, HOME, { card: { at: WROTE, id: ID, items } }, deps)
+  return { approved, night, sentItem }
+}
+
+test("a peer's approved Remove still counts on its list after the next list is saved, at the size it was approved at (#3161)", async () => {
+  const { approved, night, sentItem } = await peerWeights([
+    here(image),
+    { items: [weights], machine: "peer" },
+  ])
+  expect(night.ops).toContain(`list ${ID} approved on peer: ${peerCommand(sentItem, ID)}`)
+  expect(night.card?.id).toBe(NEXT)
+  expect(night.sent).toEqual({ at: WROTE, id: ID, items: [sentItem] })
+  const saved = { card: night.card, sent: night.sent }
+  expect(approvalPicks(approved, listOf(saved, ID), ID)).toEqual({ keep: [], remove: [sentItem] })
+  expect(
+    approvalPicks([approval(sentItem, { bytes: sentItem.bytes + 1 })], listOf(saved, ID), ID),
+  ).toEqual({ keep: [], remove: [] })
+  expect(approvalPicks(approved, listOf(saved, OTHER), OTHER)).toBe(
+    `list ${OTHER} is not the list nightly-clean saved`,
+  )
+})
+
+test("a night with no new items drops the list but still saves the one its peer's Remove names, which still counts (#3161)", async () => {
+  const { approved, night, sentItem } = await peerWeights([{ items: [weights], machine: "peer" }])
+  expect(night.card).toBeUndefined()
+  expect(night.sent).toEqual({ at: WROTE, id: ID, items: [sentItem] })
+  expect(approvalPicks(approved, listOf({ sent: night.sent }, ID), ID)).toEqual({
+    keep: [],
+    remove: [sentItem],
+  })
+})
+
+test("a night that sends Ops no peer Remove saves no sent list", async () => {
+  const { night } = await peerWeights([here(image), { items: [weights], machine: "peer" }], [])
+  expect(night.sent).toBeUndefined()
+  expect(listOf({ card: night.card }, ID)).toBeUndefined()
 })
 
 test("an approval written before the list's write time removes nothing and keeps nothing", async () => {
