@@ -1404,8 +1404,8 @@ describe("a due ship PR, in the tick", () => {
     ["a red required check", { test: "failure" }],
     ["a required check still running", { test: null }],
     [
-      "two user-facing merges in under release.hours",
-      { subjects: ["feat(PG-1): a", "fix(PG-2): b"] },
+      "two user-facing merges and a revert of a third in under release.hours",
+      { subjects: ["feat(PG-1): a", "fix(PG-2): b", 'revert: "feat(PG-3): c"'] },
     ],
     ["no merge since the last ship", { subjects: [] }],
   ] as const)("%s tells no one", async (_case, options) => {
@@ -1414,6 +1414,24 @@ describe("a due ship PR, in the tick", () => {
     const run = fake(ops, now, github(now, options))
     await beat("tick").run(run.ctx)
     expect(run.sent).toEqual([])
+  })
+
+  test("while the gh sign-in probe reads failed, the tick reads no gh for the ship PR and tells no one", async () => {
+    const ops = scratch()
+    const now = at(13, 18)
+    mkdirSync(join(ops, "tick"), { recursive: true })
+    writeFileSync(
+      join(ops, "tick", "gh-auth.json"),
+      JSON.stringify({
+        at: isoAt(new Date(now.getTime() - 60_000)),
+        ok: false,
+        reason: "gh token invalid",
+      }),
+    )
+    const run = fake(ops, now, github(now))
+    await beat("tick").run(run.ctx)
+    expect(run.sent).toEqual([])
+    expect(run.runs.filter((argv) => argv[0] === "gh")).toEqual([])
   })
 
   test("a held merge lock tells no one until it goes", async () => {

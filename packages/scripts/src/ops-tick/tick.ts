@@ -28,7 +28,7 @@ import {
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import STATUSES from "../../../../scripts/roster-statuses.json"
-import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth, KEYRING_LOCKED } from "../gh-read"
+import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth, ghDown, KEYRING_LOCKED } from "../gh-read"
 import { procSource, readBootTime, readSysctl, readUpSince } from "../ops-machine/readings"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
@@ -928,7 +928,7 @@ const USER_FACING = /^(feat|fix)\(/
 type ShipMark = { dispatcher?: boolean; opsAt?: string; pr: number }
 
 const ghJson = async (ctx: Context, path: string): Promise<unknown> => {
-  const read = await ctx.run(["gh", "api", path], 60_000)
+  const read = await ctx.run(["gh", "api", path], GH_TIMEOUT_MS)
   if (read.code !== 0) throw new Error(`gh api ${path.split("?")[0]}: ${lines(read.out).at(-1)}`)
   return JSON.parse(read.out)
 }
@@ -989,7 +989,8 @@ export const shipDue = async (ctx: Context, lockRoot = lockRootOf()) => {
   let mark = JSON.parse(before) as ShipMark | null
   const origin = await ctx.run(["git", "-C", ctx.repo, "remote", "get-url", "origin"])
   const slug = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\s*$/.exec(origin.out)?.[1]
-  if (!slug) return
+  // while the sign-in probe reads gh failed, every repeated gh read skips gh, as LIFECYCLE.md's ops-tick list says
+  if (!slug || ghDown(join(ctx.ops, "tick", "gh-auth.json"), ctx.now.getTime())) return
   const open = (
     (await ghJson(ctx, `repos/${slug}/pulls?base=main&state=open&per_page=10`)) as {
       head: { ref: string; sha: string }
