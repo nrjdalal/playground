@@ -2,5 +2,6 @@ Patch a bug you can reproduce in a tool we use upstream when its project takes c
 A fix only here dodges the bug and lets it back on the tool's next update, while a fix upstream removes it for every user.
 The work goes to a Claude worker through the build lead, with the reproduction in its brief, and the worker reads the project's contribution rules first.
 Its public text is plain and technical and names nothing of ours: no tool, session, team, company or person.
+A review of another author's PR keeps our own PR whole: it offers none of our fix into theirs and never says ours can close, so each of our PRs merges as our own.
 The worker reads other authors' branches and issues and runs only the project's own `main` and tags, so no outside code runs here.
 The dispatcher reads the exact text before it posts, and the report carries the upstream link.
