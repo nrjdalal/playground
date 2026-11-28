@@ -6882,7 +6882,7 @@ var yardSettings = defineSettings({
   }
 });
 // packages/scripts/src/playground/setting.ts
-import { resolve as resolve2 } from "path";
+import { join as join3, resolve as resolve2 } from "path";
 var CHECKOUT = resolve2(__CHECKOUT + "/packages/scripts/src/playground", "../../../..");
 var origins = new Map;
 var originRepo = (checkout = CHECKOUT) => {
@@ -7015,7 +7015,7 @@ async function loadList(guard, path, valid, empty, environment = process.env) {
 
 // scripts/hooks/no-playground-leak.ts
 import { AsyncLocalStorage as AsyncLocalStorage3 } from "async_hooks";
-import { basename as basename2, join as join5 } from "path";
+import { basename as basename2, join as join6 } from "path";
 
 // scripts/hooks/github.ts
 function repoOf(text) {
@@ -7054,13 +7054,13 @@ function remotes(cwd) {
 
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
 var names;
 function loadNames(environment = process.env) {
   names ??= (async () => {
     try {
-      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const setting = join4(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
       const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
         env: { ...process.env, ...environment },
         stderr: "ignore",
@@ -7075,10 +7075,10 @@ function loadNames(environment = process.env) {
   return names;
 }
 async function registryName(sessionId, environment = process.env) {
-  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir2(), ".claude"), "sessions");
+  const dir = join4(environment.CLAUDE_CONFIG_DIR || join4(homedir2(), ".claude"), "sessions");
   for await (const file of new Bun.Glob("*.json").scan(dir)) {
     try {
-      const entry = await Bun.file(join3(dir, file)).json();
+      const entry = await Bun.file(join4(dir, file)).json();
       if (entry.sessionId === sessionId && typeof entry.name === "string")
         return entry.name;
     } catch {}
@@ -7089,7 +7089,7 @@ async function codexName(sessionId, environment = process.env) {
     return;
   let name;
   try {
-    const index = await Bun.file(join3(environment.CODEX_HOME, "session_index.jsonl")).text();
+    const index = await Bun.file(join4(environment.CODEX_HOME, "session_index.jsonl")).text();
     for (const line of index.split(`
 `)) {
       try {
@@ -7102,7 +7102,7 @@ async function codexName(sessionId, environment = process.env) {
   return name;
 }
 async function rosterKind(name, environment = process.env) {
-  const path = join3(dataDirOf(environment), "roster.json");
+  const path = join4(dataDirOf(environment), "roster.json");
   try {
     const roster = await Bun.file(path).json();
     const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
@@ -7957,7 +7957,7 @@ var merge2 = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join4 = (parts, separator = "") => {
+var join5 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -10340,7 +10340,7 @@ async function scriptOf(operand, cmd, env) {
   return scripts;
 }
 async function outputs(cmds, env) {
-  return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join5(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record2(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -10351,7 +10351,7 @@ async function record2(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown2(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join4([await existing(path, env), out]) : out));
+    env.files.set(path, held2(r.op === ">>" ? join5([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -10360,7 +10360,7 @@ async function record2(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held2(append ? join4([await existing(path, env), input]) : input));
+      env.files.set(path, held2(append ? join5([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -10391,7 +10391,7 @@ async function outputOf(cmd, env) {
         return unknown2(LARGE);
       parts.push(part);
     }
-    return join4(parts);
+    return join5(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -11474,7 +11474,7 @@ function chipsSigned(blocks, signature) {
   return opensLine && text.split(`
 `).at(-1)?.trim() === signature.replace(/^_(.*)_$/, "$1");
 }
-var CHECKOUT2 = join5(__CHECKOUT + "/scripts/hooks", "..", "..");
+var CHECKOUT2 = join6(__CHECKOUT + "/scripts/hooks", "..", "..");
 var REPHRASE = "Say it without the term: name the work, not who did it or how it is run.";
 var READABLE = `Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md, or -F /abs/msg.md for a commit). ${NOT_RUN}`;
 var MCP_READABLE = "Pass the input as an object whose fields are strings.";
