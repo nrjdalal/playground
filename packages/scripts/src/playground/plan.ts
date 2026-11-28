@@ -109,6 +109,8 @@ playground alerts-wait <name>
                       for a manager's background task, or a session on another machine's: wait for the next outbox line addressed to <name>, a stuck alert first, else any job's line such as a heads-up or a playground send from the other machine, led by [ops-peer] and its sender's name, print it and exit, so it wakes without waiting on the relay
 playground ci-wait <pr> [--repo <owner/name>]
                       wait on a PR's CI, as a background task: poll its head over REST every 5 minutes until the two required checks (Audit, Lint, and Build and test) exist there and have concluded, then print each conclusion and exit 0 when all passed, else 1; a rate limit waits for its reset, a head that moves is waited on afresh, a check whose workflow run ended without creating it exits 1 with its rerun, a PR that conflicts with its base exits 1 at once naming the merge it needs (no CI runs on one), and a PR or repo GitHub does not know, or a refused login, exits 2; --repo is the factory's own repo when left out
+playground hosts [<worktree>] [web|api]
+                      print a worktree's own stack URLs, web and API, by its path from any folder, or the one named alone for WEB=$(playground hosts <worktree> web): portless names a stack's hosts from the branch of the folder it runs in, so it runs there; a path that is not a linked worktree on a branch portless prefixes is refused, since its hosts would be the bare names, the live dashboard's; the current folder when none is named
 playground picker <session> allow <key> [--rule <name>] | deny <key> [--rule <name>] "<reason>"
                       as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; --rule names the standing rule that settles the answer; each answer is a line in ops/picker.log
 playground model use <name> [--machine <name>]
@@ -182,6 +184,7 @@ export const WORDS: Record<string, number | "rest"> = {
   "focus on": 0,
   "herdr pin": "rest",
   "herdr stop": 0,
+  hosts: 2,
   migrate: 0,
   "model use": 1,
   ops: 0,

@@ -53,7 +53,7 @@ export async function check(
       .map((m) => Number(m[1]))
       .find((p) => live.ports.has(p))
     if (!host && port === undefined) return
-    return `no-live-sign-in hook refuses a sign-in call to the live dashboard (${host ?? `loopback port ${port}`}): the owner sign-in, first run's finish and the agent sign-in each mint a session holding the owner rung there. Sign in on your own worktree's stack instead, by the dev skill's Agent login, whose names \`bunx portless get api.playground\` prints in your worktree.`
+    return `no-live-sign-in hook refuses a sign-in call to the live dashboard (${host ?? `loopback port ${port}`}): the owner sign-in, first run's finish and the agent sign-in each mint a session holding the owner rung there. Sign in on your own worktree's stack instead, by the dev skill's Agent login, whose names \`playground hosts <your worktree> api\` prints from any folder.`
   } catch {
     // Fails open: a call the hook cannot read runs, so a parser bug never blocks a Bash command.
     return undefined

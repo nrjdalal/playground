@@ -74,10 +74,10 @@ export const exampleRouter = new Hono().post(
 
 ## 3. Restart the stack and test
 
-`bun --hot` will NOT see a new file, so restart the stack (see the `dev` skill), then, with `<pdir>` the path the `dev` skill's Start prints:
+`bun --hot` will NOT see a new file, so restart the stack (see the `dev` skill), then, with `<pdir>` the path the `dev` skill's Start prints and `<worktree>` the stack's absolute path:
 
 ```bash
-WEB=$(PORTLESS_STATE_DIR=<pdir> bunx portless get playground); API=$(PORTLESS_STATE_DIR=<pdir> bunx portless get api.playground)
+WEB=$(playground hosts <worktree> web); API=$(playground hosts <worktree> api)
 curl -sS --cacert <pdir>/ca.pem -X POST -H "Content-Type: application/json" -H "Origin: $WEB" \
   -d '{"email":"<your email>"}' "$API/api/<name>"
 ```

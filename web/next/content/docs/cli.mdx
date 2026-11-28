@@ -143,6 +143,13 @@ When GitHub does not know the PR or repo, or refuses your login, it exits 2 at o
 `--repo <owner/name>` points it at another repo; it reads the factory's own by default.
 Run it as a background task, and read the head's checks once more yourself before you call it green.
 
+## Find a worktree's stack: `playground hosts`
+
+`playground hosts <worktree>` prints the web and API URLs of the stack running in `<worktree>`, found by its path from any folder, as `web <url>` and then `api <url>`.
+Add `web` or `api` for that URL alone, as in `WEB=$(playground hosts <worktree> web)`. With no path it reads the current folder.
+portless names a stack's hosts after the branch of the folder it runs in, so a `portless get` run from the main checkout gives the bare names, which are the live Dashboard's. `playground hosts` runs it in the worktree instead.
+It refuses a path that is not a linked worktree on a branch portless prefixes, and any URL not on that prefix, and exits 1.
+
 ## Wait for alerts: `playground alerts-wait`
 
 `playground alerts-wait <name>` waits until the next line in the outbox addressed to `<name>`, prints it, and exits: a stuck session's alert or the relay watch's late-stop line first, else any job's line, such as a firefighting heads-up to the Builder.
