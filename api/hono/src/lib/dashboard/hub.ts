@@ -300,8 +300,10 @@ export class DashboardHub {
       else for (const sessionId of this.tails.keys()) this.queueRead(sessionId)
       this.live = live
       this.activity.update(working(live))
+      // a board equal to the last one sent goes nowhere, so a kept board re-renders nothing
+      const same = this.last !== null && JSON.stringify(this.last) === JSON.stringify(frame)
       this.last = frame
-      this.broadcast(frame)
+      if (!same) this.broadcast(frame)
     } finally {
       this.refreshing = false
       if (this.dirty) {
