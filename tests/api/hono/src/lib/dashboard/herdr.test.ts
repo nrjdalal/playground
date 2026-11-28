@@ -296,6 +296,29 @@ describe("readServer and herdrRecords", () => {
     expect(kept?.workspaces).toEqual(good!.workspaces)
   })
 
+  test("a server that went down keeps no last good read, so a hung read after it comes back reads empty", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hd-"))
+    cleanups.push(() => rmSync(dir, { force: true, recursive: true }))
+    const socket = join(dir, "s.sock")
+    const server = { name: "kept-down", socket }
+    const up = stubServer(
+      {
+        "pane.process_info": () => ({ process_info: PROCESS, type: "pane_process_info" }),
+        "session.snapshot": () => SNAPSHOT,
+      },
+      socket,
+    )
+    const [good] = await readHerdr([server], 1000)
+    expect(good?.panes.length).toBeGreaterThan(0)
+    up.close()
+    expect(await readHerdr([server], 300)).toEqual([])
+    const hung = stubServer({ "session.snapshot": () => null }, socket)
+    cleanups.push(hung.close)
+    expect(await readHerdr([server], 300)).toEqual([
+      { panes: [], partial: true, server: "kept-down", workspaces: [] },
+    ])
+  })
+
   test("a pane whose own read answers keeps its fresh row when another pane's read is slow, and the slow pane keeps its last good one", async () => {
     let slow = false
     const s = stub({
