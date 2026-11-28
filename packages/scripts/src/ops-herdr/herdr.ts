@@ -448,7 +448,8 @@ const waits = (output: string): Map<string, number> => {
   const held = new Map<string, number>()
   for (const line of output.split("\n")) {
     if (!line.startsWith("waiting ")) continue
-    const by = /\bthe (\w+) gate holds it\b/.exec(line)?.[1] ?? "focus"
+    // a gate only from the reason's own prefix, spawn.sh's `the <gate> gate holds it: <detail>`, since focus's own text is free and may hold those words
+    const by = /^waiting [^:\s]+: the (\w+) gate holds it:/.exec(line)?.[1] ?? "focus"
     held.set(by, (held.get(by) ?? 0) + 1)
   }
   return held

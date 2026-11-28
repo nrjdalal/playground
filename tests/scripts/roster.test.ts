@@ -1056,6 +1056,38 @@ describe("status", () => {
   })
 })
 
+// a lead that spawned and briefed a session skipped assign, so its row read starting long after it had reported (#3192).
+describe("a starting row's first report", () => {
+  // the row as spawn.sh's start writes it
+  const spawned = async () => {
+    const config = configWith([])
+    const r = await run(config, ["set", "x7mh4d-worker", "kind=worker", "task=brief.md"])
+    expect(agentOf(r.roster, "x7mh4d-worker")?.status).toBe("starting")
+    return config
+  }
+
+  test.each([
+    ["report", ["report", "x7mh4d-worker", "red test committed"]],
+    ["set eta=", ["set", "x7mh4d-worker", `eta=${inMinutes(60)}`]],
+    ["set lastReport=", ["set", "x7mh4d-worker", "lastReport=PR opened"]],
+  ])("by %s moves it to working", async (_case, args) => {
+    const config = await spawned()
+    const r = await run(config, args)
+    expect(r.code).toBe(0)
+    expect(agentOf(r.roster, "x7mh4d-worker")?.status).toBe("working")
+  })
+
+  test("leaves a row whose session never came up at starting, and a status the call gives wins", async () => {
+    const config = await spawned()
+    const title = await run(config, ["set", "x7mh4d-worker", "title=Export fix"])
+    expect(agentOf(title.roster, "x7mh4d-worker")?.status).toBe("starting")
+    const waiting = await run(config, ["report", "x7mh4d-worker", "at a prompt", "status=waiting"])
+    expect(agentOf(waiting.roster, "x7mh4d-worker")?.status).toBe("waiting")
+    const later = await run(config, ["report", "x7mh4d-worker", "still at it"])
+    expect(agentOf(later.roster, "x7mh4d-worker")?.status).toBe("waiting")
+  })
+})
+
 // spawn.sh resume reads why a row ended, so a session auto-end or a done ended stays down unless --force (#2351).
 describe("endReason", () => {
   test("a done row records done, a reason given wins, and a live status or an assign drops it", async () => {
@@ -1526,6 +1558,47 @@ describe("holders", () => {
       const r = await run(config, ["holders", pr])
       expect([r.code, r.out]).toEqual([1, ""])
     }
+    expect(bytes(config)).toBe(before)
+  })
+
+  // PG-3214: a checker's row can hold an extension repo's PR, and a bare number read as the factory repo's alone exited 1 there, which frees a clone that PR still holds
+  test("a bare number counts a live row holding that PR on any repo, an extension repo's included, naming each row", async () => {
+    const config = configWith([
+      ...rows,
+      {
+        name: "m4t8kq-reviewer",
+        pr: "https://github.com/acme/ext/pull/27",
+        status: "working",
+        task: "t",
+      },
+      {
+        name: "p6v3hd-reviewer",
+        prs: ["https://github.com/other/tools/pull/27"],
+        status: "waiting",
+        task: "t",
+      },
+      {
+        name: "w9c2rn-reviewer",
+        pr: "https://github.com/acme/ext/pull/27",
+        status: "ended",
+        task: "t",
+      },
+    ])
+    const before = bytes(config)
+    for (const pr of ["27", "#27"]) {
+      const r = await run(config, ["holders", pr])
+      expect([r.code, r.out.split("\n").filter(Boolean)]).toEqual([
+        0,
+        ["m4t8kq-reviewer", "p6v3hd-reviewer"],
+      ])
+    }
+    const url = await run(config, ["holders", "https://github.com/acme/ext/pull/27"])
+    expect([url.code, url.out.split("\n").filter(Boolean)]).toEqual([0, ["m4t8kq-reviewer"]])
+    const factory = await run(config, ["holders", "7"])
+    expect([factory.code, factory.out.split("\n").filter(Boolean)]).toEqual([
+      0,
+      ["k3m9px-reviewer", "q8r2tx-reviewer"],
+    ])
     expect(bytes(config)).toBe(before)
   })
 

@@ -438,7 +438,7 @@ HEAVY = re.compile(r"(NODE_ENV=test bun test|(^|/)bun test tests|bun run test(:s
 HEAVY_PROGRAM = re.compile(r"^(\S*/)?(bun|node|turbo|tsc|next)(\s|$)")
 # run-slot.sh as ps shows it, run by a shell or by its own shebang
 RUN_SLOT = re.compile(r"^((\S*/)?(ba|z)?sh\s+)?(\S*/)?run-slot\.sh(\s|$)")
-# precommit:light runs outside the slots by rule (scripts/ops/README.md) and its checks (trace-count's test, env-keys' one-package build) take seconds, so nothing under it is a job or counts toward the cap
+# precommit:light runs outside the slots by rule (scripts/ops/README.md) and its checks (trace-count's test, env-keys' one-package build, which takes the commit slot through run-slot when turbo has work for it) take seconds, so nothing under it is a job or counts toward the cap
 PRECOMMIT_LIGHT = re.compile(r"^(\S*/)?bun\s+(\S*/)?packages/scripts/src/precommit-light\.ts(\s|$)")
 
 

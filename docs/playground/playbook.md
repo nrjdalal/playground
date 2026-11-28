@@ -101,17 +101,17 @@ A branch whose issue is open and that is no copy stays.
 Any other unmerged branch's head is tagged `archive/<branch>` on origin before any delete, so the tag holds it and `git branch <name> archive/<branch>` brings the branch back; one whose tag cannot be made, or whose origin head is not the local head the tag would hold, stays, named in the log.
 A branch never pushed stays too, with a local `archive/<branch>` tag alone, since a push would publish commits no one has reviewed, and is named once, the night that tag is made or re-pointed to the branch's head.
 A re-point that would drop an old head, one no ancestor of the new head, first keeps it at a tag of its own, `archive/<branch>-<old7>` (its first 7 characters), so `git branch <name> archive/<branch>-<old7>` brings it back; when that tag cannot be made, the old tag stays as it is and the log names why.
-Last, it lists each machine's unused space with its size, and removes only what the owner picks Remove for on its Inbox card: model weights no model folder in `~/models` names, Docker images no container uses by any of their tags and unused for 7 days, model-test worktrees in `~/models/kit/runs/` a day after their row ended, and ship rehearsal folders in a scratchpad.
+Last, it lists each machine's unused space with its size, and removes only what Ops or a dispatcher approves on that night's list: model weights no model folder in `~/models` names, Docker images no container uses by any of their tags and unused for 7 days, model-test worktrees in `~/models/kit/runs/` a day after their row ended, and ship rehearsal folders in a scratchpad.
 It reads each other machine `PLAYGROUND_PEERS` names in the Dashboard's `.env` the same way, over one fixed ssh that only reads.
 An item under 100 MB joins one small leftovers total, and an item the machine record holds is marked recorded.
 A model stored as shards, the files in one folder that share a stem and end `-NNNNN-of-NNNNN.gguf` or `.safetensors`, is one item at its shards' total, and its Remove checks every shard before it deletes any.
 `bun packages/scripts/src/ops-tick/unused.ts` runs the same list by hand, a dry run that removes nothing.
-The card asks about the 20 largest items over 100 MB, each with Remove and Keep, and leaves out the model test's own runs and logs and a rehearsal whose version tag is not out yet; it is edited in place each night while it stands open.
-Once answered, each Remove still listed at the card's size goes the next night: an image through `docker image rm`, model weights deleted outright since they download again, and anything else to the 7-day trash, each through `playground rm --card`.
+The list names the 20 largest items over 100 MB and leaves out the model test's own runs and logs and a rehearsal whose version tag is not out yet; it goes to Ops as one outbox line each night, never to the Inbox, and `playground rm --approve <id> <path> [--peer <machine>] [--keep]` approves one item, a Remove or a Keep, logged with who approved it.
+Each approved Remove still listed at the list's size goes the next night: an image through `docker image rm`, model weights deleted outright since they download again, and anything else to the 7-day trash, each through `playground rm --card`.
 A Remove on another machine reaches Ops as the command `playground rm --card <id> --peer <machine> <path>`, which re-checks the path on that peer before it deletes, and a Keep holds until the item's size changes.
 Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch, with each machine's unused items.
 The log line also holds the free disk before and after, which the System page shows too, and each machine's unused total.
-The card is its one decision: a container or unused volume over 1 GB that no rule takes, the one leftover it cannot judge, is kept, and named as kept in the same log and outbox line, as is a container whose removal failed.
+The list is its one decision: a container or unused volume over 1 GB that no rule takes, the one leftover it cannot judge, is kept, and named as kept in the same log and outbox line, as is a container whose removal failed.
 Each machine keeps a record of every path the factory put on it, `machine-record.json` in the data folder, written by `playground record add` and the steps that make such a path: an Inbox root card that ran, `link-skills.sh`'s links outside the data folder, and the run folder and Postgres image the runner box's heavy runs use (`ci.sh`).
 A path the OS made, a snapd unit under `~/.config` for example, goes through `playground record known <path> --why "<who made it>"` so the nightly check skips it.
 Every night at 3:45 a check compares it with the watched places here and on each peer: the home folder's top level, `~/.bun/bin`, `~/.cache`, `~/.config`, systemd user units, `~/.local/bin`, Docker's images and containers, and the root-step folders.
@@ -153,7 +153,7 @@ What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
 Once focus ends, either way, one Inbox card says the same, and the quiet items count again.
-The card moves to Done by itself once everything that came in while focus stood is answered.
+The card moves to Done by itself once everything that came in while focus stood is answered or put away with Archive or Later.
 
 ## Tickets
 

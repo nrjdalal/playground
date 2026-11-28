@@ -6091,7 +6091,7 @@ var SEATLESS = new Set(["ended", "parked"]);
 import { AsyncLocalStorage } from "async_hooks";
 var budget = new AsyncLocalStorage;
 function withLiveBudget(body, ms = 6000) {
-  return budget.getStore() ? body() : budget.run({ reads: new Map, until: performance.now() + ms }, body);
+  return budget.getStore() ? body() : budget.run({ heads: new Map, reads: new Map, until: performance.now() + ms }, body);
 }
 var run = (at, args, env, timeout) => {
   const proc = Bun.spawnSync(["git", "-C", at, ...args], {
@@ -6104,11 +6104,7 @@ var run = (at, args, env, timeout) => {
   return { ok: proc.exitCode === 0, out: proc.stdout.toString() };
 };
 function liveHeads(at, remote, timeout) {
-  const command = process.env.GIT_SSH_COMMAND || run(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
-  const env = { GIT_TERMINAL_PROMPT: "0" };
-  if (command)
-    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
-  const live = run(at, ["ls-remote", "--heads", "--", remote], env, timeout);
+  const live = run(at, ["ls-remote", "--heads", "--", remote], quiet(at), timeout);
   if (!live.ok)
     return null;
   const tips = [];
@@ -6119,6 +6115,27 @@ function liveHeads(at, remote, timeout) {
       tips.push({ ref: `${remote}/${name.slice("refs/heads/".length)}`, sha });
   }
   return tips;
+}
+function quiet(at) {
+  const command = process.env.GIT_SSH_COMMAND || run(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
+  const env = { GIT_TERMINAL_PROMPT: "0" };
+  if (command)
+    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
+  return env;
+}
+function liveDefault(at, remote, timeout = 5000) {
+  const call = budget.getStore();
+  const key = `${at}\x00${remote}`;
+  const had = call?.heads.get(key);
+  if (had !== undefined)
+    return had;
+  if (call)
+    call.headsUntil ??= Math.min(call.until, performance.now() + timeout);
+  const left = call ? Math.floor(call.headsUntil - performance.now()) : timeout;
+  const live = left > 0 ? run(at, ["ls-remote", "--symref", "--", remote, "HEAD"], quiet(at), left) : undefined;
+  const head = live?.ok && /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(live.out)?.[1] || null;
+  call?.heads.set(key, head);
+  return head;
 }
 function present(at, tips) {
   if (!tips.length)
@@ -6865,7 +6882,7 @@ var yardSettings = defineSettings({
   }
 });
 // packages/scripts/src/playground/setting.ts
-import { resolve as resolve2 } from "path";
+import { join as join3, resolve as resolve2 } from "path";
 var CHECKOUT = resolve2(__CHECKOUT + "/packages/scripts/src/playground", "../../../..");
 var origins = new Map;
 var originRepo = (checkout = CHECKOUT) => {
@@ -6998,7 +7015,7 @@ async function loadList(guard, path, valid, empty, environment = process.env) {
 
 // scripts/hooks/no-playground-leak.ts
 import { AsyncLocalStorage as AsyncLocalStorage3 } from "async_hooks";
-import { basename as basename2, join as join5 } from "path";
+import { basename as basename2, join as join6 } from "path";
 
 // scripts/hooks/github.ts
 function repoOf(text) {
@@ -7037,13 +7054,13 @@ function remotes(cwd) {
 
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
 var names;
 function loadNames(environment = process.env) {
   names ??= (async () => {
     try {
-      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const setting = join4(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
       const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
         env: { ...process.env, ...environment },
         stderr: "ignore",
@@ -7058,10 +7075,10 @@ function loadNames(environment = process.env) {
   return names;
 }
 async function registryName(sessionId, environment = process.env) {
-  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir2(), ".claude"), "sessions");
+  const dir = join4(environment.CLAUDE_CONFIG_DIR || join4(homedir2(), ".claude"), "sessions");
   for await (const file of new Bun.Glob("*.json").scan(dir)) {
     try {
-      const entry = await Bun.file(join3(dir, file)).json();
+      const entry = await Bun.file(join4(dir, file)).json();
       if (entry.sessionId === sessionId && typeof entry.name === "string")
         return entry.name;
     } catch {}
@@ -7072,7 +7089,7 @@ async function codexName(sessionId, environment = process.env) {
     return;
   let name;
   try {
-    const index = await Bun.file(join3(environment.CODEX_HOME, "session_index.jsonl")).text();
+    const index = await Bun.file(join4(environment.CODEX_HOME, "session_index.jsonl")).text();
     for (const line of index.split(`
 `)) {
       try {
@@ -7085,7 +7102,7 @@ async function codexName(sessionId, environment = process.env) {
   return name;
 }
 async function rosterKind(name, environment = process.env) {
-  const path = join3(dataDirOf(environment), "roster.json");
+  const path = join4(dataDirOf(environment), "roster.json");
   try {
     const roster = await Bun.file(path).json();
     const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
@@ -7940,7 +7957,7 @@ var merge2 = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join4 = (parts, separator = "") => {
+var join5 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -10323,7 +10340,7 @@ async function scriptOf(operand, cmd, env) {
   return scripts;
 }
 async function outputs(cmds, env) {
-  return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join5(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record2(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -10334,7 +10351,7 @@ async function record2(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown2(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join4([await existing(path, env), out]) : out));
+    env.files.set(path, held2(r.op === ">>" ? join5([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -10343,7 +10360,7 @@ async function record2(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held2(append ? join4([await existing(path, env), input]) : input));
+      env.files.set(path, held2(append ? join5([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -10374,7 +10391,7 @@ async function outputOf(cmd, env) {
         return unknown2(LARGE);
       parts.push(part);
     }
-    return join4(parts);
+    return join5(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -11466,7 +11483,7 @@ function chipsSigned(blocks, signature) {
   return opensLine && text.split(`
 `).at(-1)?.trim() === signature.replace(/^_(.*)_$/, "$1");
 }
-var CHECKOUT2 = join5(__CHECKOUT + "/scripts/hooks", "..", "..");
+var CHECKOUT2 = join6(__CHECKOUT + "/scripts/hooks", "..", "..");
 var REPHRASE = "Say it without the term: name the work, not who did it or how it is run.";
 var READABLE = `Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md, or -F /abs/msg.md for a commit). ${NOT_RUN}`;
 var MCP_READABLE = "Pass the input as an object whose fields are strings.";
@@ -12393,9 +12410,9 @@ function branchOnly(flags, positionals, dir) {
     if (config.unknown || config.value.split(`
 `).some((line) => line.startsWith(`remote.${remote.value}.push=`)))
       return false;
-    const head = gitText(dir, ["symbolic-ref", "--short", `refs/remotes/${remote.value}/HEAD`], "the remote's default branch");
-    if (!head.unknown)
-      defaults.add(head.value.trim().slice(remote.value.length + 1).toLowerCase());
+    const head = remoteDefault(dir, remote.value);
+    if (head)
+      defaults.add(head);
   }
   return specs.every((spec) => {
     if (unreadable(spec) || /[*?[\\\s]/.test(spec.value))
@@ -12423,11 +12440,22 @@ function branchHead(dir) {
   const defaults = new Set(["main", "master"]);
   for (const remote of remotes.value.split(`
 `).filter(Boolean)) {
-    const ref = gitText(dir, ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`], "the remote's default branch");
-    if (!ref.unknown)
-      defaults.add(ref.value.trim().slice(remote.length + 1).toLowerCase());
+    const ref = remoteDefault(dir, remote);
+    if (ref)
+      defaults.add(ref);
   }
   return !defaults.has(name);
+}
+function remoteDefault(dir, remote) {
+  const local = gitText(dir, ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`], "the remote's default branch");
+  if (local.unknown)
+    return;
+  const name = local.value.trim().slice(remote.length + 1).toLowerCase();
+  if (name === "main" || name === "master")
+    return name;
+  const url = gitText(dir, ["config", "--get", `remote.${remote}.url`], "the remote's URL");
+  const remoteHead = url.unknown ? null : liveDefault(dir, remote);
+  return remoteHead ? remoteHead.toLowerCase() : name;
 }
 async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
   const { flags, positionals } = parseFlags(rest, takes);

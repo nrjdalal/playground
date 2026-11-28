@@ -33,7 +33,7 @@ export const USAGE = `Usage:
   roster.ts who <kind>                              (prints the name holding a manager kind's seat; writes nothing)
   roster.ts who dispatcher [1|2]                    (prints the dispatcher in slot 1, Alpha, by default, or 2, Bravo; writes nothing)
   roster.ts who assistant                           (prints the live session the roster gives the assistant kind, else exits 1; writes nothing)
-  roster.ts holders <pr>                            (prints each live row naming the PR, number or URL, in pr or prs, else exits 1, and exits 2 on a roster that does not read; writes nothing)
+  roster.ts holders <pr>                            (prints each live row naming the PR in pr or prs, else exits 1, and exits 2 on a roster that does not read; writes nothing; a URL names one repo's PR, a bare number or #<n> that PR number on every repo)
 A checker's prs list holds every PR it serves, so auto-end keeps it while one is open: prs=<pr>,<pr> sets it, prs+=<pr> adds one, prs-=<pr> removes one, and a prs-= of the row's own pr clears pr too, so holders stops naming it and an assign has nothing to re-add; a PR not yet opened goes in as its issue's URL, and an extension item as <scope>/<kind>/<key>, which assign's item= sets as the row's item and adds to prs (pr= adds it to prs alone); a checker whose row holds a pr or item takes worker= and pr= (or item=) together on assign, pr= naming an open pull request, and a checker whose worker is unset or ended takes a new PR only through that assign with a live worker=.
 Times always come from the UTC clock; titles are capped at 40 chars.`
 
@@ -484,6 +484,13 @@ function checkTarget(pairs: [string, string][]): void {
     )
 }
 
+// a starting row's first report, a report or a set of eta= or lastReport=, shows its session has begun, so it reads working with no separate assign; a status the call gives wins
+function begun(entry: Agent, pairs: [string, string][], reported: boolean): void {
+  if (entry.status !== "starting" || pairs.some(([k]) => k === "status")) return
+  if (reported || pairs.some(([k, v]) => (k === "eta" || k === "lastReport") && v !== ""))
+    entry.status = "working"
+}
+
 // a call that parks a row, or clears a parked row's hold, leaves it holding one, so the sweep can tell its lead once the wait ends; a call that moves it off parked drops its hold, so a later park names a fresh one, and a hold named on a row the call leaves not parked is refused, so the caller sees why it would not stay. A row parked before this check keeps taking writes that leave its park alone.
 function parkHold(entry: Agent, pairs: [string, string][], moved: boolean): void {
   const touched = moved || pairs.some(([k]) => k === "status" || k === "hold")
@@ -551,12 +558,9 @@ function checkRetask(
 async function holders(pr: string | undefined, rest: string[]): Promise<void> {
   if (!pr || rest.length || (!/^#?[1-9]\d*$/.test(pr) && !PR_URL_RE.test(pr)))
     throw new Refusal("roster.ts: holders takes one PR, its number or its URL", 2)
-  const repo = PR_URL_RE.test(pr)
-    ? ""
-    : await factoryRepoOf().catch((error: Error) => {
-        throw new Refusal(`roster.ts: ${error.message}`, 2)
-      })
-  const url = prUrl(pr, repo)
+  // a bare number counts that PR on every repo, since a checker's row can hold an extension repo's PR and a miss reads as free
+  const n = /^#?([1-9]\d*)$/.exec(pr)?.[1]
+  const holds = (u: string) => (n ? u.endsWith(`/pull/${n}`) : u === pr)
   const agents = await Bun.file(path)
     .json()
     .then((r: Roster) => (Array.isArray(r?.agents) ? r.agents : null))
@@ -567,10 +571,11 @@ async function holders(pr: string | undefined, rest: string[]): Promise<void> {
     .filter(
       (a) =>
         STATUSES.live.includes(String(a.status)) &&
-        rowPullRequests({ pr: a.pr, prs: a.prs }).includes(url),
+        rowPullRequests({ pr: a.pr, prs: a.prs }).some(holds),
     )
     .map((a) => a.name)
-  if (!names.length) throw new Refusal(`roster.ts: no live row holds ${url}`, 1)
+  if (!names.length)
+    throw new Refusal(`roster.ts: no live row holds ${n ? `a PR #${n} on any repo` : pr}`, 1)
   console.log(names.join("\n"))
 }
 
@@ -641,6 +646,7 @@ async function main(argv: string[]): Promise<void> {
           1,
         )
       apply(entry, pairs, factoryRepo)
+      begun(entry, pairs, false)
       // a prs+= of the same PR later in the call puts it back on purpose, so only what the call left removed is read back
       withdrawn = withdrawn.filter(
         (pr) => entry.pr !== pr && !((entry.prs as string[] | undefined) ?? []).includes(pr),
@@ -656,6 +662,7 @@ async function main(argv: string[]): Promise<void> {
       entry.lastReport = text
       entry.lastReportAt = now()
       apply(entry, pairs, factoryRepo)
+      begun(entry, pairs, true)
       parkHold(entry, pairs, false)
     } else if (cmd === "assign") {
       const [title, task, ...more] = rest

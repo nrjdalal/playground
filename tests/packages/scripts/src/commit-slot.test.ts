@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { isBuild, replays, slotted } from "../../../../packages/scripts/src/commit-slot"
+import { dryRun, replays, slotted } from "../../../../packages/scripts/src/commit-slot"
 import { scratchEnv } from "../../../scratch-env"
 
 const SCRIPT = join(import.meta.dir, "../../../../packages/scripts/src/commit-slot.ts")
@@ -94,10 +94,21 @@ describe("slotted", () => {
   })
 })
 
-test("isBuild names the build alone, the one step turbo's cache speaks for", () => {
-  expect(isBuild(["bun", "run", "build"])).toBe(true)
-  expect(isBuild(["bun", "run", "check-types:tests"])).toBe(false)
-  expect(isBuild(["bun", "run", "--cwd", "packages/scripts", "check-types"])).toBe(false)
+test("dryRun names the turbo dry run of each build step, the steps turbo's cache speaks for, and none for a type check", () => {
+  const DRY = ["bun", "run", "turbo", "run", "build", "--dry=json"]
+  expect(dryRun(["bun", "run", "build"])).toEqual(DRY)
+  expect(
+    dryRun([
+      "bunx",
+      "turbo",
+      "run",
+      "build",
+      "--filter=@packages/env",
+      "--output-logs=errors-only",
+    ]),
+  ).toEqual([...DRY, "--filter=@packages/env"])
+  expect(dryRun(["bun", "run", "check-types:tests"])).toBeNull()
+  expect(dryRun(["bun", "run", "--cwd", "packages/scripts", "check-types"])).toBeNull()
 })
 
 describe("replays", () => {
@@ -176,7 +187,7 @@ describe("commit-slot.ts", () => {
     writeFileSync(join(worktree, "package.json"), JSON.stringify({ scripts: { build: "echo hi" } }))
     writeFileSync(
       join(worktree, "node_modules/.bin/turbo"),
-      `#!/bin/sh\necho "$@" > '${seen}'\necho '${out}'\nexit ${code}\n`,
+      `#!/bin/sh\necho "$@" >> '${seen}'\necho '${out}'\nexit ${code}\n`,
     )
     chmodSync(join(worktree, "node_modules/.bin/turbo"), 0o755)
     const slot = join(DIR, "seen-slot")
@@ -214,6 +225,31 @@ describe("commit-slot.ts", () => {
   test("hands the step to run-slot.sh as commit-<worktree> when one build task misses the cache", () => {
     const { result, slot } = turbo(dry("HIT", "MISS"), () => run(["bun", "run", "build"]))
     expect(slot).toBe("commit-wt-one -- bun run build\n")
+    expect(result.exitCode).toBe(7)
+  })
+
+  const ENV_BUILD = [
+    "bunx",
+    "turbo",
+    "run",
+    "build",
+    "--filter=@packages/env",
+    "--output-logs=errors-only",
+  ]
+
+  test("runs env-keys' build of @packages/env bare when turbo's dry run of that filter finds every task cached", () => {
+    const { asked, result, slot } = turbo(dry("HIT"), () => run(ENV_BUILD))
+    expect(asked).toBe(
+      "run build --dry=json --filter=@packages/env\nrun build --filter=@packages/env --output-logs=errors-only\n",
+    )
+    expect(slot).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+  })
+
+  test("hands env-keys' build of @packages/env to run-slot.sh when its task misses the cache", () => {
+    const { asked, result, slot } = turbo(dry("MISS"), () => run(ENV_BUILD))
+    expect(asked).toBe("run build --dry=json --filter=@packages/env\n")
+    expect(slot).toBe(`commit-wt-one -- ${ENV_BUILD.join(" ")}\n`)
     expect(result.exitCode).toBe(7)
   })
 

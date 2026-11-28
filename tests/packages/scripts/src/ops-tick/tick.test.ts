@@ -677,6 +677,8 @@ describe("sweep", () => {
       join(ops, "..", "roster.json"),
       JSON.stringify({
         agents: [
+          { name: OLD.builder, status: "working" },
+          { name: OLD.ops, status: "working" },
           { name: "worker-x", status: "working" },
           { name: OLD.planner },
           { name: "reviewer-q", worker: OLD.ops },
@@ -839,12 +841,14 @@ describe("sweep", () => {
 })
 
 describe("switch watch, in the tick", () => {
-  // usage.json reading that account, in a data folder whose policy sets usage.switchAccount to switch@, and a roster seating both dispatchers unless `second` is false.
+  // usage.json reading that account, in a data folder whose policy sets usage.switchAccount to switch@, and a roster seating both dispatchers unless `second` is false, and both leads.
   const usage = (ops: string, account: string, used: number, second = true) => {
     storeWith(join(ops, ".."), {}, { "usage.switchAccount": "switch@example.test" })
     const agents = [
       { kind: "dispatcher", name: OLD.dispatcher, status: "working" },
       { kind: "dispatcher", name: `${OLD.dispatcher}-2`, status: second ? "working" : "ended" },
+      { kind: "builder", name: OLD.builder, status: "working" },
+      { kind: "ops", name: OLD.ops, status: "working" },
     ]
     writeFileSync(join(ops, "..", "roster.json"), JSON.stringify({ agents }))
     writeFileSync(
@@ -1147,14 +1151,172 @@ describe("the beats that send no line", () => {
   })
 })
 
+// The roster beside a scratch ops folder, holding these rows.
+const rosterAt = (ops: string, agents: Record<string, unknown>[]) =>
+  writeFileSync(join(ops, "..", "roster.json"), JSON.stringify({ agents }))
+
+// A time as the beats write one, in UTC to the second.
+const isoAt = (when: Date) => when.toISOString().replace(/\.\d{3}Z$/, "Z")
+
 describe("the optimizer's beats", () => {
+  const OPTIMIZER = { kind: "optimizer", name: "k3v9q2-optimizer", status: "working" }
+
   test.each([
     ["optimizer-tick", "optimizer tick"],
     ["optimizer-daily", "optimizer daily"],
-  ])("%s sends its words to the optimizer", async (name, words) => {
-    const { ctx, sent } = fake(scratch(), at(14, 7))
-    await beat(name).run(ctx)
-    expect(sent).toEqual([{ text: words, to: "optimizer" }])
+  ])(
+    "%s sends its words to a live optimizer, and no line to the dispatcher",
+    async (name, words) => {
+      const ops = scratch()
+      rosterAt(ops, [OPTIMIZER])
+      const { ctx, sent } = fake(ops, at(14, 7))
+      await beat(name).run(ctx)
+      expect(sent).toEqual([{ text: words, to: "optimizer" }])
+    },
+  )
+
+  // the Optimizer had no session for about 12 days, and every beat to it reached no one (#3199)
+  const run = (ctx: Context, beats = [beat("optimizer-tick")]) =>
+    Promise.all(cycle(ctx, runner({ log: () => {} }), beats))
+  const downLine = (kind: string, since: Date, missed: number) => ({
+    text: `the ${kind} seat has no live session since ${isoAt(since)}; ${missed} beats missed; start it with playground ${kind}`,
+    to: "dispatcher",
+  })
+
+  test("with no live optimizer row, the first beat tells the dispatcher once and the next tells no one; after the seat is live and down again, the next beat tells it again", async () => {
+    const ops = scratch()
+    rosterAt(ops, [{ ...OPTIMIZER, status: "ended" }])
+    const first = fake(ops, at(14, 7))
+    await run(first.ctx)
+    expect(first.sent).toEqual([downLine("optimizer", at(14, 7), 1)])
+    const second = fake(ops, at(16, 7))
+    await run(second.ctx)
+    expect(second.sent).toEqual([])
+    rosterAt(ops, [OPTIMIZER])
+    const live = fake(ops, at(18, 7))
+    await run(live.ctx)
+    expect(live.sent).toEqual([{ text: "optimizer tick", to: "optimizer" }])
+    rosterAt(ops, [{ ...OPTIMIZER, status: "ended" }])
+    const again = fake(ops, at(20, 7))
+    await run(again.ctx)
+    expect(again.sent).toEqual([downLine("optimizer", at(20, 7), 1)])
+  })
+
+  test("a roster that does not read mid-outage sends the line as before and keeps the outage, so the dispatcher is not told again", async () => {
+    const ops = scratch()
+    rosterAt(ops, [{ ...OPTIMIZER, status: "ended" }])
+    await run(fake(ops, at(14, 7)).ctx)
+    writeFileSync(join(ops, "..", "roster.json"), "{ not json")
+    const unread = fake(ops, at(16, 7))
+    await run(unread.ctx)
+    expect(unread.sent).toEqual([{ text: "optimizer tick", to: "optimizer" }])
+    rosterAt(ops, [{ ...OPTIMIZER, status: "ended" }])
+    const after = fake(ops, at(18, 7))
+    await run(after.ctx)
+    expect(after.sent).toEqual([])
+  })
+
+  test("a dispatcher line that fails goes at the next beat, counting each beat missed", async () => {
+    const ops = scratch()
+    rosterAt(ops, [])
+    await run(fake(ops, at(14, 7), {}, ["no live session"]).ctx)
+    const next = fake(ops, at(16, 7))
+    await run(next.ctx)
+    expect(next.sent).toEqual([downLine("optimizer", at(14, 7), 2)])
+  })
+
+  test("a beat's line to any other seat takes the same check: a down planner's goes nowhere and tells the dispatcher once, a live one's goes", async () => {
+    const ops = scratch()
+    const PLANNER = { kind: "planner", name: "k3v9q2-planner", status: "ended" }
+    rosterAt(ops, [PLANNER])
+    const toPlanner = {
+      cron: "* * * * *",
+      name: "to-planner",
+      run: async (ctx: Context) => {
+        await ctx.send("planner", "first")
+        await ctx.send("planner", "second")
+      },
+      to: "planner",
+    }
+    const down = fake(ops, at(14, 7))
+    await run(down.ctx, [toPlanner])
+    expect(down.sent).toEqual([downLine("planner", at(14, 7), 1)])
+    rosterAt(ops, [{ ...PLANNER, status: "working" }])
+    const live = fake(ops, at(14, 8))
+    await run(live.ctx, [toPlanner])
+    expect(live.sent).toEqual([
+      { text: "first", to: "planner" },
+      { text: "second", to: "planner" },
+    ])
+  })
+})
+
+// a lead's sweep stopped and went unseen for about 11 days (#3199)
+describe("a lead's stale sweep, in the tick", () => {
+  const BUILDER = { kind: "builder", name: "k3v9q2-builder", status: "working" }
+  const quiet = { ...QUIET_LOAD, "week-marks.py": "acme@example.com: week 40%" }
+  // the lead's sweep cursor, last written minutes before now
+  const sweptAt = (ops: string, lead: string, now: Date, minutes: number) => {
+    const file = join(ops, "..", "sweep", `${lead}.json`)
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, "{}")
+    const when = new Date(now.getTime() - minutes * 60_000)
+    utimesSync(file, when, when)
+    return when
+  }
+  const line = (when: Date) =>
+    `your sweep has not run since ${isoAt(when)}; re-create it by SESSIONS.md Keep the sweep running`
+
+  test("46 minutes old tells the lead, 76 the dispatcher, later ticks no one, and a fresh write then a new gap tells the lead again", async () => {
+    const ops = scratch()
+    rosterAt(ops, [BUILDER])
+    const now = at(13, 18)
+    const when = sweptAt(ops, BUILDER.name, now, 46)
+    const first = fake(ops, now, quiet)
+    await beat("tick").run(first.ctx)
+    expect(first.sent).toEqual([{ text: line(when), to: BUILDER.name }])
+    const later = new Date(now.getTime() + 30 * 60_000)
+    const second = fake(ops, later, quiet)
+    await beat("tick").run(second.ctx)
+    expect(second.sent).toEqual([{ text: line(when), to: "dispatcher" }])
+    const third = fake(ops, new Date(later.getTime() + 14 * 60_000), quiet)
+    await beat("tick").run(third.ctx)
+    expect(third.sent).toEqual([])
+    const fresh = new Date(later.getTime() + 30 * 60_000)
+    sweptAt(ops, BUILDER.name, fresh, 0)
+    const written = fake(ops, fresh, quiet)
+    await beat("tick").run(written.ctx)
+    expect(written.sent).toEqual([])
+    const gap = new Date(fresh.getTime() + 46 * 60_000)
+    const fourth = fake(ops, gap, quiet)
+    await beat("tick").run(fourth.ctx)
+    expect(fourth.sent).toEqual([{ text: line(fresh), to: BUILDER.name }])
+  })
+
+  test("Ops' stale sweep says nothing while its sweep hold stands, since Ops paused it on purpose", async () => {
+    const ops = scratch()
+    const OPS = { kind: "ops", name: "k3v9q2-ops", status: "working" }
+    rosterAt(ops, [OPS])
+    const now = at(13, 18)
+    writeFileSync(join(ops, "sweep-hold-until"), isoAt(new Date(now.getTime() + 3 * 3_600_000)))
+    sweptAt(ops, OPS.name, now, 46)
+    const first = fake(ops, now, quiet)
+    await beat("tick").run(first.ctx)
+    expect(first.sent).toEqual([])
+    const later = fake(ops, new Date(now.getTime() + 30 * 60_000), quiet)
+    await beat("tick").run(later.ctx)
+    expect(later.sent).toEqual([])
+  })
+
+  test("a lead whose file is fresh, or whose row is not live, hears nothing", async () => {
+    const ops = scratch()
+    const now = at(13, 18)
+    rosterAt(ops, [BUILDER, { kind: "ops", name: "k3v9q2-ops", status: "ended" }])
+    sweptAt(ops, BUILDER.name, now, 10)
+    sweptAt(ops, "k3v9q2-ops", now, 120)
+    const { ctx, sent } = fake(ops, now, quiet)
+    await beat("tick").run(ctx)
+    expect(sent).toEqual([])
   })
 })
 
@@ -2272,6 +2434,7 @@ describe("the focus card", () => {
       "/repo",
       "ask",
       "open",
+      "--awake",
       "--since",
       "2026-10-19T08:00:00.000Z",
       "--until",
@@ -2298,12 +2461,52 @@ describe("the focus card", () => {
         "--by",
         OLD.ops,
         "--note",
-        "Everything that came in while focus stood is answered",
+        "Everything that came in while focus stood is answered or put away",
       ],
     ])
     const after = fake(ops, new Date("2026-10-19T09:15:00.000Z"))
     await beat("focus-card").run(after.ctx)
     expect(after.runs).toEqual([])
+  })
+
+  // PG-3174: an item the owner archived or put off with Later still printed in ask open, so the card never resolved while one stood in its window
+  test("resolves once the only items left in its window are archived or put off, and stays while one there is awake (PG-3174)", async () => {
+    const ops = scratch()
+    writeFileSync(
+      join(ops, "..", "roster.json"),
+      JSON.stringify({ agents: [{ kind: "ops", name: OLD.ops, role: "manager" }] }),
+    )
+    writeFileSync(
+      join(ops, "..", "focus.json"),
+      JSON.stringify({
+        reason: "a timed demo",
+        session: "worker-f",
+        since: "2026-10-19T08:00:00.000Z",
+        until: "2026-10-19T09:00:00.000Z",
+      }),
+    )
+    await beat("focus-card").run(fake(ops, new Date("2026-10-19T09:00:30.000Z"), ASKED).ctx)
+    // plain ask open still prints the put-away items, with their view; --awake prints only an awake one
+    const putAway =
+      "#i602 decision from worker-q · Archive the made-up note? · archived 2026-10-19T08:30:00.000Z\n#i603 decision from worker-q · Snooze the made-up check? · later until 2026-10-20T08:00:00.000Z\n"
+    const awake = fake(ops, new Date("2026-10-19T09:05:00.000Z"), {
+      "ask open --awake": "#i604 decision from worker-q · Ship the made-up fix?\n",
+      "ask open": `${putAway}#i604 decision from worker-q · Ship the made-up fix?\n`,
+    })
+    await beat("focus-card").run(awake.ctx)
+    expect(awake.runs.map((argv) => argv.slice(5, 8))).toEqual([["ask", "open", "--awake"]])
+    const putAwayOnly = fake(ops, new Date("2026-10-19T09:10:00.000Z"), {
+      "ask open --awake": "",
+      "ask open": putAway,
+    })
+    await beat("focus-card").run(putAwayOnly.ctx)
+    expect(putAwayOnly.runs.map((argv) => argv.slice(5, 7))).toEqual([
+      ["ask", "open"],
+      ["ask", "resolve"],
+    ])
+    expect(putAwayOnly.runs[1]!.at(-1)).toBe(
+      "Everything that came in while focus stood is answered or put away",
+    )
   })
 
   // PG-1349 round 1: a kept card that had resolved stayed after a later card failed, and every beat after threw on it, so no new card posted

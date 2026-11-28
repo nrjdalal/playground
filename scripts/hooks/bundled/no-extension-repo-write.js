@@ -44,8 +44,8 @@ var applyEnvAliases = (env = process.env) => {
 applyEnvAliases();
 
 // scripts/hooks/no-extension-repo-write.ts
-import { existsSync as existsSync3 } from "fs";
-import { join as join7 } from "path";
+import { existsSync as existsSync3, statSync as statSync3 } from "fs";
+import { join as join8 } from "path";
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
@@ -144,7 +144,7 @@ var SEATLESS = new Set(["ended", "parked"]);
 import { AsyncLocalStorage } from "async_hooks";
 var budget = new AsyncLocalStorage;
 function withLiveBudget(body, ms = 6000) {
-  return budget.getStore() ? body() : budget.run({ reads: new Map, until: performance.now() + ms }, body);
+  return budget.getStore() ? body() : budget.run({ heads: new Map, reads: new Map, until: performance.now() + ms }, body);
 }
 var run = (at, args, env, timeout) => {
   const proc = Bun.spawnSync(["git", "-C", at, ...args], {
@@ -157,11 +157,7 @@ var run = (at, args, env, timeout) => {
   return { ok: proc.exitCode === 0, out: proc.stdout.toString() };
 };
 function liveHeads(at, remote, timeout) {
-  const command = process.env.GIT_SSH_COMMAND || run(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
-  const env = { GIT_TERMINAL_PROMPT: "0" };
-  if (command)
-    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
-  const live = run(at, ["ls-remote", "--heads", "--", remote], env, timeout);
+  const live = run(at, ["ls-remote", "--heads", "--", remote], quiet(at), timeout);
   if (!live.ok)
     return null;
   const tips = [];
@@ -172,6 +168,27 @@ function liveHeads(at, remote, timeout) {
       tips.push({ ref: `${remote}/${name.slice("refs/heads/".length)}`, sha });
   }
   return tips;
+}
+function quiet(at) {
+  const command = process.env.GIT_SSH_COMMAND || run(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
+  const env = { GIT_TERMINAL_PROMPT: "0" };
+  if (command)
+    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
+  return env;
+}
+function liveDefault(at, remote, timeout = 5000) {
+  const call = budget.getStore();
+  const key = `${at}\x00${remote}`;
+  const had = call?.heads.get(key);
+  if (had !== undefined)
+    return had;
+  if (call)
+    call.headsUntil ??= Math.min(call.until, performance.now() + timeout);
+  const left = call ? Math.floor(call.headsUntil - performance.now()) : timeout;
+  const live = left > 0 ? run(at, ["ls-remote", "--symref", "--", remote, "HEAD"], quiet(at), left) : undefined;
+  const head = live?.ok && /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(live.out)?.[1] || null;
+  call?.heads.set(key, head);
+  return head;
 }
 function present(at, tips) {
   if (!tips.length)
@@ -370,7 +387,7 @@ async function input(name, kind, deadline = DEADLINE) {
 
 // scripts/hooks/no-playground-leak.ts
 import { AsyncLocalStorage as AsyncLocalStorage3 } from "async_hooks";
-import { basename as basename3, join as join6 } from "path";
+import { basename as basename3, join as join7 } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
@@ -9937,7 +9954,7 @@ var REF_MOVE = /\b(?:createCommitOnBranch|createRef|deleteRef|mergeBranch|mergeP
 var REF_MUTATION = new RegExp(`${REF_MOVE.source}|\\bcreatePullRequest\\b`);
 
 // packages/scripts/src/playground/setting.ts
-import { resolve as resolve3 } from "path";
+import { join as join6, resolve as resolve3 } from "path";
 
 // packages/settings/src/accounts.ts
 var email2 = string2().email();
@@ -11388,7 +11405,7 @@ function chipsSigned(blocks, signature) {
   return opensLine && text.split(`
 `).at(-1)?.trim() === signature.replace(/^_(.*)_$/, "$1");
 }
-var CHECKOUT2 = join6(__CHECKOUT + "/scripts/hooks", "..", "..");
+var CHECKOUT2 = join7(__CHECKOUT + "/scripts/hooks", "..", "..");
 var REPHRASE = "Say it without the term: name the work, not who did it or how it is run.";
 var READABLE = `Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md, or -F /abs/msg.md for a commit). ${NOT_RUN}`;
 var MCP_READABLE = "Pass the input as an object whose fields are strings.";
@@ -12315,9 +12332,9 @@ function branchOnly(flags, positionals, dir) {
     if (config.unknown || config.value.split(`
 `).some((line) => line.startsWith(`remote.${remote.value}.push=`)))
       return false;
-    const head = gitText(dir, ["symbolic-ref", "--short", `refs/remotes/${remote.value}/HEAD`], "the remote's default branch");
-    if (!head.unknown)
-      defaults.add(head.value.trim().slice(remote.value.length + 1).toLowerCase());
+    const head = remoteDefault(dir, remote.value);
+    if (head)
+      defaults.add(head);
   }
   return specs.every((spec) => {
     if (unreadable(spec) || /[*?[\\\s]/.test(spec.value))
@@ -12345,11 +12362,22 @@ function branchHead(dir) {
   const defaults = new Set(["main", "master"]);
   for (const remote of remotes.value.split(`
 `).filter(Boolean)) {
-    const ref = gitText(dir, ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`], "the remote's default branch");
-    if (!ref.unknown)
-      defaults.add(ref.value.trim().slice(remote.length + 1).toLowerCase());
+    const ref = remoteDefault(dir, remote);
+    if (ref)
+      defaults.add(ref);
   }
   return !defaults.has(name);
+}
+function remoteDefault(dir, remote) {
+  const local = gitText(dir, ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`], "the remote's default branch");
+  if (local.unknown)
+    return;
+  const name = local.value.trim().slice(remote.length + 1).toLowerCase();
+  if (name === "main" || name === "master")
+    return name;
+  const url = gitText(dir, ["config", "--get", `remote.${remote}.url`], "the remote's URL");
+  const remoteHead = url.unknown ? null : liveDefault(dir, remote);
+  return remoteHead ? remoteHead.toLowerCase() : name;
 }
 async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
   const { flags, positionals } = parseFlags(rest, takes);
@@ -12572,6 +12600,18 @@ var GUARD = "no-extension-repo-write";
 var OWNER_ROUTE = "Only the owner changes one, typing the command as a ! command in the dispatcher's terminal window: tell your lead what it should do, and the dispatcher hands the owner the command.";
 var REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 var decoded = (text) => text.replace(/%([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)));
+var origins2 = new Map;
+function originUrl(config) {
+  const mtime = existsSync3(config) ? statSync3(config).mtimeMs : -1;
+  const known = origins2.get(config);
+  if (known?.mtime === mtime)
+    return known.url;
+  const url = Bun.spawnSync(["git", "config", "--file", config, "--get", "remote.origin.url"], {
+    stderr: "ignore"
+  }).stdout.toString();
+  origins2.set(config, { mtime, url });
+  return url;
+}
 function guardedRepos(data, values, environment) {
   const given = values["ext.repos"];
   const named = new Map;
@@ -12583,11 +12623,7 @@ function guardedRepos(data, values, environment) {
   const repos = new Set(named.values());
   const scopes = scopesIn(data);
   for (const scope of scopes) {
-    const config = join7(extensionsDir(data), scope, ".git", "config");
-    const url = Bun.spawnSync(["git", "config", "--file", config, "--get", "remote.origin.url"], {
-      stderr: "ignore"
-    });
-    const repo = remoteRepo(url.stdout.toString());
+    const repo = remoteRepo(originUrl(join8(extensionsDir(data), scope, ".git", "config")));
     if (repo)
       repos.add(`${repo.owner}/${repo.repo}`.toLowerCase());
   }
@@ -12658,5 +12694,6 @@ if (import.meta.main) {
 }
 export {
   check,
-  guardedRepos
+  guardedRepos,
+  originUrl
 };
