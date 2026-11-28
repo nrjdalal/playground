@@ -2,7 +2,7 @@
 // idle_sessions.ts [hours]: live sessions that run with nothing to do, with each one's measured Claude spend over the last N hours (default 1).
 // Ported from ~/.playground/ops/optimizer/idle_sessions.py; a session's PRs are its roster pr and prs list, its worker's, every open one on its branch and every one its transcript links, so a checker serving a second PR is never listed while that one is open.
 // Flags, from Claude's session registry (live pid, status, statusUpdatedAt), roster.json and GitHub REST reads per PR (an open PR cached 5 minutes, a merged or closed one for good):
-// Every flag needs 10+ minutes not busy, so a session finishing a step is never listed. ops-tick's auto-end beat ends what auto_end.ts takes of it.
+// Every flag needs 10+ minutes not busy, so a session finishing a step is never listed, but checker-pr-done on a checker whose status reads `idle`, which messages keep waking. ops-tick's auto-end beat ends what auto_end.ts takes of it.
 //   checker-worker-gone  a reviewer or tester whose worker has no live session and is not coming back (comingBack), with no open PR a live worker serves among its PRs
 //   checker-pr-done      a reviewer or tester whose PRs are all merged or closed
 //   checker-nothing      a reviewer or tester not busy for 30+ minutes whose every PR head carries its verdict or is closed
@@ -223,13 +223,16 @@ export async function collect(input: CollectInput): Promise<Row[]> {
     const status = d.status || "?"
     if (status === "busy") continue
     const quiet = (now - (d.statusUpdatedAt || d.updatedAt || now * 1000) / 1000) / 60
-    if (!Number.isFinite(quiet) || quiet < 10) continue
+    if (!Number.isFinite(quiet)) continue
     const r = roster[name] ?? {}
-    const why: string[] = []
-    if (r.status && ["ended", "paused"].includes(r.status)) why.push(`roster-says-${r.status}`)
     // A checker by the roster's kind, else by its name; its worker by the roster's link, else by the sin an old reviewer-<sin> or tester-<sin> name carries, since an <id>-<kind> name carries none.
     const kind = kindOf(name, r.kind)
     const checker = kind === "reviewer" || kind === "tester"
+    // Each message to a checker wakes it and resets its quiet clock, so an idle one is read for checker-pr-done alone before 10 minutes.
+    const fresh = quiet < 10
+    if (fresh && !(checker && status === "idle")) continue
+    const why: string[] = []
+    if (r.status && ["ended", "paused"].includes(r.status)) why.push(`roster-says-${r.status}`)
     const worker = checker ? workerOf(name, r.worker) : undefined
     let refs: string[] = []
     let donePr: string | undefined
@@ -303,6 +306,7 @@ export async function collect(input: CollectInput): Promise<Row[]> {
       )
         why.push("checker-nothing (head scored)")
     }
+    if (fresh) why.splice(0, why.length, ...why.filter((w) => w.startsWith("checker-pr-done")))
     if (why.length === 0) continue
     rows.push({
       donePr,
