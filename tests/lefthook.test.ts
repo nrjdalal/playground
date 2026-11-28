@@ -1364,8 +1364,8 @@ test("the pre-commit docs-wrap step covers every docs:wrap file and runs after l
   expect(wrap!.priority as number).toBeGreaterThan(lint!.priority as number)
 })
 
-// the pre-commit build, next build included, goes through commit-slot.ts, which takes the commit slot in a worktree when turbo finds a build task with work to do; env-keys' build of @packages/env stays bare, since it ran 8s after a 829s queue wait (measured); both share one turbo cache outside every checkout
-test("the pre-commit build goes through commit-slot, which slots a build with work to do, env-keys' small build does not, and both share the turbo cache", async () => {
+// the pre-commit build, next build included, and env-keys' build of @packages/env go through commit-slot.ts, which takes the commit slot in a worktree when turbo finds a build task with work to do (PG-3188: on 27 Nov a fresh worktree's bare env build ran outside every slot); both share one turbo cache outside every checkout
+test("the pre-commit build and env-keys' build go through commit-slot, which slots a build with work to do, and both share the turbo cache", async () => {
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
     "pre-commit": { commands: Record<string, Record<string, unknown>> }
   }
@@ -1373,7 +1373,9 @@ test("the pre-commit build goes through commit-slot, which slots a build with wo
   const CACHE = 'TURBO_CACHE_DIR="${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" '
   const SLOT = "bun --no-env-file packages/scripts/src/commit-slot.ts "
   expect(String(build!.run)).toBe(`${CACHE}${SLOT}bun run build`)
-  expect(String(envKeys!.run)).toStartWith(`${CACHE}bunx turbo run build `)
+  expect(String(envKeys!.run)).toBe(
+    `${CACHE}${SLOT}bunx turbo run build --filter=@packages/env --output-logs=errors-only && bun packages/scripts/src/env-keys.ts POSTGRES_URL`,
+  )
 })
 
 // lefthook on this repo's own main-checkout step, in scratch repos under a scratch HOME: a commit in the factory's main checkout (where link-skills.sh's run-slot.sh link points) is refused whatever command made it, while one in its worktree, a plain clone of a person's own or a clone beside it goes through

@@ -5,7 +5,8 @@ Read the section for the mode you start and for each flag you pass, and the sect
 
 ## Modes
 
-- **A worker** opens its own workspace, named after it, in the Playground checkout, or in the folder `--in <dir>` names under the code root or the folder of an org `ext.links` guards, reporting to the builder, or to the session `--reports-to <session>` names when its brief reports elsewhere; **a runner** the same, reporting to ops, with no `--reports-to`.
+- **A worker** opens its own workspace, named after it, in the Playground checkout, or in the folder `--in <dir>` names under the code root or the folder of an org `ext.links` guards, reporting to the manager that ran the start (Ops, the Builder, the Planner or an orchestrator), else to the builder, or to the session `--reports-to <session>` names when its brief reports elsewhere;
+  **a runner** the same, reporting to ops, with no `--reports-to`.
   spawn.sh names each with `roster.ts who builder` and `who ops` ([ROSTER.md](ROSTER.md)), each seat's live holder, else its `sessions.names` name, so a manager respawned under a new name takes its new workers at once:
 
   ```bash
