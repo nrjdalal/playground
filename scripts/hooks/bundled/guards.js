@@ -18950,7 +18950,6 @@ if (false) {}
 
 // scripts/hooks/no-raw-delete.ts
 import { realpathSync as realpathSync6 } from "fs";
-import { homedir as homedir5 } from "os";
 import { basename as basename10, dirname as dirname10, join as join21, resolve as resolve11, sep as sep4 } from "path";
 var INSTEAD4 = "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
 var OWN_PAD = "It sits in your own scratchpad folder, where playground rm <path> moves it whole to the 7-day trash up to 2 GB, with no file limit and its node_modules not counted: run it yourself, since your lead cannot move a live session's scratchpad. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
@@ -19063,7 +19062,7 @@ async function rootsOf(cwd, session, command, environment) {
   const name = id && /-[A-Za-z]*[rR]|--rec/.test(command) ? await registryName(id, environment).catch(() => {
     return;
   }) : undefined;
-  const pad = name && /^[\w.-]+$/.test(name) ? real4(join21(environment.HOME || homedir5(), ".playground", "scratchpad", name)) : undefined;
+  const pad = name && /^[\w.-]+$/.test(name) ? real4(join21(dataDirOf(environment), "scratchpad", name)) : undefined;
   return { pad, scratch, worktree };
 }
 function inPad(args, env, { pad }) {
@@ -19971,12 +19970,12 @@ async function check24(raw, environment = process.env) {
 
 // scripts/hooks/no-raw-wa.ts
 import { realpathSync as realpathSync8 } from "fs";
-import { homedir as homedir7 } from "os";
+import { homedir as homedir6 } from "os";
 import { resolve as resolve15 } from "path";
 
 // scripts/hooks/no-roster-write.ts
 import { realpathSync as realpathSync7 } from "fs";
-import { homedir as homedir6 } from "os";
+import { homedir as homedir5 } from "os";
 import { basename as basename12, dirname as dirname11, resolve as resolve14 } from "path";
 var GUARDED2 = [
   {
@@ -20219,7 +20218,7 @@ async function judgeBash(command, cwd, environment, { file, noun, refuse }) {
     const out = [];
     for (const place of places(at))
       for (const raw of [word.value, word.value.slice(word.value.indexOf("=") + 1)]) {
-        const value = /^~(?:\/|$)/.test(raw) ? `${environment.HOME || homedir6()}${raw.slice(1)}` : raw;
+        const value = /^~(?:\/|$)/.test(raw) ? `${environment.HOME || homedir5()}${raw.slice(1)}` : raw;
         const path = value.startsWith("/") ? value : place.cwd && resolve14(place.cwd, value);
         if (path)
           out.push({ glob: !!word.glob, path });
@@ -20600,7 +20599,7 @@ async function judgeBash2(command, cwd, environment) {
         if (!word?.value)
           continue;
         for (const raw of [word.value, word.value.slice(word.value.indexOf("=") + 1)]) {
-          const value = /^~(?:\/|$)/.test(raw) ? `${homedir7()}${raw.slice(1)}` : raw;
+          const value = /^~(?:\/|$)/.test(raw) ? `${homedir6()}${raw.slice(1)}` : raw;
           const path = value.startsWith("/") ? value : place.cwd && resolve15(place.cwd, value);
           if (!path)
             continue;

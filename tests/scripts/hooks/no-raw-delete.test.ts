@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { boxEnv } from "../../../packages/scripts/src/box-env"
 import { check } from "../../../scripts/hooks/no-raw-delete"
 import { NEVER_MADE } from "./fixtures/refused-forms"
 
@@ -206,7 +207,7 @@ describe("a recursive rm in the caller's own data-folder scratchpad names playgr
   const pads = join(home, ".playground", "scratchpad")
   const own = join(pads, "k3v9q2-worker")
   mkdirSync(join(own, "clone"), { recursive: true })
-  const env = { ...process.env, CLAUDE_CONFIG_DIR: config, HOME: home }
+  const env = boxEnv(home, { CLAUDE_CONFIG_DIR: config })
   const OWN = "moves it whole to the 7-day trash up to 2 GB, with no file limit"
   const CAP = "which takes up to 5,000 files or 2 GB"
 
@@ -231,7 +232,7 @@ describe("a recursive rm in the caller's own data-folder scratchpad names playgr
     [
       "a session the registry does not name",
       `rm -rf ${own}/clone`,
-      { ...env, CLAUDE_CONFIG_DIR: join(home, "none") },
+      boxEnv(home, { CLAUDE_CONFIG_DIR: join(home, "none") }),
     ],
     ["a worktree's folder", "rm -rf node_modules", env],
   ] as const)("%s keeps the trash's cap and the lead's cleanup", async (_case, command, at) => {

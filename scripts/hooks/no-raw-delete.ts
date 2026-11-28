@@ -1,9 +1,9 @@
 // PreToolUse hook, acting for every session and sub-agent: refuses a recursive delete, an option that deletes the files a program reads, and the calls that strip a file's delete protection, since a recursive delete is final and a prompt line against one does not hold (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders), and names playground rm, which moves a path into a 7-day trash. A speed bump: a script file a session writes and runs passes it.
 
 import { realpathSync } from "node:fs"
-import { homedir } from "node:os"
 import { basename, dirname, join, resolve, sep } from "node:path"
 
+import { dataDirOf } from "../../packages/env/src/data-dir"
 import { input } from "./input"
 import { gitCommand } from "./no-stash"
 import { registryName } from "./role"
@@ -214,7 +214,7 @@ async function rootsOf(
       : undefined
   const pad =
     name && /^[\w.-]+$/.test(name)
-      ? real(join(environment.HOME || homedir(), ".playground", "scratchpad", name))
+      ? real(join(dataDirOf(environment), "scratchpad", name))
       : undefined
   return { pad, scratch, worktree }
 }
