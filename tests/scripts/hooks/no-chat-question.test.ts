@@ -423,6 +423,113 @@ describe("what passes", () => {
     expect(await stop(last)).toBeUndefined()
   })
 
+  // a lead's stop was refused three turns in a row on a status line after its card was approved, each asking him nothing (PG-3213)
+  test.each([
+    [
+      "an until clause before it yourself",
+      "The PR stays a draft until you merge it yourself.",
+      false,
+    ],
+    [
+      "nothing else from me waiting on him",
+      "There's no open question for you. #i1217 is approved and settled, and nothing else from me is waiting on you.",
+      false,
+    ],
+    [
+      "nothing of mine waiting on him",
+      "Nothing of mine is waiting on you, so I posted nothing.",
+      false,
+    ],
+    ["is waiting on you still asks", "The ship is waiting on you.", true],
+    ["then <verb> it yourself still asks", "Then merge it yourself.", true],
+    ["an until clause after an order still asks", "Don't merge until you test it yourself.", true],
+    ["hold off until still asks", "Hold off until you check it yourself.", true],
+    ["do nothing until still asks", "Do nothing until you review it yourself.", true],
+    ["wait until still asks", "Wait until you try it yourself.", true],
+    ["allowed word a", "It stays a draft until you merge it yourself.", false],
+    ["allowed word an", "It stays an unmerged draft until you merge it yourself.", false],
+    ["allowed word the", "It stays the draft until you merge it yourself.", false],
+    ["allowed word draft", "It remains draft until you merge it yourself.", false],
+    ["allowed word open", "The PR stays open until you merge it yourself.", false],
+    ["allowed word held", "It remains held until you merge it yourself.", false],
+    ["allowed word parked", "It sits parked until you merge it yourself.", false],
+    ["allowed word unmerged", "The branch stays unmerged until you merge it yourself.", false],
+    ["allowed words on and hold", "It is kept on hold until you merge it yourself.", false],
+    ["no word between", "The ship waits until you approve it yourself.", false],
+    [
+      "an off-list word between still asks",
+      "The PR stays open for review until you merge it yourself.",
+      true,
+    ],
+    [
+      "four allowed words between still ask",
+      "It stays a draft on hold until you merge it yourself.",
+      true,
+    ],
+    [
+      "four words between the status verb and until still ask",
+      "The PR stays open for code review until you merge it yourself.",
+      true,
+    ],
+    [
+      "the owner named between still asks",
+      "The PR waits on you until you merge it yourself.",
+      true,
+    ],
+    ["for you between still asks", "The PR waits for you until you merge it yourself.", true],
+    ["with you between still asks", "It stays with you until you merge it yourself.", true],
+    ["your desk between still asks", "It sits on your desk until you merge it yourself.", true],
+    [
+      "yours to merge between still asks",
+      "The PR stays yours to merge until you test it yourself.",
+      true,
+    ],
+    ["a run-on order still asks", "It stays open now merge until you check it yourself.", true],
+    [
+      "a so clause after the status verb still asks",
+      "The PR stays a draft, so don't merge until you test it yourself.",
+      true,
+    ],
+    [
+      "an and clause after a comma still asks",
+      "It stays open, and hold off until you check it yourself.",
+      true,
+    ],
+    [
+      "a then clause still asks",
+      "The ship waits for CI, then wait until you try it yourself.",
+      true,
+    ],
+    [
+      "a but clause still asks",
+      "The fix stays in, but don't ship until you test it yourself.",
+      true,
+    ],
+    [
+      "an order after a colon still asks",
+      "It remains held: don't merge until you test it yourself.",
+      true,
+    ],
+    [
+      "an and clause with no comma still asks",
+      "It stays open and hold off until you check it yourself.",
+      true,
+    ],
+    [
+      "an order after a dash still asks",
+      "It stays open - merge until you check it yourself.",
+      true,
+    ],
+    ["an or clause still asks", "It stays green or merge until you check it yourself.", true],
+    [
+      "an until clause opening a sentence still asks",
+      "Until you merge it yourself, nothing ships.",
+      true,
+    ],
+  ])("a status line asks only when it puts work on him: %s", (_name, line, asks) => {
+    expect(asksDecision(line)).toBe(asks)
+  })
+
   // 16 Nov: a lead's reports naming a done item were refused, while its real question was not (PG-2404)
   test.each([
     [
