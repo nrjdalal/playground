@@ -7,7 +7,9 @@ import {
   dispatcherOf,
   dispatcherSeatOf,
   kindOf,
+  isManagerKind,
   managerKindOfName,
+  type ManagerKind,
   managerOf,
 } from "@packages/config/kinds"
 import { purgeTrash, stripTrash } from "@packages/safe-delete"
@@ -413,6 +415,7 @@ const tick = async (ctx: Context) => {
     await ctx.send(line.includes("ALERT") ? "builder" : "dispatcher", line)
   await switchWatch(ctx)
   await settleWeekAlerts(ctx)
+  await staleSweeps(ctx)
 }
 
 // The account the switch watch reads, the one the factory moves off at a full week: usage.switchAccount in the data folder's policy, none while it is unset or the policy cannot be read.
@@ -821,6 +824,99 @@ export const idleCompact = async (ctx: Context, checkout = dashboardCheckout(ctx
 }
 
 const words = (text: string) => async (ctx: Context) => void (await ctx.send("optimizer", text))
+
+// The roster's agents, none while it cannot be read.
+const agentsOf = async (ctx: Context): Promise<unknown> =>
+  (
+    (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+      agents?: unknown
+    } | null
+  )?.agents
+
+// Pure: the session holding a manager kind's seat (managerOf, as roster.ts who reads it) while its roster row reads a live status, else undefined.
+export const liveSeat = (agents: unknown, kind: ManagerKind): string | undefined => {
+  const name = managerOf(agents, kind)
+  const row = (Array.isArray(agents) ? agents : []).findLast(
+    (a: { name?: unknown } | null) => a?.name === name,
+  ) as { status?: unknown } | undefined
+  return row && STATUSES.live.includes(String(row.status)) ? name : undefined
+}
+
+// A beat's send with every line to a manager seat (builder, ops, optimizer, planner) checked first: while the seat has no live session the line goes nowhere, and the dispatcher hears once per outage; tick/seat-down.json keeps each down seat's first beat and its count of beats missed, a beat run counting once a seat, until the seat reads live again (a roster that does not read sends every line as before and leaves the outage as it stands), each read and write chained after the last so beats running at once never lose a count.
+let seatChain: Promise<unknown> = Promise.resolve()
+export const seated = (ctx: Context): Context => {
+  const counted = new Set<string>()
+  const check = async (kind: ManagerKind): Promise<boolean> => {
+    const path = join(ctx.ops, "tick", "seat-down.json")
+    const down = ((await readJson(path).catch(() => null)) ?? {}) as Record<
+      string,
+      { missed: number; since: string; told?: boolean }
+    >
+    const agents = await agentsOf(ctx)
+    if (agents === undefined) return true
+    if (liveSeat(agents, kind)) {
+      if (down[kind]) {
+        delete down[kind]
+        await writeAtomic(path, JSON.stringify(down))
+      }
+      return true
+    }
+    const gap = (down[kind] ??= { missed: 0, since: isoSeconds(ctx.now) })
+    if (!counted.has(kind)) gap.missed += 1
+    counted.add(kind)
+    if (!gap.told)
+      gap.told = await ctx
+        .send(
+          "dispatcher",
+          `the ${kind} seat has no live session since ${gap.since}; ${gap.missed} beats missed; start it with playground ${kind}`,
+          true,
+        )
+        .catch(() => false)
+    await writeAtomic(path, JSON.stringify(down))
+    return false
+  }
+  return {
+    ...ctx,
+    send: async (to, text, again) => {
+      if (!isManagerKind(to)) return ctx.send(to, text, again)
+      const live = seatChain.then(() => check(to))
+      seatChain = live.catch(() => undefined)
+      return (await live) ? ctx.send(to, text, again) : true
+    },
+  }
+}
+
+// A live lead's sweep cursor (sweep/<lead>.json in the data folder) untouched past 45 minutes tells that lead, but Ops while its sweep hold stands (sweepHold), and 30 minutes after that line, with the file still unwritten, the dispatcher, once each per outage; tick/sweep-stale.json keeps each told lead's file time and when the lead heard, dropped once the file is written again.
+const SWEEP_STALE_MS = 45 * 60_000
+const SWEEP_ESCALATE_MS = 30 * 60_000
+const staleSweeps = async (ctx: Context) => {
+  const agents = await agentsOf(ctx)
+  const path = join(ctx.ops, "tick", "sweep-stale.json")
+  const before = JSON.stringify((await readJson(path).catch(() => null)) ?? {})
+  const told = JSON.parse(before) as Record<
+    string,
+    { dispatcher?: boolean; leadAt?: string; mtime: number }
+  >
+  const held = await sweepHold(ctx)
+  for (const kind of ["builder", "ops"] as const) {
+    const lead = liveSeat(agents, kind)
+    if (!lead) continue
+    if (kind === "ops" && held) {
+      delete told[lead]
+      continue
+    }
+    const file = await stat(join(ctx.ops, "..", "sweep", `${lead}.json`)).catch(() => null)
+    if (!file || told[lead]?.mtime !== file.mtimeMs) delete told[lead]
+    if (!file || ctx.now.getTime() - file.mtimeMs <= SWEEP_STALE_MS) continue
+    const text = `your sweep has not run since ${isoSeconds(file.mtime)}; re-create it by SESSIONS.md Keep the sweep running`
+    const mark = (told[lead] ??= { mtime: file.mtimeMs })
+    if (!mark.leadAt) {
+      if (await ctx.send(lead, text, true)) mark.leadAt = isoSeconds(ctx.now)
+    } else if (!mark.dispatcher && ctx.now.getTime() - Date.parse(mark.leadAt) >= SWEEP_ESCALATE_MS)
+      mark.dispatcher = await ctx.send("dispatcher", text, true)
+  }
+  if (JSON.stringify(told) !== before) await writeAtomic(path, JSON.stringify(told))
+}
 
 // The local models' keep beat (playground model use): each machine whose localModels.hereModel or localModels.peerModel is set gets that model back once another sits idle, or once it is down; loaded only here, since it reads the settings package.
 const modelKeep = async (ctx: Context) => {
@@ -1333,7 +1429,7 @@ export function cycle(ctx: Context, state: Runner, beats: Beat[] = BEATS): Promi
       state.log(`${b.name} catches up the run it missed at ${missed.toISOString().slice(0, 16)}Z`)
     const failed: string[] = []
     const unsent: Unsent[] = []
-    const guarded = guard(ctx, failed, unsent)
+    const guarded = guard(seated(ctx), failed, unsent)
     try {
       for (const line of state.unsent.get(b.name) ?? []) await guarded.send(line.to, line.text)
       await b.run(guarded)

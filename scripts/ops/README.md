@@ -238,6 +238,16 @@ A daily beat, one whose cron names one minute and one hour and leaves the other 
 
 Tests: `tests/packages/scripts/src/ops-tick/tick.test.ts`'s "a daily beat missed while the job was down or the Mac slept".
 
+## A seat or a sweep with no one behind it
+
+Every ops-tick line to a manager seat (`builder`, `ops`, `optimizer`, `planner`) goes there only while `roster.ts who <kind>` names a row at a live status (`scripts/roster-statuses.json`); while it names none, the line goes nowhere, and the dispatcher hears once per outage: "the <kind> seat has no live session since <iso>; <n> beats missed; start it with playground <kind>".
+That line comes again only after the seat has read live and gone down again, the outage's first beat and its count kept in `ops/tick/seat-down.json`, and a roster that does not read sends every line as before.
+The 15-minute `tick` beat reads each live lead's sweep cursor, `sweep/<lead>.json` in the data folder, and one untouched past 45 minutes tells that lead "your sweep has not run since <iso>; re-create it by SESSIONS.md Keep the sweep running".
+Ops' cursor is skipped while `ops/sweep-hold-until` stands, since Ops then slows or pauses its sweep on purpose.
+The same line goes to the dispatcher 30 minutes after the lead's while the file is still unwritten, each once per outage, kept in `ops/tick/sweep-stale.json` until the file is written again.
+
+Tests: `tests/packages/scripts/src/ops-tick/tick.test.ts`'s "the optimizer's beats" and "a lead's stale sweep, in the tick".
+
 ## runner-host
 
 The runner host is a peer machine that runs heavy runs for run-slot through `ci.sh`, so they leave this machine's run slots; GitHub's workflows run on hosted runners alone ([README's CI](../../README.md#ci)).
