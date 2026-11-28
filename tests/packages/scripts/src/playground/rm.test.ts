@@ -342,7 +342,7 @@ const afterSave = async (opts: { bytes?: number; next?: boolean } = {}) => {
       peer,
     }),
   )
-  return { cardId, deps, next, ran, seen, weights }
+  return { cardId, deps, ran, seen, weights }
 }
 
 test.each([
