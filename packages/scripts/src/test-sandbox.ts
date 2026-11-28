@@ -14,7 +14,7 @@ import { basename, isAbsolute, join, relative } from "node:path"
 import { removeScratch } from "@packages/safe-delete"
 
 import { CLOCK_EXEMPT, clockExempt } from "./clock-exempt"
-import { sandbox } from "./sandbox"
+import { sandbox, TEST_DEADLINE_MS } from "./sandbox"
 import { py } from "./test-skills"
 import { isMainCheckout, prebuildTests } from "./verify/prebuild"
 
@@ -38,14 +38,23 @@ const dropScratch = () => {
 const ahead = Boolean(process.env.CLOCK_AHEAD_DAYS)
 const clock = ahead ? [`--preload=${join(import.meta.dir, "../../../tests/clock-ahead.ts")}`] : []
 // bun's own test timeout cannot stop a test blocked in sync code (a spawnSync that never returns held a worker 29 minutes once), so the parallel pass has a deadline: each worker marks the file it holds through a preload that runs once per test file, and a pass past the deadline is killed as a group and fails naming the files still marked
-const DEADLINE_MS = Number(process.env.TEST_PARALLEL_DEADLINE_MS) || 20 * 60_000
+const DEADLINE_MS = Number(process.env.TEST_PARALLEL_DEADLINE_MS) || TEST_DEADLINE_MS
 const running = join(scratch, "running")
 mkdirSync(running)
+// every file a worker starts, one line each, so a deadline counts the files that ran and the ones that never started (PG-3254: a list of 867 cut at about 186 read as 867 run)
+const started = join(scratch, "started")
 const preload = join(scratch, "running.ts")
 writeFileSync(
   preload,
-  `import { afterAll } from "bun:test"\nimport { rmSync, writeFileSync } from "node:fs"\nconst mark = ${JSON.stringify(running)} + "/" + process.pid\nwriteFileSync(mark, Bun.main)\nafterAll(() => rmSync(mark, { force: true }))\n`,
+  `import { afterAll } from "bun:test"\nimport { appendFileSync, rmSync, writeFileSync } from "node:fs"\nconst mark = ${JSON.stringify(running)} + "/" + process.pid\nwriteFileSync(mark, Bun.main)\nappendFileSync(${JSON.stringify(started)}, Bun.main + "\\n")\nafterAll(() => rmSync(mark, { force: true }))\n`,
 )
+const startedCount = () => {
+  try {
+    return new Set(readFileSync(started, "utf8").split("\n").filter(Boolean)).size
+  } catch {
+    return 0
+  }
+}
 const held = () =>
   readdirSync(running).flatMap((pid) => {
     try {
@@ -57,7 +66,7 @@ const held = () =>
 let interrupted: NodeJS.Signals | undefined
 // each pass runs bun test in a process group of its own, which ends whole as the pass ends: a child a test left running, after it passed or bun timed it out, once spun with parent pid 1 until a reboot; sh leads the group and ends it from inside with kill 0 once bun test exits, so the signal reaches this group alone, where a pid already reaped can name a new process within a second; its trap outlives a forwarded Ctrl-C, which bun test takes, so the group still ends; on Linux the group is bwrap's, outside the pid view, so a forwarded signal ends bwrap and --die-with-parent ends the whole view at once, bun test and the trap included
 let passes = 0
-const runPass = async (argv: string[], deadline?: number) => {
+const runPass = async (argv: string[], deadline?: number, total?: number | null) => {
   const status = join(scratch, `pass-${++passes}`)
   const child = Bun.spawn(
     wrap([
@@ -93,10 +102,16 @@ const runPass = async (argv: string[], deadline?: number) => {
   process.off("SIGTERM", forward)
   if (code !== "late") return existsSync(status) ? Number(readFileSync(status, "utf8")) : code
   const files = held()
+  const ran = Math.max(startedCount(), files.length)
   stop("SIGKILL")
   await child.exited
+  const counted = total == null ? `${ran} files ran` : `${ran} of ${total} files ran`
+  const never =
+    total == null
+      ? "; a name filter leaves the total uncounted"
+      : `; ${Math.max(0, total - ran)} never started`
   console.error(
-    `test-sandbox: parallel pass passed its deadline (${Math.round(DEADLINE_MS / 1000)}s), still running: ${files.join(", ") || "no file named"}`,
+    `test-sandbox: parallel pass passed its deadline (${Math.round(DEADLINE_MS / 1000)}s): ${counted} (${ran - files.length} finished, ${files.length} still running: ${files.join(", ") || "no file named"})${never}`,
   )
   return 124
 }
@@ -290,6 +305,22 @@ if (left.length > 0)
 console.error(
   `test-sandbox: ${workers} workers with a ${Math.round(DEADLINE_MS / 1000)}s deadline, then ${serial.length} serial files`,
 )
+// the parallel pass's test files, each named file and each file of a named folder but the ones its ignore patterns leave out, or null when a name filter picks them
+const passTotal = (): number | null => {
+  const all = new Set<string>()
+  for (const arg of rest) {
+    if (arg.startsWith("-")) continue
+    const b = bare(arg)
+    if (isBunTest(b)) all.add(realpathSync(b))
+    else if (existsSync(b) && statSync(b).isDirectory())
+      for (const full of scanFolder(b).bun) {
+        const path = relative(process.cwd(), full)
+        if (!SERIAL.includes(path) && !(ahead && clockExempt(path))) all.add(realpathSync(full))
+      }
+    else return null
+  }
+  return all.size
+}
 // a flag left alone in `rest` (every path named was serial) would have bun test run the whole suite
 const named = (list: string[]) => list.some((path) => !path.startsWith("-"))
 const parallel =
@@ -306,6 +337,7 @@ const parallel =
           ...rest,
         ],
         DEADLINE_MS,
+        passTotal(),
       )
     : 0
 if (interrupted) {

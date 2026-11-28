@@ -7,7 +7,9 @@ import {
   dispatcherOf,
   dispatcherSeatOf,
   kindOf,
+  isManagerKind,
   managerKindOfName,
+  type ManagerKind,
   managerOf,
 } from "@packages/config/kinds"
 import { purgeTrash, stripTrash } from "@packages/safe-delete"
@@ -26,12 +28,13 @@ import {
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import STATUSES from "../../../../scripts/roster-statuses.json"
-import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth, KEYRING_LOCKED } from "../gh-read"
+import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth, ghDown, KEYRING_LOCKED } from "../gh-read"
 import { procSource, readBootTime, readSysctl, readUpSince } from "../ops-machine/readings"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
 import { lapse } from "../playground/priority"
 import { dashboardCheckout, NO_CHECKOUT } from "../playground/probe"
+import { REQUIRED_CHECKS } from "../pr-merge/gates"
 import { lockRootOf } from "../pr-merge/merge"
 import { ALERT_JOB, waiterLive } from "../stuck-alert"
 import { swapBundles, unswapBundles } from "../swap-bundles"
@@ -196,7 +199,7 @@ const resolveOwn = async (ctx: Context, id: string, by: string, note: string) =>
 
 type FocusCardKept = { by: string; id: string; since: string; until: string }
 
-// Once focus has ended, by off or at its end, one Inbox update under the ops manager's name names what queued while it stood (focusCard), kept in tick/focus-cards.json; a card kept at an earlier beat resolves once no ask posted while its focus stood is open, since what it pointed at is answered; a card that fails stays for the next beat, and the first failure throws once the rest are tried and the new card posted.
+// Once focus has ended, by off or at its end, one Inbox update under the ops manager's name names what queued while it stood (focusCard), kept in tick/focus-cards.json; a card kept at an earlier beat resolves once no ask posted while its focus stood is open and awake, since what it pointed at is answered or put away; a card that fails stays for the next beat, and the first failure throws once the rest are tried and the new card posted.
 const focusCardBeat = async (ctx: Context) => {
   const keptPath = join(ctx.ops, "tick", "focus-cards.json")
   const kept = ((await readJson(keptPath).catch(() => [])) ?? []) as FocusCardKept[]
@@ -299,7 +302,7 @@ export const runSlotHold = async (ctx: Context) => {
   if (JSON.stringify(told) !== before) await writeAtomic(toldPath, JSON.stringify(told))
 }
 
-// One kept focus card resolved, true, once no ask posted in its window is open; false while one is
+// One kept focus card resolved, true, once no ask posted in its window is open and awake (ask open --awake leaves out what the owner archived or put off with Later); false while one is
 const settleFocusCard = async (ctx: Context, card: FocusCardKept): Promise<boolean> => {
   const open = await ctx.run([
     "bun",
@@ -309,6 +312,7 @@ const settleFocusCard = async (ctx: Context, card: FocusCardKept): Promise<boole
     ctx.repo,
     "ask",
     "open",
+    "--awake",
     "--since",
     card.since,
     "--until",
@@ -316,7 +320,12 @@ const settleFocusCard = async (ctx: Context, card: FocusCardKept): Promise<boole
   ])
   if (open.code !== 0) throw new Error(`bun run ask open: ${lines(open.out).at(-1)}`)
   if (lines(open.out).some((line) => /^#i\d+ /.test(line.trim()))) return false
-  await resolveOwn(ctx, card.id, card.by, "Everything that came in while focus stood is answered")
+  await resolveOwn(
+    ctx,
+    card.id,
+    card.by,
+    "Everything that came in while focus stood is answered or put away",
+  )
   return true
 }
 
@@ -407,6 +416,8 @@ const tick = async (ctx: Context) => {
     await ctx.send(line.includes("ALERT") ? "builder" : "dispatcher", line)
   await switchWatch(ctx)
   await settleWeekAlerts(ctx)
+  await staleSweeps(ctx)
+  await shipDue(ctx)
 }
 
 // The account the switch watch reads, the one the factory moves off at a full week: usage.switchAccount in the data folder's policy, none while it is unset or the policy cannot be read.
@@ -815,6 +826,193 @@ export const idleCompact = async (ctx: Context, checkout = dashboardCheckout(ctx
 }
 
 const words = (text: string) => async (ctx: Context) => void (await ctx.send("optimizer", text))
+
+// The roster's agents, none while it cannot be read.
+const agentsOf = async (ctx: Context): Promise<unknown> =>
+  (
+    (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+      agents?: unknown
+    } | null
+  )?.agents
+
+// Pure: the session holding a manager kind's seat (managerOf, as roster.ts who reads it) while its roster row reads a live status, else undefined.
+export const liveSeat = (agents: unknown, kind: ManagerKind): string | undefined => {
+  const name = managerOf(agents, kind)
+  const row = (Array.isArray(agents) ? agents : []).findLast(
+    (a: { name?: unknown } | null) => a?.name === name,
+  ) as { status?: unknown } | undefined
+  return row && STATUSES.live.includes(String(row.status)) ? name : undefined
+}
+
+// A beat's send with every line to a manager seat (builder, ops, optimizer, planner) checked first: while the seat has no live session the line goes nowhere, and the dispatcher hears once per outage; tick/seat-down.json keeps each down seat's first beat and its count of beats missed, a beat run counting once a seat, until the seat reads live again (a roster that does not read sends every line as before and leaves the outage as it stands), each read and write chained after the last so beats running at once never lose a count.
+let seatChain: Promise<unknown> = Promise.resolve()
+export const seated = (ctx: Context): Context => {
+  const counted = new Set<string>()
+  const check = async (kind: ManagerKind): Promise<boolean> => {
+    const path = join(ctx.ops, "tick", "seat-down.json")
+    const down = ((await readJson(path).catch(() => null)) ?? {}) as Record<
+      string,
+      { missed: number; since: string; told?: boolean }
+    >
+    const agents = await agentsOf(ctx)
+    if (agents === undefined) return true
+    if (liveSeat(agents, kind)) {
+      if (down[kind]) {
+        delete down[kind]
+        await writeAtomic(path, JSON.stringify(down))
+      }
+      return true
+    }
+    const gap = (down[kind] ??= { missed: 0, since: isoSeconds(ctx.now) })
+    if (!counted.has(kind)) gap.missed += 1
+    counted.add(kind)
+    if (!gap.told)
+      gap.told = await ctx
+        .send(
+          "dispatcher",
+          `the ${kind} seat has no live session since ${gap.since}; ${gap.missed} beats missed; start it with playground ${kind}`,
+          true,
+        )
+        .catch(() => false)
+    await writeAtomic(path, JSON.stringify(down))
+    return false
+  }
+  return {
+    ...ctx,
+    send: async (to, text, again) => {
+      if (!isManagerKind(to)) return ctx.send(to, text, again)
+      const live = seatChain.then(() => check(to))
+      seatChain = live.catch(() => undefined)
+      return (await live) ? ctx.send(to, text, again) : true
+    },
+  }
+}
+
+// A live lead's sweep cursor (sweep/<lead>.json in the data folder) untouched past 45 minutes tells that lead, but Ops while its sweep hold stands (sweepHold), and 30 minutes after that line, with the file still unwritten, the dispatcher, once each per outage; tick/sweep-stale.json keeps each told lead's file time and when the lead heard, dropped once the file is written again.
+const SWEEP_STALE_MS = 45 * 60_000
+const SWEEP_ESCALATE_MS = 30 * 60_000
+const staleSweeps = async (ctx: Context) => {
+  const agents = await agentsOf(ctx)
+  const path = join(ctx.ops, "tick", "sweep-stale.json")
+  const before = JSON.stringify((await readJson(path).catch(() => null)) ?? {})
+  const told = JSON.parse(before) as Record<
+    string,
+    { dispatcher?: boolean; leadAt?: string; mtime: number }
+  >
+  const held = await sweepHold(ctx)
+  for (const kind of ["builder", "ops"] as const) {
+    const lead = liveSeat(agents, kind)
+    if (!lead) continue
+    if (kind === "ops" && held) {
+      delete told[lead]
+      continue
+    }
+    const file = await stat(join(ctx.ops, "..", "sweep", `${lead}.json`)).catch(() => null)
+    if (!file || told[lead]?.mtime !== file.mtimeMs) delete told[lead]
+    if (!file || ctx.now.getTime() - file.mtimeMs <= SWEEP_STALE_MS) continue
+    const text = `your sweep has not run since ${isoSeconds(file.mtime)}; re-create it by SESSIONS.md Keep the sweep running`
+    const mark = (told[lead] ??= { mtime: file.mtimeMs })
+    if (!mark.leadAt) {
+      if (await ctx.send(lead, text, true)) mark.leadAt = isoSeconds(ctx.now)
+    } else if (!mark.dispatcher && ctx.now.getTime() - Date.parse(mark.leadAt) >= SWEEP_ESCALATE_MS)
+      mark.dispatcher = await ctx.send("dispatcher", text, true)
+  }
+  if (JSON.stringify(told) !== before) await writeAtomic(path, JSON.stringify(told))
+}
+
+const SHIP_ESCALATE_MS = 60 * 60_000
+
+// A squashed subject the changelog reads as user-facing: a feat( or fix( with its PG scope; a revert counts as none.
+const USER_FACING = /^(feat|fix)\(/
+
+type ShipMark = { dispatcher?: boolean; opsAt?: string; pr: number }
+
+const ghJson = async (ctx: Context, path: string): Promise<unknown> => {
+  const read = await ctx.run(["gh", "api", path], GH_TIMEOUT_MS)
+  if (read.code !== 0) throw new Error(`gh api ${path.split("?")[0]}: ${lines(read.out).at(-1)}`)
+  return JSON.parse(read.out)
+}
+
+// What makes the open ship PR due by the release rule, or undefined while it is not: its required checks green, no merge lock held, and release.merges user-facing merges or release.hours since the first merge after the last ship.
+const dueBy = async (
+  ctx: Context,
+  slug: string,
+  head: string,
+  lockRoot: string,
+): Promise<string | undefined> => {
+  if (await stat(join(lockRoot, "merge.lock")).catch(() => null)) return
+  const runs =
+    (
+      (await ghJson(ctx, `repos/${slug}/commits/${head}/check-runs?per_page=100`)) as {
+        check_runs?: { conclusion?: string | null; id: number; name: string }[]
+      }
+    ).check_runs ?? []
+  const newest = (name: string) =>
+    runs.filter((r) => r.name === name).sort((a, b) => b.id - a.id)[0]
+  if (!REQUIRED_CHECKS.every((name) => newest(name)?.conclusion === "success")) return
+  const shipped = (
+    (await ghJson(
+      ctx,
+      `repos/${slug}/pulls?base=main&state=closed&sort=updated&direction=desc&per_page=10`,
+    )) as { merged_at?: string | null; number: number }[]
+  )
+    .filter((p) => p.merged_at)
+    .sort((a, b) => Date.parse(b.merged_at!) - Date.parse(a.merged_at!))[0]
+  const since = shipped ? Date.parse(shipped.merged_at!) : 0
+  const merges = (
+    (await ghJson(
+      ctx,
+      `repos/${slug}/commits?sha=canary&per_page=100${shipped ? `&since=${shipped.merged_at}` : ""}`,
+    )) as { commit: { committer?: { date?: string }; message: string } }[]
+  )
+    .map((c) => ({
+      at: Date.parse(c.commit.committer?.date ?? ""),
+      subject: c.commit.message.split("\n")[0]!,
+    }))
+    .filter((c) => c.at > since)
+  const read = await readPolicy(dirname(ctx.ops))
+  const settings = read.settings ?? { schemaVersion: 1 as const, values: {} }
+  const wanted = ruleSettings.get(settings, "release.merges")
+  const hours = ruleSettings.get(settings, "release.hours")
+  const after = shipped ? ` since the last ship (#${shipped.number})` : ""
+  const facing = merges.filter((c) => USER_FACING.test(c.subject)).length
+  if (facing >= wanted) return `${facing} user-facing merges have landed${after}`
+  const first = Math.min(...merges.map((c) => c.at))
+  if (merges.length && ctx.now.getTime() - first >= hours * 3_600_000)
+    return `${hours} hours of merging have passed${after}`
+}
+
+// The open ship PR from canary into main, once the release rule makes it due: one line to ops, then the same line to the dispatcher an hour later while it is still open, once per ship PR, marked in tick/ship-due.json.
+export const shipDue = async (ctx: Context, lockRoot = lockRootOf()) => {
+  const path = join(ctx.ops, "tick", "ship-due.json")
+  const before = JSON.stringify((await readJson(path).catch(() => null)) ?? null)
+  let mark = JSON.parse(before) as ShipMark | null
+  const origin = await ctx.run(["git", "-C", ctx.repo, "remote", "get-url", "origin"])
+  const slug = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\s*$/.exec(origin.out)?.[1]
+  // while the sign-in probe reads gh failed, every repeated gh read skips gh, as LIFECYCLE.md's ops-tick list says
+  if (!slug || ghDown(join(ctx.ops, "tick", "gh-auth.json"), ctx.now.getTime())) return
+  const open = (
+    (await ghJson(ctx, `repos/${slug}/pulls?base=main&state=open&per_page=10`)) as {
+      head: { ref: string; sha: string }
+      number: number
+    }[]
+  ).find((p) => p.head.ref === "canary")
+  if (!open) mark = null
+  else {
+    if (!mark || mark.pr !== open.number) mark = { pr: open.number }
+    if (!mark.opsAt) {
+      const why = await dueBy(ctx, slug, open.head.sha, lockRoot)
+      const text = `#${open.number} is due to ship: ${why}; ship it by the release skill`
+      if (why && (await ctx.send("ops", text, true))) mark.opsAt = isoSeconds(ctx.now)
+    } else if (!mark.dispatcher && ctx.now.getTime() - Date.parse(mark.opsAt) >= SHIP_ESCALATE_MS)
+      mark.dispatcher = await ctx.send(
+        "dispatcher",
+        `#${open.number} is still open an hour after Ops was told it is due to ship (${mark.opsAt})`,
+        true,
+      )
+  }
+  if (JSON.stringify(mark) !== before) await writeAtomic(path, JSON.stringify(mark))
+}
 
 // The local models' keep beat (playground model use): each machine whose localModels.hereModel or localModels.peerModel is set gets that model back once another sits idle, or once it is down; loaded only here, since it reads the settings package.
 const modelKeep = async (ctx: Context) => {
@@ -1327,7 +1525,7 @@ export function cycle(ctx: Context, state: Runner, beats: Beat[] = BEATS): Promi
       state.log(`${b.name} catches up the run it missed at ${missed.toISOString().slice(0, 16)}Z`)
     const failed: string[] = []
     const unsent: Unsent[] = []
-    const guarded = guard(ctx, failed, unsent)
+    const guarded = guard(seated(ctx), failed, unsent)
     try {
       for (const line of state.unsent.get(b.name) ?? []) await guarded.send(line.to, line.text)
       await b.run(guarded)

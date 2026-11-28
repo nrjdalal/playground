@@ -39,6 +39,10 @@ export const groups: Group[] = [
         "xargs -0 -I{} sh -c {} < <(printf 'x\\0pkill node')",
       ],
       [
+        "a kill by name after a NUL escape printf decodes, read from GNU -a's file as sh -c's -I string",
+        "xargs -0 -a <(printf 'x\\0pkill node') -I{} sh -c {}",
+      ],
+      [
         "a kill by name after a newline escape in an ANSI-C here-string, read by xargs into nohup",
         "xargs nohup <<< $'x\\npkill node'",
       ],

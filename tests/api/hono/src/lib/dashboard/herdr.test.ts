@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import {
   existsSync,
   mkdirSync,
@@ -266,9 +266,9 @@ describe("readServer and herdrRecords", () => {
       "session.snapshot": () => ({ ...SNAPSHOT, snapshot: { ...SNAPSHOT.snapshot, panes } }),
     })
     const start = performance.now()
-    expect(await readHerdr([{ name: "hung", socket: s.path }], 300)).toEqual([
-      { panes: [], partial: true, server: "hung", workspaces: [] },
-    ])
+    const [read] = await readHerdr([{ name: "hung", socket: s.path }], 300)
+    expect(read).toMatchObject({ partial: true, server: "hung" })
+    expect(read?.panes.flatMap((p) => p.processes)).toEqual([])
     expect(performance.now() - start).toBeLessThan(1500)
     expect(herdrProblem()).toContain("hung")
   })
@@ -280,6 +280,100 @@ describe("readServer and herdrRecords", () => {
     expect(read?.panes.length).toBeGreaterThan(0)
     const whole = await readHerdr([{ name: "whole", socket: stub().path }], 1000)
     expect(whole[0]?.partial).toBeUndefined()
+  })
+
+  // Under load the owner's board flipped to "not running" while the dispatcher stayed up: a read past its deadline sent the server back empty.
+  test("a server whose read runs past its deadline keeps its last good rows, marked partial, rather than an empty board", async () => {
+    let hang = false
+    const s = stub({ "session.snapshot": () => (hang ? null : SNAPSHOT) })
+    const server = { name: "kept-whole", socket: s.path }
+    const [good] = await readHerdr([server], 1000)
+    expect(good?.partial).toBeUndefined()
+    hang = true
+    const [kept] = await readHerdr([server], 300)
+    expect(kept?.partial).toBe(true)
+    expect(kept?.panes).toEqual(good!.panes)
+    expect(kept?.workspaces).toEqual(good!.workspaces)
+  })
+
+  test("a server that went down keeps no last good read, so a hung read after it comes back reads empty", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hd-"))
+    cleanups.push(() => rmSync(dir, { force: true, recursive: true }))
+    const socket = join(dir, "s.sock")
+    const server = { name: "kept-down", socket }
+    const up = stubServer(
+      {
+        "pane.process_info": () => ({ process_info: PROCESS, type: "pane_process_info" }),
+        "session.snapshot": () => SNAPSHOT,
+      },
+      socket,
+    )
+    const [good] = await readHerdr([server], 1000)
+    expect(good?.panes.length).toBeGreaterThan(0)
+    up.close()
+    expect(await readHerdr([server], 300)).toEqual([])
+    const hung = stubServer({ "session.snapshot": () => null }, socket)
+    cleanups.push(hung.close)
+    expect(await readHerdr([server], 300)).toEqual([
+      { panes: [], partial: true, server: "kept-down", workspaces: [] },
+    ])
+  })
+
+  test("a pane whose own read answers keeps its fresh row when another pane's read is slow, and the slow pane keeps its last good one", async () => {
+    let slow = false
+    const s = stub({
+      "pane.process_info": (params) =>
+        params.pane_id === "w1:p2" && slow
+          ? null
+          : {
+              process_info:
+                params.pane_id === "w1:p1"
+                  ? {
+                      ...PROCESS,
+                      foreground_processes: slow ? [CLAUDE] : PROCESS.foreground_processes,
+                    }
+                  : { foreground_processes: [{ argv: ["/bin/zsh"], pid: 11 }] },
+              type: "pane_process_info",
+            },
+    })
+    const server = { name: "kept-pane", socket: s.path }
+    await readHerdr([server], 1000)
+    slow = true
+    const [read] = await readHerdr([server], 300)
+    expect(read?.partial).toBe(true)
+    expect(read?.panes.map((p) => [p.pane_id, p.processes.map((proc) => proc.pid)])).toEqual([
+      ["w1:p1", [4242]],
+      ["w1:p2", [11]],
+    ])
+  })
+
+  test("a partial or empty server read logs one line with the server's name and how long it took", async () => {
+    let mode: "whole" | "slow" | "hung" = "whole"
+    const s = stub({
+      "pane.process_info": (params) =>
+        mode === "slow" && params.pane_id === "w1:p2"
+          ? { error: { code: "busy", message: "busy" } }
+          : { process_info: { foreground_processes: [] }, type: "pane_process_info" },
+      "session.snapshot": () => (mode === "hung" ? null : SNAPSHOT),
+    })
+    const lines: string[] = []
+    const spy = spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+      lines.push(args.join(" "))
+    })
+    try {
+      const server = { name: "logged", socket: s.path }
+      await readHerdr([server], 300)
+      expect(lines).toEqual([])
+      mode = "slow"
+      await readHerdr([server], 300)
+      mode = "hung"
+      await readHerdr([server], 300)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toMatch(/^herdr: the logged server's read came back partial in \d+ ms/)
+    expect(lines[1]).toMatch(/^herdr: the logged server's read came back empty in \d+ ms/)
   })
 
   test("a pane holds a session when a foreground process has a registry file naming it, and is keyed by server and pane", async () => {

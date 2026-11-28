@@ -2040,6 +2040,29 @@ describe("a draft card's changed words", () => {
     expect(html).not.toContain("moves to Friday")
   })
 
+  // the owner typed over "hi", then the poster's ask edit changed it, while the card was not mounted (a reload, a shelf move) (PG-3176)
+  test("give way to the poster's newer words, the owner's kept a click away", () => {
+    saveDraft(cardDraftKey(draft.id), {
+      attachments: [],
+      base: "hi",
+      text: "hi, the ship moves to Friday",
+    })
+    const html = opened({ ...draft, preview: { ...draft.preview, text: "hi there" } } as InboxItem)
+    expect(box(html)).toBe("hi there")
+    expect(named(html, "Restore my edit")).not.toBe("")
+  })
+
+  test("stay in the box, with nothing to restore, while the poster's words are the ones they were typed over (PG-3176)", () => {
+    saveDraft(cardDraftKey(draft.id), {
+      attachments: [],
+      base: "hi",
+      text: "hi, the ship moves to Friday",
+    })
+    const html = opened(draft)
+    expect(box(html)).toBe("hi, the ship moves to Friday")
+    expect(named(html, "Restore my edit")).toBe("")
+  })
+
   test("are another card's alone: a card shows its own words when only another's are kept", () => {
     saveDraft(cardDraftKey("id-42"), { attachments: [], text: "for another card" })
     expect(box(opened(draft))).toBe("hi")
@@ -2170,6 +2193,84 @@ describe("an ask card's answer in progress (PG-1345)", () => {
     const html = opened(single(["staging", "main"]))
     expect(picked(html)).toEqual([])
     expect(note(html)).toBe("")
+  })
+})
+
+// The primitive shows Next on every question but the last and Send on the last alone, so Next and Send take turns in one slot only when both follow Previous, which shows on every question, off on the first (PG-3178).
+describe("a multi-question ask's footer order (PG-3178)", () => {
+  const real = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+  const store = new Map<string, string>()
+  beforeAll(() =>
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => store.get(key) ?? null,
+        removeItem: (key: string) => void store.delete(key),
+        setItem: (key: string, value: string) => void store.set(key, value),
+      } as Storage,
+    }),
+  )
+  afterEach(() => {
+    for (const id of Object.keys(readPicks())) savePicks(id, EMPTY_PICKS)
+  })
+  afterAll(() => {
+    if (real) Object.defineProperty(globalThis, "localStorage", real)
+    else delete (globalThis as { localStorage?: Storage }).localStorage
+  })
+
+  const preview = {
+    questions: ["Which base?", "When?", "Who?"].map((question) => ({
+      options: [{ label: "one" }, { label: "two" }],
+      question,
+    })),
+    type: "ask" as const,
+  }
+  const three = {
+    ...decision,
+    id: "id-3178",
+    preview: { ...preview, text: "Pick for each." },
+    ref: 3178,
+    title: "Three questions",
+  } as InboxItem
+  // each stepper button in the footer's actions row, in the order it renders, with its hidden and disabled state
+  const steppers = (html: string) =>
+    [
+      ...(html.match(/data-slot="questionnaire-actions"[\s\S]*$/)?.[0] ?? "").matchAll(
+        /<button[^>]*data-slot="questionnaire-(previous|next|submit)"[^>]*>/g,
+      ),
+    ].map(([tag, slot]) => ({
+      disabled: /aria-disabled="true"|\sdisabled=""/.test(tag),
+      hidden: /\shidden=""/.test(tag),
+      slot,
+    }))
+
+  for (const [step, name] of [
+    [0, "first"],
+    [1, "middle"],
+    [2, "last"],
+  ] as const)
+    test(`on its ${name} question, Previous leads, then Next and Send in the one slot after it`, () => {
+      savePicks("id-3178", {
+        ...EMPTY_PICKS,
+        picks: [0, 0, 0],
+        sig: picksKey(questionsOf(preview)),
+        step,
+      })
+      const buttons = steppers(opened(three))
+      expect(buttons.map((b) => b.slot)).toEqual(["previous", "next", "submit"])
+      expect(buttons[0]!.hidden).toBe(false)
+      expect(buttons[0]!.disabled).toBe(step === 0)
+    })
+
+  test("a single-question ask keeps Send first, with no Previous or Next", () => {
+    const single = {
+      ...decision,
+      id: "id-3179",
+      preview: { options: [{ label: "one" }, { label: "two" }], text: "Pick one.", type: "ask" },
+      ref: 3179,
+      title: "One question",
+    } as InboxItem
+    expect(steppers(opened(single)).map((b) => b.slot)).toEqual(["submit"])
   })
 })
 
@@ -2335,5 +2436,49 @@ describe("a root step card (PG-2433)", () => {
     expect(opened(closed, "done")).toContain(
       "Root step failed (exit 126): you closed the password window, so nothing ran as root",
     )
+  })
+})
+
+// A multiSelect ask's card ticks several rows at once on the primitive's checkboxes, and its Send waits for one (PG-3177).
+describe("a multiSelect ask's card (PG-3177)", () => {
+  const OPTIONS = [{ label: "Nudge Ana" }, { label: "Nudge Bo" }, { label: "Nudge Cy" }]
+  const ticking = {
+    ...decision,
+    id: "id-72",
+    preview: { multiSelect: true, options: OPTIONS, text: "Who gets a nudge?", type: "ask" },
+    ref: 72,
+    title: "Nudge whom?",
+  } as InboxItem
+  const sig = choicesKey(choicesOf({ multiSelect: true, options: OPTIONS, type: "ask" }), true)
+  const inputs = (html: string) =>
+    [...html.matchAll(/<[^>]*data-slot="questionnaire-choice-input"[^>]*>/g)].map((m) => m[0])
+  const checked = (html: string) =>
+    inputs(html)
+      .filter((tag) => /data-checked(?:=""|[\s>])/.test(tag))
+      .map((tag) => tag.match(/value="([^"]*)"/)?.[1] ?? "")
+  afterEach(() => savePicks("id-72", EMPTY_PICKS))
+
+  test("shows a checkbox for each option and None of these, with Send off until one is ticked", () => {
+    const html = opened(ticking)
+    expect(inputs(html)).toHaveLength(4)
+    for (const tag of inputs(html)) expect(tag).toContain('type="checkbox"')
+    expect(named(html, "Send")).toContain('aria-disabled="true"')
+    expect(named(html, "Send")).toContain('aria-description="Pick an option first"')
+  })
+
+  test("gives back every tick on remount, and Send takes them", () => {
+    savePicks("id-72", { ...EMPTY_PICKS, sig, ticks: [0, 2] })
+    const html = opened(ticking)
+    expect(checked(html)).toEqual(["A: Nudge Ana", "C: Nudge Cy"])
+    expect(named(html, "Send")).toContain('aria-disabled="false"')
+  })
+
+  test("a one-pick ask's kept pick never reads as its ticks", () => {
+    savePicks("id-72", {
+      ...EMPTY_PICKS,
+      pick: 0,
+      sig: choicesKey(choicesOf({ options: OPTIONS, type: "ask" })),
+    })
+    expect(checked(opened(ticking))).toEqual([])
   })
 })

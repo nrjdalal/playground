@@ -5,12 +5,14 @@ import {
   type AskQuestion,
   type Choices,
   INSTALL_TEXT,
+  multiSelect,
   PEER_INSTALL_TEXT,
   PEER_POLICY,
   PEER_RULE,
   questionsOf,
   ROOT_DIR,
   ROOT_STEPS,
+  ticksAnswer,
 } from "@packages/config/inbox"
 import type { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
 import {
@@ -18,6 +20,7 @@ import {
   RiAppsLine,
   RiArchive2Line,
   RiArrowDownSLine,
+  RiArrowGoBackLine,
   RiArrowUpLine,
   RiChat3Line,
   RiCheckDoubleLine,
@@ -135,7 +138,7 @@ import { HOLDS_RELOAD } from "@/lib/build-reload"
 import { copyToClipboard } from "@/lib/clipboard"
 import { config } from "@/lib/config"
 import { dispatcherOf, useNow } from "@/lib/dashboard"
-import { cardDraftKey, draftSaver, readDrafts, saveDraft } from "@/lib/drafts"
+import { cardDraftKey, cardKept, draftSaver, posterEdit, readDrafts, saveDraft } from "@/lib/drafts"
 import {
   answerItem,
   canDraft,
@@ -184,6 +187,7 @@ import {
   shelfRow,
   shelfToOpen,
   takenBy,
+  tickRow,
   updatedSince,
   upfrontLink,
   uploadsOn,
@@ -420,19 +424,21 @@ const SIDE_TONES: Record<"approve" | "deny", string> = {
 const DRAFT_TONE =
   "border-warning/30 bg-warning/10 hover:bg-warning/15 dark:border-warning/30 dark:bg-warning/10 dark:hover:bg-warning/15"
 
-// The rows as the card's choices, numbered for the keys 1 on. While the card is busy (its answer on its way, or it has just moved under the owner) they stay enabled, dimmed and busy, and take no click or key: Questionnaire counts a disabled choice as no answer, so disabling them would mark a card Send already checked invalid.
+// The rows as the card's choices, numbered for the keys 1 on, each a checkbox ticked by ticks on a multiSelect ask, else a radio checked by pick. While the card is busy (its answer on its way, or it has just moved under the owner) they stay enabled, dimmed and busy, and take no click or key: Questionnaire counts a disabled choice as no answer, so disabling them would mark a card Send already checked invalid.
 export function AskChoices({
   busy,
   choices,
   paused,
   pick,
   setPick,
+  ticks,
 }: {
   busy: boolean
   choices: Choices
   paused: boolean
   pick: number | null
   setPick: (pick: number) => void
+  ticks?: number[]
 }) {
   const yesNo = choices.shape === "yes-no"
   return (
@@ -447,7 +453,7 @@ export function AskChoices({
         return (
           <Hint key={row.index} content={paused ? PAUSED_WHY : undefined}>
             <QuestionnaireChoice
-              checked={pick === row.index}
+              checked={ticks ? ticks.includes(row.index) : pick === row.index}
               // a yes or no's keys 1 and 2 still pick a side, with no number badge drawn
               className={cn(
                 "text-xs",
@@ -479,9 +485,14 @@ export function picksKey(questions: AskQuestion[]): string {
 }
 
 // A signature of a single-question ask's choice rows, so the card drops its kept pick when an in-place edit changes, reorders or rewords them, since the pick is held by position; picksKey does the same for a multi-question ask.
-export function choicesKey(choices: Choices | null): string {
+export function choicesKey(choices: Choices | null, ticking = false): string {
   if (!choices) return "[]"
-  return JSON.stringify([choices.shape, choices.rows.map((r) => [r.label, r.letter, r.go])])
+  return JSON.stringify([
+    choices.shape,
+    choices.rows.map((r) => [r.label, r.letter, r.go]),
+    // a multiSelect ask's ticks never land on the same rows taking one pick, nor its pick on ticks
+    ...(ticking ? ["ticks"] : []),
+  ])
 }
 
 // One question of a multi-question ask as the card's choices, numbered for the keys 1 on, with the recommended option badged where it sits; the pick is this question's own, so stepping between questions keeps each. Busy dims them and takes no click, as AskChoices does.
@@ -1117,31 +1128,43 @@ export function InboxCard({
   const keeps = item.kind === "draft" && schedulable(item)
   const keptKey = cardDraftKey(item.id)
   const [kept] = useState(() => (keeps ? readDrafts()[keptKey] : undefined))
-  const [draft, setDraft] = useState(kept?.text ?? posted)
+  // kept words typed over an earlier text of the poster's give way to his newer one, as a live edit does below (PG-3176)
+  const [start] = useState(() =>
+    kept?.base !== undefined && kept.base !== posted
+      ? posterEdit(kept.text, kept.base, posted)
+      : { draft: kept?.text ?? posted, waiting: null },
+  )
+  const [draft, setDraft] = useState(start.draft)
+  // his words a poster's edit replaced, one click from coming back until the next edit or the card closes
+  const [restorable, setRestorable] = useState(start.waiting)
   const [saveKept] = useState(() => draftSaver(keptKey, kept))
-  const editDraft = (text: string) => {
-    setDraft(text)
-    saveKept({ attachments: [], text: text === posted ? "" : text })
-  }
+  // his words are kept with the poster's text they were typed over, waiting ones included, so a remount shows the poster's newer text and gives back Restore my edit
+  useEffect(() => {
+    if (keeps) saveKept(cardKept(draft, posted, restorable))
+  }, [draft, keeps, posted, restorable, saveKept])
   // once it is answered, settled or archived, its kept words go
   useEffect(() => {
     if (item.kind === "draft" && !keeps) saveDraft(keptKey, { attachments: [], text: "" })
   }, [item.kind, keeps, keptKey])
-  // the poster's bun run ask edit replaces the words in place, unless he has changed them
+  // the poster's bun run ask edit always replaces the words in place, his own kept to restore (PG-3176)
   const [synced, setSynced] = useState(posted)
   if (posted !== synced) {
     setSynced(posted)
-    if (draft === synced) setDraft(posted)
+    const next = posterEdit(draft, synced, posted)
+    setDraft(next.draft)
+    setRestorable(next.waiting)
   }
   // a multi-question ask's picks, one option index per question, and the question in sight, held below as the single pick is so the card steps through them before its Submit sends them all at once
   const questions = item.kind === "decision" ? questionsOf(item.preview) : []
   const multi = questions.length > 0
   // a single-question ask's choice rows, used both for the signature below and the pick's row further down
   const choices = multi ? null : decisionChoices(item)
+  // a multiSelect ask's rows are checkboxes, every one ticked going with its Send (PG-3177)
+  const ticking = choices !== null && item.kind === "decision" && multiSelect(item.preview)
   // the card's answer in progress is kept under its id while it can still take it, and cleared once answered, settled or archived, so it stays in step with a draft card's words
   const keepsAnswer = item.kind === "decision" && schedulable(item)
   // the card's answer in progress comes back after a list refresh or a shelf move remounts it (ask-picks store), as a draft card's words do: its pick(s), the question in sight and the Note, read once under its own id while it still keeps an answer; the pick(s) and step are taken only while the signature still matches, so a stale pick never lands on another option, while the Note stands on its own
-  const sig = multi ? picksKey(questions) : choicesKey(choices)
+  const sig = multi ? picksKey(questions) : choicesKey(choices, ticking)
   const [restored] = useState(() => (keepsAnswer ? (readPicks()[item.id] ?? null) : null))
   const sigKept =
     restored !== null &&
@@ -1152,6 +1175,7 @@ export function InboxCard({
   const [picks, setPicks] = useState<(number | null)[]>(
     sigKept ? restored.picks : questions.map(() => null),
   )
+  const [ticks, setTicks] = useState<number[]>(sigKept ? restored.ticks : [])
   const [step, setStep] = useState(sigKept ? restored.step : 0)
   // an in-place bun run ask edit can change the questions or a single ask's options under an open card; when the signature moves, drop the pick, picks and step back to the first, as the draft text resyncs above, so a stale pick never lands on another option
   const [syncedPicks, setSyncedPicks] = useState(() => sig)
@@ -1159,12 +1183,13 @@ export function InboxCard({
     setSyncedPicks(sig)
     setPick(null)
     setPicks(questions.map(() => null))
+    setTicks([])
     setStep(0)
   }
   const [note, setNote] = useState(restored?.note ?? "")
   useEffect(() => {
-    savePicks(item.id, keepsAnswer ? { note, pick, picks, sig, step } : EMPTY_PICKS)
-  }, [item.id, keepsAnswer, note, pick, picks, sig, step])
+    savePicks(item.id, keepsAnswer ? { note, pick, picks, sig, step, ticks } : EMPTY_PICKS)
+  }, [item.id, keepsAnswer, note, pick, picks, sig, step, ticks])
   // a secret ask's value, held only until Submit hands it on, then cleared
   const [secret, setSecret] = useState("")
   const secretKey =
@@ -1293,8 +1318,14 @@ export function InboxCard({
 
   // choices is the single ask's rows computed above, null for a multi-question ask; its footer sits in the form beside its Send while it is open, and every other card's answers from outside it
   const picked = pick === null ? null : (choices?.rows[pick] ?? null)
+  // what a multiSelect ask's Send sends: every ticked option, or None of these alone
+  const ticked = ticking ? ticksAnswer(choices.rows, ticks) : null
   // every question of a multi-question ask answered, so its Submit may send them all at once
   const allPicked = multi && picks.every((p) => p !== null)
+  // whether Send has an answer to send (every question picked, a tick answer, or a single pick), why not while it has none, and whether it sends a deny
+  const ready = multi ? allPicked : ticking ? ticked !== null : pick !== null
+  const sendOff = ready ? null : multi ? "Answer every question first" : sendWhy(picked)
+  const sendsDeny = ticking ? ticked?.action === "deny" : !multi && picked !== null && !picked.go
   const footerInForm = (choices !== null || multi) && outcome === null && !folded
   const draftReady = item.kind === "draft" && outcome === null && !busy && draft.trim() !== ""
   const secretReady = secretAsk && outcome === null && !busy && secret.trim() !== ""
@@ -1319,7 +1350,14 @@ export function InboxCard({
   const body = folded ? null : outcome !== null ? (
     sentWords
   ) : choices ? (
-    <AskChoices busy={busy} choices={choices} paused={paused} pick={pick} setPick={setPick} />
+    <AskChoices
+      busy={busy}
+      choices={choices}
+      paused={paused}
+      pick={pick}
+      setPick={ticking ? (row) => setTicks((now) => tickRow(choices.rows, now, row)) : setPick}
+      ticks={ticking ? ticks : undefined}
+    />
   ) : secretAsk && !config.hosted ? (
     // masked, never saved by the browser, and a key here stays in the field; Enter submits; enabled while the card is paused, as the comment box is, so a paste in that second lands
     <Input
@@ -1351,12 +1389,30 @@ export function InboxCard({
         {!answers ? (
           <p className="whitespace-pre-wrap">{draft}</p>
         ) : (
-          <Textarea
-            aria-label={`Message to ${item.preview.to}`}
-            className={BOX}
-            value={draft}
-            onChange={(event) => editDraft(event.target.value)}
-          />
+          <>
+            <Textarea
+              aria-label={`Message to ${item.preview.to}`}
+              className={BOX}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+            {restorable && (
+              <Hint content="Its poster changed the message: put back the words you typed">
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  className="text-muted-foreground self-start"
+                  onClick={() => {
+                    setDraft(restorable.text)
+                    setRestorable(null)
+                  }}
+                >
+                  <RiArrowGoBackLine data-icon="inline-start" />
+                  Restore my edit
+                </Button>
+              </Hint>
+            )}
+          </>
         )}
       </div>
       {item.preview.attachments ? <Attachments items={item.preview.attachments} /> : null}
@@ -1612,30 +1668,19 @@ export function InboxCard({
   ) : (
     <CardFooter className="flex-wrap gap-2">
       {footerInForm ? (
-        // shadcn's questionnaire actions in a row that wraps on a narrow card: Submit first, off until an option is picked (every question of a multi-question ask) and saying why on hover and focus, then a multi-question ask's Previous and Next between its questions, then the card's own buttons
+        // shadcn's questionnaire actions in a row that wraps on a narrow card: a multi-question ask's Previous first on every question (off on the first), then Next, which the primitive shows on all but the last question, and Send, which it shows on the last alone, so the two share the second place (PG-3178); Send is off until an option is picked (every question of a multi-question ask) and says why on hover and focus; then the card's own buttons
         <QuestionnaireActions className="flex flex-wrap">
-          <Hint
-            content={
-              held ??
-              (multi ? (allPicked ? undefined : "Answer every question first") : sendWhy(picked)) ??
-              undefined
-            }
-          >
-            <QuestionnaireSubmit
-              // green as a go row, or red once the no-go row is the pick it sends
-              className={SIDE_TONES[!multi && picked && !picked.go ? "deny" : "approve"]}
-              disabled={busy || (multi ? !allPicked : pick === null)}
-              render={<Button size="sm" variant="outline" {...OFF_FOCUSABLE} />}
-              size="sm"
-              variant="outline"
-            >
-              <RiSendPlaneLine data-icon="inline-start" />
-              Send
-            </QuestionnaireSubmit>
-          </Hint>
           {multi && (
             <>
-              <QuestionnairePrevious disabled={busy || step === 0} size="sm" variant="outline" />
+              <QuestionnairePrevious
+                // the primitive hides Previous on the first question, which would move Next into its place
+                aria-hidden={false}
+                disabled={busy || step === 0}
+                hidden={false}
+                inert={false}
+                size="sm"
+                variant="outline"
+              />
               <QuestionnaireNext
                 disabled={busy || step >= questions.length - 1 || picks[step] == null}
                 size="sm"
@@ -1647,6 +1692,19 @@ export function InboxCard({
               />
             </>
           )}
+          <Hint content={held ?? sendOff ?? undefined}>
+            <QuestionnaireSubmit
+              // green as a go row, or red once the no-go row is the pick it sends
+              className={SIDE_TONES[sendsDeny ? "deny" : "approve"]}
+              disabled={busy || !ready}
+              render={<Button size="sm" variant="outline" {...OFF_FOCUSABLE} />}
+              size="sm"
+              variant="outline"
+            >
+              <RiSendPlaneLine data-icon="inline-start" />
+              Send
+            </QuestionnaireSubmit>
+          </Hint>
           {left}
           {right}
         </QuestionnaireActions>
@@ -1812,6 +1870,11 @@ export function InboxCard({
           if (busy) return
           if (multi) {
             if (allPicked) void onAnswer("approve", undefined, undefined, picks as number[])
+          } else if (ticking) {
+            if (ticked)
+              void (ticked.action === "approve"
+                ? onAnswer("approve", undefined, undefined, ticked.options)
+                : onAnswer("deny"))
           } else if (picked)
             void (picked.go ? onAnswer("approve", undefined, picked.index) : onAnswer("deny"))
         }}
@@ -1820,7 +1883,7 @@ export function InboxCard({
           const action = cardKey(keyOf(event), {
             choosing: footerInForm,
             draftReady,
-            picked: multi ? allPicked : pick !== null,
+            picked: ready,
           })
           if (action === null) return
           if (action === "leave") return event.stopPropagation()
@@ -1882,6 +1945,7 @@ export function InboxCard({
           <QuestionnaireItem
             aria-labelledby={titleId}
             name={QUESTION}
+            multiple={ticking}
             className="gap-(--card-spacing)"
           >
             {/* one column no wider than the card, so a wide table or drawing in the ask scrolls inside it rather than stretching the card */}

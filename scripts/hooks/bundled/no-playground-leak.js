@@ -46,7 +46,7 @@ applyEnvAliases();
 // scripts/hooks/no-playground-leak.ts
 import { AsyncLocalStorage as AsyncLocalStorage3 } from "async_hooks";
 import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync3, statSync as statSync2 } from "fs";
-import { basename as basename2, join as join6 } from "path";
+import { basename as basename2, join as join7 } from "path";
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
@@ -65,7 +65,7 @@ var dataDir = (env = process.env) => dataDirOf(env);
 import { AsyncLocalStorage } from "async_hooks";
 var budget = new AsyncLocalStorage;
 function withLiveBudget(body, ms = 6000) {
-  return budget.getStore() ? body() : budget.run({ reads: new Map, until: performance.now() + ms }, body);
+  return budget.getStore() ? body() : budget.run({ heads: new Map, reads: new Map, until: performance.now() + ms }, body);
 }
 var run = (at, args, env, timeout) => {
   const proc = Bun.spawnSync(["git", "-C", at, ...args], {
@@ -78,11 +78,7 @@ var run = (at, args, env, timeout) => {
   return { ok: proc.exitCode === 0, out: proc.stdout.toString() };
 };
 function liveHeads(at, remote, timeout) {
-  const command = process.env.GIT_SSH_COMMAND || run(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
-  const env = { GIT_TERMINAL_PROMPT: "0" };
-  if (command)
-    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
-  const live = run(at, ["ls-remote", "--heads", "--", remote], env, timeout);
+  const live = run(at, ["ls-remote", "--heads", "--", remote], quiet(at), timeout);
   if (!live.ok)
     return null;
   const tips = [];
@@ -93,6 +89,27 @@ function liveHeads(at, remote, timeout) {
       tips.push({ ref: `${remote}/${name.slice("refs/heads/".length)}`, sha });
   }
   return tips;
+}
+function quiet(at) {
+  const command = process.env.GIT_SSH_COMMAND || run(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
+  const env = { GIT_TERMINAL_PROMPT: "0" };
+  if (command)
+    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
+  return env;
+}
+function liveDefault(at, remote, timeout = 5000) {
+  const call = budget.getStore();
+  const key = `${at}\x00${remote}`;
+  const had = call?.heads.get(key);
+  if (had !== undefined)
+    return had;
+  if (call)
+    call.headsUntil ??= Math.min(call.until, performance.now() + timeout);
+  const left = call ? Math.floor(call.headsUntil - performance.now()) : timeout;
+  const live = left > 0 ? run(at, ["ls-remote", "--symref", "--", remote, "HEAD"], quiet(at), left) : undefined;
+  const head = live?.ok && /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(live.out)?.[1] || null;
+  call?.heads.set(key, head);
+  return head;
 }
 function present(at, tips) {
   if (!tips.length)
@@ -8314,6 +8331,12 @@ function packageScripts(path) {
     return {};
   }
 }
+function slotWords({ args, name }) {
+  if (name !== "run-slot.sh")
+    return;
+  const at = args.findIndex((a, i) => i > 0 && a.value === "--");
+  return at === -1 ? [] : args.slice(at + 1);
+}
 function shellSlot(args, shell) {
   const { inline, operand } = shellOperand(args, shell);
   if (inline || !operand || program(operand.value) !== "run-slot.sh")
@@ -8910,13 +8933,7 @@ var itemsOf = (fed, split) => {
 `), ...fed.value.split(/\s+/)];
   return [fed.value, ...fed.value.split(split)];
 };
-async function xargsFilled(cmd, xargs, env) {
-  const filled = new Map;
-  for (const [word, replace] of xargs.flatMap((x) => x?.filled ?? []))
-    filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
-  const wrapped = xargs.some((x) => x?.wrapped);
-  if (filled.size === 0 && !wrapped)
-    return [];
+async function xargsTexts(cmd, xargs, env) {
   const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !stdinPath(f.file.value));
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))];
   const inputs = [
@@ -8934,6 +8951,16 @@ async function xargsFilled(cmd, xargs, env) {
     if (raw?.some((text) => /["'\\]/.test(text)))
       texts.add(undefined);
   }
+  return texts;
+}
+async function xargsFilled(cmd, xargs, env) {
+  const filled = new Map;
+  for (const [word, replace] of xargs.flatMap((x) => x?.filled ?? []))
+    filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
+  const wrapped = xargs.some((x) => x?.wrapped);
+  if (filled.size === 0 && !wrapped)
+    return [];
+  const texts = await xargsTexts(cmd, xargs, env);
   const wordsOf = (value) => value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
   const fill = (text) => ({
     ...cmd,
@@ -9502,17 +9529,7 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     const script = operand.value;
     if (!xargs?.replace || !script.includes(xargs.replace))
       return run2(lexScript(script, env), subshell(env), visit, builtins);
-    const fed = await stdinOf(cmd, env);
-    const texts = new Set;
-    for (const split of [null, ...xargs.delimiters ?? []]) {
-      const items = itemsOf(fed, split);
-      if (!items || items.length > READINGS)
-        texts.add(UNKNOWN);
-      else
-        for (const text of items)
-          if (text.trim())
-            texts.add(text.trim());
-    }
+    const texts = new Set([...await xargsTexts(cmd, [xargs], env)].map((text) => text ?? UNKNOWN));
     for (const text of texts.size > 0 ? texts : [""]) {
       const lexed = lexScript(filled(script, xargs.replace, text), env);
       const verdict = await run2(lexed, subshell(env), visit, builtins);
@@ -10039,7 +10056,7 @@ async function check(raw, environment = process.env) {
 }
 
 // packages/scripts/src/playground/setting.ts
-import { resolve as resolve3 } from "path";
+import { join as join6, resolve as resolve3 } from "path";
 
 // packages/settings/src/accounts.ts
 var email2 = string2().email();
@@ -11062,7 +11079,7 @@ function judgeTool(tool, input, factory) {
   const what = typeof branch === "string" && branch !== "" ? branch : "the default branch, canary";
   return `no-protected-push hook refuses ${tool}: it writes ${what} of ${place}. ${ROUTE} ${FIX}`;
 }
-async function judgeMerge(rest, repos, parsed, env, factory, builder, command) {
+async function judgeMerge(rest, repos, parsed, env, factory, builder, command, xargsUnread) {
   const { flags, positionals } = parseFlags(rest, MERGE_TAKES);
   if (flags.some((f) => f.name === "--help" || f.name === "-h"))
     return;
@@ -11073,7 +11090,7 @@ async function judgeMerge(rest, repos, parsed, env, factory, builder, command) {
   const [target] = positionals;
   const url = target && !unreadable(target) ? /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\//i.exec(target.value) : null;
   const candidates = url ? [{ owner: url[1], repo: url[2] }] : given.length > 0 ? [repoOf(given.at(-1))] : GH_DEFAULT(env, parsed.local);
-  if (target && unreadable(target))
+  if (target && unreadable(target) || xargsUnread)
     candidates.push(undefined);
   if (!mayBe(candidates, factory))
     return;
@@ -11086,11 +11103,60 @@ async function judgeMerge(rest, repos, parsed, env, factory, builder, command) {
   const repoWord = url ? undefined : given.at(-1);
   const unread = [
     ...repoWord && unreadable(repoWord) ? [`the repository ${shown(repoWord)}`] : [],
-    ...target && unreadable(target) ? [`the pull request ${shown(target)}`] : []
+    ...target && unreadable(target) ? [`the pull request ${shown(target)}`] : [],
+    ...xargsUnread ? [xargsUnread] : []
   ];
   if (unread.length > 0 && !mayBe(candidates.filter(Boolean), factory))
     return `no-protected-push hook refuses this gh pr merge: ${unread.join(" and ")} ${unread.length > 1 ? "are values" : "is a value"} the hook cannot read, so it cannot tell this merge from one of ${place}, whose base is main or canary (gh takes a pull request URL in the number's place over -R). Write the repository and the pull request number literally, one gh pr merge per pull request, as gh pr merge 5 -R <owner>/<repo>. For a pull request of ${place}: ${MERGE_FIX}`;
   return `no-protected-push hook refuses this gh pr merge: it merges a pull request of ${place}, whose base is main or canary. ${ROUTE} ${MERGE_FIX} ${BUILDER_FORM}`;
+}
+async function xargsFed(cmd, parsed, args, env, direct) {
+  const { xargs } = parsed;
+  if (!xargs)
+    return [];
+  const strings = [xargs.replace, ...xargs.outer ?? []].filter((s) => !!s);
+  const holds = (w) => strings.some((s) => w.value.includes(s));
+  const appends = !xargs.replace || !!xargs.appends && !args.some((w) => w.value === xargs.replace);
+  if (!appends && !args.some(holds))
+    return [];
+  const { head } = ghCommand(args);
+  const wordsOf = (value) => value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
+  const texts = [
+    ...await xargsTexts(cmd, [parsed, ...parsed.also].map((p) => p.xargs), env)
+  ];
+  const help = args.some((w) => ["--help", "-h", "--version"].includes(w.value));
+  return texts.flatMap((text) => {
+    if (text === undefined)
+      return [
+        {
+          args,
+          open: direct && !help && (head.length === 0 || head.length === 1 && head[0] === "pr" || head.some((h) => strings.some((s) => h.includes(s)))),
+          unread: appends ? "what xargs appends from its input" : `what xargs puts in place of ${strings.join(" or ")}`
+        }
+      ];
+    const filled = args.flatMap((w) => holds(w) ? wordsOf(strings.reduce((v, s) => v.replaceAll(s, () => text), w.value)) : [w]);
+    const fed = appends ? [...filled, ...wordsOf(text)] : filled;
+    const [sub, verb] = ghCommand(fed).head;
+    if (sub !== "pr" || verb !== "merge")
+      return [{ args: fed }];
+    const merge = wordsOf("pr merge -R");
+    return [{ args: fed }, ...namedRepos(wordsOf(text)).map((repo) => ({ args: [...merge, repo] }))];
+  });
+}
+var ghReadings = (parsed) => [
+  ...parsed.name === "gh" ? [parsed] : [],
+  ...parsed.also.flatMap(ghReadings)
+];
+function namedRepos(words) {
+  return words.flatMap((w, k) => {
+    const url = /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\//i.exec(w.value);
+    if (url)
+      return [{ quoted: false, value: `${url[1]}/${url[2]}` }];
+    if ((w.value === "-R" || w.value === "--repo") && words[k + 1])
+      return [words[k + 1]];
+    const attached = /^(?:--repo=|-R)(.+)$/.exec(w.value);
+    return attached ? [{ quoted: false, value: attached[1] }] : [];
+  });
 }
 var shown = (word) => word.source ? `\`${word.source}\`` : "a value built at run time";
 function fieldOf(request, key) {
@@ -11207,23 +11273,33 @@ async function inspect(raw, environment, checkout) {
   let settled = true;
   const visit = async (cmd, parsed, at) => {
     const { args, first, name } = parsed;
-    let ghArgs;
+    const ghCalls = [];
     if (name === "gh")
-      ghArgs = args;
-    else if (!PRINTERS.has(name)) {
-      const nested = args.findIndex((a) => program(a.value) === "gh");
+      ghCalls.push({ args, runs: true });
+    else {
+      const slotted = slotWords(parsed);
+      if (slotted?.length)
+        for (const reading of ghReadings(parse3({ ...cmd, words: slotted })))
+          ghCalls.push({ args: reading.args, runs: true });
+      const nested = PRINTERS.has(name) ? -1 : args.findIndex((a) => program(a.value) === "gh");
       if (nested !== -1)
-        ghArgs = args.slice(nested + 1);
+        ghCalls.push({ args: args.slice(nested + 1), runs: false });
     }
-    if (ghArgs) {
-      const { head, repos, rest } = ghCommand(ghArgs);
+    for (const { args: ghArgs, runs } of ghCalls) {
       const folders = places(at);
       if (at.cwdUnread || at.cwdAnywhere)
         folders.push({ ...at, cwd: undefined, cwdSure: undefined });
-      for (const place of folders) {
-        const verdict = head[0] === "pr" && head[1] === "merge" ? await judgeMerge(rest, repos, parsed, place, factory, builder, command) : head[0] === "api" ? await judgeApi(rest, cmd, parsed, place, factory) : undefined;
-        if (verdict)
-          return verdict;
+      const readings = [{ args: ghArgs }, ...await xargsFed(cmd, parsed, ghArgs, at, runs)];
+      for (const [k, reading] of readings.entries()) {
+        const { head, repos, rest } = ghCommand(reading.args);
+        const merge = head[0] === "pr" && head[1] === "merge";
+        if (k > 0 && !merge && !reading.open)
+          continue;
+        for (const place of folders) {
+          const verdict = merge || reading.open ? await judgeMerge(rest, repos, parsed, place, factory, builder, command, reading.unread) : head[0] === "api" ? await judgeApi(rest, cmd, parsed, place, factory) : undefined;
+          if (verdict)
+            return verdict;
+        }
       }
     }
     let gitArgs;
@@ -11945,9 +12021,9 @@ function chipsSigned(blocks, signature) {
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var HANDLE = /^[a-z\d][\w.-]{1,63}$/i;
 var MAX_ROSTER_BYTES = 1048576;
-var CHECKOUT2 = join6(__CHECKOUT + "/scripts/hooks", "..", "..");
+var CHECKOUT2 = join7(__CHECKOUT + "/scripts/hooks", "..", "..");
 function rosterNames(environment) {
-  const path = join6(dataDirOf(environment), "roster.json");
+  const path = join7(dataDirOf(environment), "roster.json");
   try {
     if (statSync2(path).size > MAX_ROSTER_BYTES)
       return [];
@@ -11964,9 +12040,9 @@ function rosterNames(environment) {
 }
 var notEveryday = (name) => HANDLE.test(name) && !terms.everyday.some((w) => w.toLowerCase() === name.toLowerCase());
 function skillNames(checkout = CHECKOUT2) {
-  const ours = join6(checkout, "skills", "playground");
+  const ours = join7(checkout, "skills", "playground");
   try {
-    return readdirSync2(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync3(join6(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
+    return readdirSync2(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync3(join7(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
   } catch {
     return [];
   }
@@ -12910,9 +12986,9 @@ function branchOnly(flags, positionals, dir) {
     if (config.unknown || config.value.split(`
 `).some((line) => line.startsWith(`remote.${remote.value}.push=`)))
       return false;
-    const head = gitText(dir, ["symbolic-ref", "--short", `refs/remotes/${remote.value}/HEAD`], "the remote's default branch");
-    if (!head.unknown)
-      defaults.add(head.value.trim().slice(remote.value.length + 1).toLowerCase());
+    const head = remoteDefault(dir, remote.value);
+    if (head)
+      defaults.add(head);
   }
   return specs.every((spec) => {
     if (unreadable(spec) || /[*?[\\\s]/.test(spec.value))
@@ -12940,11 +13016,22 @@ function branchHead(dir) {
   const defaults = new Set(["main", "master"]);
   for (const remote of remotes.value.split(`
 `).filter(Boolean)) {
-    const ref = gitText(dir, ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`], "the remote's default branch");
-    if (!ref.unknown)
-      defaults.add(ref.value.trim().slice(remote.length + 1).toLowerCase());
+    const ref = remoteDefault(dir, remote);
+    if (ref)
+      defaults.add(ref);
   }
   return !defaults.has(name);
+}
+function remoteDefault(dir, remote) {
+  const local = gitText(dir, ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`], "the remote's default branch");
+  if (local.unknown)
+    return;
+  const name = local.value.trim().slice(remote.length + 1).toLowerCase();
+  if (name === "main" || name === "master")
+    return name;
+  const url = gitText(dir, ["config", "--get", `remote.${remote}.url`], "the remote's URL");
+  const remoteHead = url.unknown ? null : liveDefault(dir, remote);
+  return remoteHead ? remoteHead.toLowerCase() : name;
 }
 async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
   const { flags, positionals } = parseFlags(rest, takes);
@@ -13102,18 +13189,18 @@ function candidate(command) {
   const maybe = state().policy.anyWrite ? MAYBE_ANY : MAYBE;
   return command.includes("$'") || maybe.test(command.replace(/[\\'"]/g, ""));
 }
-async function factoryTerms(environment = process.env, checkout = CHECKOUT2, lists = join6(coreDir(), "lists")) {
-  const loaded = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join6(lists, "playground-terms.json"));
+async function factoryTerms(environment = process.env, checkout = CHECKOUT2, lists = join7(coreDir(), "lists")) {
+  const loaded = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join7(lists, "playground-terms.json"));
   if (loaded.refusal !== undefined)
     return { refusal: loaded.refusal };
   terms = loaded.list;
   return { pattern: pattern(environment, checkout) };
 }
-async function check3(raw, environment = process.env, checkout = CHECKOUT2, lists = join6(coreDir(), "lists")) {
+async function check3(raw, environment = process.env, checkout = CHECKOUT2, lists = join7(coreDir(), "lists")) {
   const loadedTerms = await factoryTerms(environment, checkout, lists);
   if (loadedTerms.refusal !== undefined)
     return refusedList(raw, loadedTerms.refusal);
-  const loadedCleared = await guardList("no-playground-leak", "slack-cleared", isCleared, {}, environment, join6(lists, "slack-cleared.json"));
+  const loadedCleared = await guardList("no-playground-leak", "slack-cleared", isCleared, {}, environment, join7(lists, "slack-cleared.json"));
   if (loadedCleared.refusal !== undefined)
     return refusedList(raw, loadedCleared.refusal);
   const read = await readPolicy(dataDir(environment));
@@ -13207,6 +13294,7 @@ export {
   factoryTerms,
   inspectAs,
   refusedList,
+  remoteDefault,
   rosterNames,
   skillNames
 };

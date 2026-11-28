@@ -193,6 +193,24 @@ describe.skipIf(!dockerUp())("an answer from WhatsApp, on the inbox store", () =
     expect((await store.getItem(db, item.id))?.status).toBe("denied")
   })
 
+  test("a multiSelect ask's several ticks from WhatsApp approve it with every one (PG-3177)", async () => {
+    const item = await post({
+      multiSelect: true,
+      options: [{ label: "Nudge Ana" }, { label: "Nudge Bo" }, { label: "Nudge Cy" }],
+      scope: "factory",
+      text: "Who gets a nudge?",
+      type: "ask",
+    })
+    const { data, write } = scratch()
+    const path = write({ action: "approve", id: item.id, options: [0, 2] })
+    expect(await whatsappAnswer(db, path, { data, deliver })).toMatchObject({ ok: true })
+    expect((await store.getItem(db, item.id))?.answer).toMatchObject({
+      choice: "approve",
+      options: [0, 2],
+      via: "whatsapp",
+    })
+  })
+
   test.each([
     ["a delete", { type: "delete", what: "/tmp/made-up", why: "old" }],
     ["a budget", { amount: "$5", type: "budget", why: "a run" }],

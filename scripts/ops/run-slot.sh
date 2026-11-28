@@ -441,7 +441,7 @@ if [ "${1:-}" = slots ]; then
   SLOTS_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
-# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many the queue's next run can take now (the open, unheld ones while unit_fits passes for first_waiter's ticket, or a medium with no waiter; none while waiters wait and none can start, and none while focus's hold stands), and the live tickets in the queue, which spawn.sh's slots gate reads
+# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many the queue's next run can take now (the open, unheld ones while unit_fits passes for first_waiter's ticket, or a medium with no waiter; none while waiters wait and none can start, and none while focus's hold stands), and the live tickets in the queue, which spawn.sh's slots gate reads; while focus's hold stands, one more line on stderr names it, its end and its reason
 # run-slot.sh kind -- <command>: print the lane run-slot picks for that command (refuse for a run it refuses, docker for a docker build, else quick_kind's clone, commit, quick, or nothing for the queue) and exit, with no ask line, ticket or holder and nothing run, so a lane question reads run-slot's own pick
 KIND_ONLY=
 if [ "${1:-}" = kind ]; then
@@ -1056,7 +1056,7 @@ chain_lane() {
 # Quick slots, outside the queue, one holder each: a plain git commit (its pre-commit build, about 17s) takes run-slot-commit (builder, 13 Oct: five commits waited in a fifteen-deep queue; a commit with a longer hook goes through the queue as <who> -- bash -c '...'), and a node_modules clone (cp -cR <sibling>/node_modules <worktree>/, or cp -R --reflink=auto on Linux: cp and a node_modules path, whatever the flags) takes run-slot-clone (dispatcher, 13 Oct: three load spikes, 77 and 43 among them, each with fseventsd near 100% while clones ran at once); a git merge or pull takes run-slot-commit too, and a bun install or a short bun test, docs:wrap or format:check takes run-slot-quick
 quick_rule() {
   local a first=""
-  # a pre-commit step commit-slot.ts hands over (the build or a type check), marked RUN_SLOT_COMMIT_STEP=1 under its commit-<worktree> name, is a plain git commit's own step, so it takes run-slot-commit too (3 Nov: a plain commit's build waited about an hour in the queue)
+  # a pre-commit step commit-slot.ts hands over (the build, env-keys' build of @packages/env or a type check), marked RUN_SLOT_COMMIT_STEP=1 under its commit-<worktree> name, is a plain git commit's own step, so it takes run-slot-commit too (3 Nov: a plain commit's build waited about an hour in the queue)
   case "$WHO" in commit-*) [ "${RUN_SLOT_COMMIT_STEP:-}" = 1 ] && { echo commit; return; } ;; esac
   # the command's first word past env and VAR=x, as box_fits finds it (optimizer, 19 Oct: a commit run as env NODE_ENV=... git commit waited 14 min in the queue)
   first=$(first_word "$@")
@@ -1234,7 +1234,7 @@ heavy_build() {
         return 1
       fi ;;
   esac
-  # commit-slot.ts's build step (`bun run build`) alone, never its type checks, which build nothing
+  # commit-slot.ts's build steps (`bun run build`, and env-keys' `bunx turbo run build --filter=@packages/env`) alone, never its type checks, which build nothing
   case "$WHO" in commit-*) for a in "$@"; do [ "$a" = build ] && commit=1; done ;; esac
   for a in "$@"; do
     case "$state" in
@@ -2713,6 +2713,10 @@ if [ -n "$ROOM_ONLY" ]; then
     elif [ "$waiters" = 0 ]; then
       unit_fits 22 2 medium "" "$c" && free=$((c / 2 - held))
     fi
+  else
+    # stdout stays the four numbers spawn.sh's slots gate parses, so the hold names itself on stderr (issue 3189)
+    read -r _ _ ends why 2>/dev/null < "$OPS/run-slot.focus"
+    echo "run-slot.sh: run-slot.focus for $FOCUS_HOLDER holds the lanes until ${ends:-its end}: ${why:-no reason given}" >&2
   fi
   echo "$((c / 2)) $held $free $waiters"
   exit 0

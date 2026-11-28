@@ -10,7 +10,8 @@ test("the reviewer template carries the hold: stop the push waiter with TaskStop
   expect(line).toContain("stop your push waiter")
   expect(line).toContain("`TaskStop`")
   expect(line).toContain("that lead's resume word")
-  expect(line).toContain("ship's freeze is no hold")
+  expect(line).toContain("names your PR's hold a full hold")
+  expect(line).toContain("holds the merge alone, so your waiter stays and your rounds go on")
 })
 
 // an urgent ticket gets the Mac: every other session idles on the lead's stop until the all-clear

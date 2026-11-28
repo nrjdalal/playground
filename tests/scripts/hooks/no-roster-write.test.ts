@@ -100,6 +100,9 @@ describe("a write to the live roster is refused, naming roster.ts", () => {
     `watch -n5 cat ${ROSTER}`,
     `yq . ${ROSTER}`,
     `fx ${ROSTER}`,
+    // #3130's review: a variable copied from one holding the data folder still holds it after that one is set again
+    `D=${DATA}; E=$D; D=/tmp; ls ${DATA} | while read f; do rm $E/$f; done`,
+    `D=${DATA}; E=$D; D=/tmp; (ls ${DATA} | while read f; do rm $E/$f; done)`,
   ])("%s", async (command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-roster-write hook refuses")
@@ -259,6 +262,64 @@ describe("roster.ts and every read run", () => {
     "chflags uchg /tmp/x",
     "zstd --rm /tmp/x",
     "pigz /tmp/x",
+    // #3130: twins of its refused forms on a scratch folder or another file, and reads beside them
+    `D=${DATA}/scratch/w; ls $D | xargs -I{} rm $D/{}`,
+    `D=${DATA}/scratch/w; rm $D/$f`,
+    `D=${DATA}; ls $D | xargs -I{} cat $D/{}`,
+    `export D=/tmp/w; cat /tmp/no-such-names.txt | xargs -I{} rm "$D/{}"`,
+    `cat /tmp/no-such-names.txt | xargs sh -c 'cd ${DATA}/scratch/w && rm "$@"' _`,
+    `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'cd ${DATA}/scratch/w && rm {}'`,
+    `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'cd ${DATA} && cat {}'`,
+    `cd ${DATA}/scratch/w && python3 -c "import os; os.remove('roster.json')"`,
+    `cd ${DATA} && python3 -c "print(open('roster.json').read())"`,
+    `cd ${DATA} && node -e "console.log(require('fs').statSync('roster.json').mode)"`,
+    `cd ${DATA} && python3 -c "import os; print(os.stat('roster.json').st_mode)"`,
+    `python3 -c "import os; os.replace('/tmp/x', '/tmp/y')"`,
+    `node -e "const r = require('${ROSTER}'); console.log(JSON.stringify(r).replace('a', 'b'))"`,
+    `python3 -c "import shutil; shutil.copy('${ROSTER}', '/tmp/r')"`,
+    `node -e "require('fs').copyFileSync('${ROSTER}', '/tmp/r')"`,
+    `chmod -R 755 ${DATA}/scratch/w`,
+    "gzip -r /tmp/w",
+    `chown -R x ${DATA}/scratch/w`,
+    "D=/tmp/w; echo x > $D/$f",
+    "D=/tmp/w; E=$D; rm $E/$f",
+    `D=/tmp/w; E=$D; D=${DATA}; rm $E/$f`,
+    `cd ${DATA} && python3 -c "print(open('./roster.json').read())"`,
+    `cd ${DATA}/scratch/w && python3 -c "import os; os.remove('./roster.json')"`,
+    `python3 -c "import shutil; p='/tmp/y'; shutil.copy('/tmp/x', p)"`,
+    `python3 -c "import os; print(os.lstat('${ROSTER}').st_mode)"`,
+    'rm -rf "$(mktemp -d)"',
+    'chmod -R 755 "$(echo /tmp/w)"',
+    `python3 -c "from shutil import copy; copy('${ROSTER}', '/tmp/x')"`,
+    `perl -e "use File::Copy; copy('${ROSTER}', '/tmp/x')"`,
+    `ruby -e "require 'fileutils'; FileUtils.cp('${ROSTER}', '/tmp/x')"`,
+    `python3 -c "print(open('${ROSTER}').read().replace('a', 'b'))"`,
+    `node -e "console.log(require('fs').readFileSync('${ROSTER}', 'utf8').replace(/a/g, 'b'))"`,
+    `python3 -c "import subprocess; subprocess.run(['cat', '${ROSTER}'])"`,
+    `python3 -c "import copy, json; d = json.load(open('${ROSTER}')); print(copy.deepcopy(d))"`,
+    `python3 -c "import pathlib; print(pathlib.Path('${ROSTER}').read_text())"`,
+    `python3 -c "import pathlib; pathlib.Path('/tmp/x').replace('/tmp/y')"`,
+    `ruby -e "require 'fileutils'; FileUtils.mv('/tmp/x', '/tmp/y')"`,
+    `python3 -c "import json, datetime; r = json.load(open('${ROSTER}')); print(datetime.datetime.fromisoformat(r[0]['eta']).replace(tzinfo=None))"`,
+    `python3 -c "import json, datetime; rows = json.load(open('${ROSTER}')); print([datetime.datetime.fromisoformat(x['eta']).replace(tzinfo=datetime.timezone.utc) for x in rows])"`,
+    `python3 -c "print(open('${ROSTER}').read().count('install'))"`,
+    `python3 -c "import json; print([x for x in json.load(open('${ROSTER}')) if 'mv' in x.get('task', '')])"`,
+    `python3 -c "import json; r = json.load(open('${ROSTER}')); print('cp done', len(r))"`,
+    `python3 -c "import json; r = json.load(open('${ROSTER}')); print('pip install x')"`,
+    `python3 -c "import json; r = json.load(open('${ROSTER}')); print([x.get('task', 'mv ok') for x in r])"`,
+    `python3 -c "import json; r = json.load(open('${ROSTER}')); print([x for x in r if x.get('task', '').startswith('mv ')])"`,
+    `bun -e "const r = JSON.parse(require('fs').readFileSync('${ROSTER}', 'utf8')); console.log(r.filter(x => x.task.includes('bun install ')).length)"`,
+    `python3 -c "import json; r = json.load(open('${ROSTER}')); print('cp done for', len(r))"`,
+    `python3 -c "import json; r = json.load(open('${ROSTER}')); print('Install the roster rows:', len(r))"`,
+    `python3 -c "import json; r = json.load(open('${ROSTER}')); print([x for x in r if 'mv x y' in str(x)])"`,
+    `bun -e "const r = require('fs').readFileSync('${ROSTER}', 'utf8'); console.log('install deps ' + r.length)"`,
+    `bun -e "const r = require('fs').readFileSync('${ROSTER}', 'utf8'); console.log(['cp', 'a'].join(' '), r.length)"`,
+    `node -e 'const fs = require("fs"); console.log(fs.readFileSync("${ROSTER}", "utf8").length); console.log(\`install the roster now\`)'`,
+    `bun -e 'const r = require("fs").readFileSync("${ROSTER}", "utf8"); console.log(\`cp done for \${r.length}\`)'`,
+    `bun -e 'const r = require("fs").readFileSync("${ROSTER}", "utf8"); console.log(\`mv the rows \${r.length}\`)'`,
+    `python3 -c "import json; run = json.load(open('${ROSTER}')); print('cp a b', len(run))"`,
+    `bun -e "const call = require('fs').readFileSync('${ROSTER}', 'utf8'); console.log('mv x y', call.length)"`,
+    `python3 -c "import json; exec_rows = json.load(open('${ROSTER}')); print('install a b', len(exec_rows))"`,
     // 3134.ts's twin: an ANSI-C item naming another file of the data folder
     "xargs -I{} sh -c 'echo x >> {}' <<< '$'\"'\"'\\x7e/.playground/notes.json'\"'\"''",
   ])("%s", async (command) => {
@@ -315,6 +376,9 @@ describe("a roster under a temp folder whose name holds rm", () => {
     `python3 -c "print(open('${roster}').read())"`,
     `node -e "console.log(require('fs').readFileSync('${roster}', 'utf8'))"`,
     `python3 -c "print(open('/tmp/no-roster-write/x').read(), open('${roster}').read())"`,
+    // a list's or a form's append is no write: only an appendFile call is
+    `python3 -c "import json; l = list(json.load(open('${roster}'))); l.append(1); print(l)"`,
+    `bun -e "const r = require('fs').readFileSync('${roster}', 'utf8'); const q = new URLSearchParams(); q.append('n', r.length); console.log(q)"`,
   ])("runs %s", async (command) => {
     expect(await under(command)).toBeUndefined()
   })
@@ -339,6 +403,8 @@ describe("a roster under a temp folder whose name holds rm", () => {
     `perl -e 'unlink/**/("${roster}")'`,
     `perl -e 'unlink/1/("${roster}")'`,
     `bun -e "await Bun.write/**/('${roster}', '{}')"`,
+    `node -e "require('fs').appendFileSync('${roster}', 'x')"`,
+    `node -e "require('fs').promises.appendFile('${roster}', 'x')"`,
   ])("refuses %s", async (command) => {
     expect(await under(command)).toContain("scripts/roster.ts")
   })
@@ -359,4 +425,70 @@ test("no-raw-wa's process refuses a factory session's Write of the roster, in th
   })
   expect(await proc.exited).toBe(2)
   expect(await new Response(proc.stderr).text()).toContain("no-roster-write hook refuses")
+})
+
+// The unused-space approvals log is the second file it guards, whose one writer is playground rm --approve
+describe("the unused-space approvals log", () => {
+  const LOG = join(DATA, "ops", "tick", "unused-approvals.jsonl")
+  const LINE = `{"at":"2026-11-27T00:00:00.000Z","by":"ops","bytes":1,"choice":"remove","list":"x","machine":"m","path":"/x"}`
+
+  test.each([
+    `echo '${LINE}' >> ~/.playground/ops/tick/unused-approvals.jsonl`,
+    `printf '%s\\n' '${LINE}' >> ${LOG}`,
+    `echo '${LINE}' | tee -a ${LOG}`,
+    `cp /tmp/approvals.jsonl ${LOG}`,
+    `cp /tmp/unused-approvals.jsonl ~/.playground/ops/tick/`,
+    `sed -i '' 's/keep/remove/' ${LOG}`,
+    `rm ${LOG}`,
+    `bun -e "require('fs').appendFileSync('${LOG}', 'x')"`,
+    // code joining the data folder and the rest of the path apart
+    `bun -e "require('fs').appendFileSync(require('path').join(process.env.HOME, '.playground', 'ops/tick/unused-approvals.jsonl'), 'x')"`,
+    `node -e "const p = require('path'); require('fs').appendFileSync(p.join(process.env.HOME, '.playground', 'ops', 'tick', 'unused-approvals.jsonl'), 'x')"`,
+  ])("refuses %s, naming rm --approve", async (command) => {
+    const reason = await bash(command)
+    expect(reason).toContain("no-roster-write hook refuses")
+    expect(reason).toContain("playground rm --approve")
+  })
+
+  // a copy call onto its name, and its bare name written from its own folder, as for the roster
+  test.each([
+    [
+      `node -e "require('fs').copyFileSync('/tmp/x', 'unused-approvals.jsonl')"`,
+      join(DATA, "ops", "tick"),
+    ],
+    [
+      `node -e "require('fs').appendFileSync('./unused-approvals.jsonl', 'x')"`,
+      join(DATA, "ops", "tick"),
+    ],
+    [`python3 -c "import shutil; shutil.copy('/tmp/x', '${LOG}')"`, root],
+  ])("refuses %s from %s", async (command, cwd) => {
+    const reason = await check(
+      JSON.stringify({
+        cwd,
+        hook_event_name: "PreToolUse",
+        tool_input: { command },
+        tool_name: "Bash",
+      }),
+      environment,
+    )
+    expect(reason).toContain("playground rm --approve")
+  })
+
+  test.each([
+    ["Edit", { file_path: LOG, new_string: "b", old_string: "a" }],
+    ["Write", { content: LINE, file_path: LOG }],
+  ] as const)("refuses a %s of it", async (tool, input) => {
+    expect(await call(tool, input)).toContain("playground rm --approve")
+  })
+
+  test.each([
+    "playground rm --approve 6f1c0e3a-1b2c-4d5e-8f90-a1b2c3d4e5f6 /Users/x/models/old --keep",
+    'bun "${PLAYGROUND_REPO:?}/packages/scripts/src/playground/rm.ts" --approve x /x',
+    `cat ${LOG}`,
+    "jq -c 'select(.choice == \"remove\")' ~/.playground/ops/tick/unused-approvals.jsonl",
+    `tail -5 ${LOG}`,
+    `wc -l ${LOG}`,
+  ])("runs %s", async (command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
 })

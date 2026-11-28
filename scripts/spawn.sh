@@ -10,7 +10,7 @@ set -euo pipefail
 # new one under a generated name. Every launch is in bypass mode, and drops
 # inscope's own CLAUDE_CONFIG_DIR where inscope exports one.
 #
-#   spawn.sh worker    <name> <brief> --title "<t>"    its own workspace, this checkout or --in's folder; reports to the builder (roster.ts who builder), or to --reports-to's session
+#   spawn.sh worker    <name> <brief> --title "<t>"    its own workspace, this checkout or --in's folder; reports to the manager that ran the start (a builder, ops, planner or orchestrator session, CLAUDE_PID's), else the builder (roster.ts who builder), or to --reports-to's session
 #   spawn.sh runner    <name> <brief>                  its own workspace, this checkout; reports to ops (roster.ts who ops)
 #   spawn.sh column    <reviewer|tester|probe|lead|dispatcher> <name> <reports-to> <pane> <brief>
 #                      a column right of a herdr pane id (w1:p2), its spawner's own being $HERDR_PANE_ID
@@ -41,7 +41,7 @@ set -euo pipefail
 #   --effort <level>   with any mode but restore, close or read, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
 #   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PRs the checker serves, each by its URL or its number alone, with an issue's URL beside a pull request for a PR not yet opened, or an extension item it scores as <scope>/<kind>/<key>; a reviewer's or tester's start is refused unless it names a pull request or an extension item, and its roster row records it before the pane opens; on an ended roster row it replaces the row's prs, and its pr with the first pull request named; on any other row, a parked one included, or none, it joins them and gives a row with no pr the first pull request named
-#   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
+#   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the manager that ran the start or the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
 #   --memory <dir>     with any mode but restore, close or read, anywhere among its words: the launch runs with Claude Code's auto-memory on, writing to <dir>, an absolute folder: its built settings file, one of its own (factory-settings-...-memory-<name>.json), sets autoMemoryEnabled and autoMemoryDirectory, while every other launch's file stays as it is, for the auto-memory trial; --memory off launches with memory off on the shared file, whatever arm the role or the row would take
 #   --runtime herdr    with any mode but restore, close or read, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
@@ -208,10 +208,10 @@ session_name() { local n k; while read -r n k; do [ "$k" != "$1" ] || { echo "$n
 second_dispatcher() { [ "${1%-2}" != "$1" ] && [ "$(session_kind "${1%-2}")" = dispatcher ]; }
 # The first dispatcher, a dispatcher (its caller reads KIND) that holds slot 1 or is sessions.names' own and not the second, starts past every gate, by manager and by resume alike, so a restore brings the owner's dispatcher back at once.
 first_dispatcher() { [ "$1" = "$(dispatcher_of 1)" ] || { [ "$(session_kind "$1")" = dispatcher ] && ! second_dispatcher "$1"; }; }
-# A resume's refusal that a later restore clears with no change: a gate holding it over a reading that falls, or focus standing for another session. A gate that cannot read its input or reads a bad setting is a fault, which waiting never ends.
+# A resume's refusal that a later restore clears with no change: a gate holding it over a reading that falls, or focus standing for another session. A gate that cannot read its input or reads a bad setting is a fault, which waiting never ends. Focus's refusal ends in its free-text reason, so both patterns read the line before it.
 restore_waits() {
-  local wait_re='the [a-z]+ gate holds it:|focus stands for' fault_re='cannot read|PLAYGROUND_LOAD_MULT is|holds no'
-  [[ $1 =~ $wait_re ]] && ! [[ $1 =~ $fault_re ]]
+  local wait_re='the [a-z]+ gate holds it:|focus stands for' fault_re='cannot read|PLAYGROUND_LOAD_MULT is|holds no' line=${1%%, its reason \"*}
+  [[ $line =~ $wait_re ]] && ! [[ $line =~ $fault_re ]]
 }
 
 # The live sessions: a registry file whose pid is alive with the start time the file records, in the form it records it, as the Dashboard reads them, but for a `claude -p` run (entrypoint sdk-cli), which holds no name. It prints a line, tab-separated pid, session id, folder and process start ("-" for a field the file lacks), for each live session named $1, the lowest pid first.
@@ -309,6 +309,7 @@ gates = json.loads(gates)
 now = dt.datetime.now(dt.timezone.utc)
 readings = {}
 on_seat = False  # an --account start on the own login that seat_start moves onto its seat token
+bare_seat = False  # a start with no --account that lands on the own login's seat token while its Claude Code login has ended
 if host:
     readings["host"] = host
     try:
@@ -966,6 +967,10 @@ try:
             if own_pick and stored_detail and not stored_seen:
                 stored_name, stored_seen, stored_detail, on_seat = seat_start(runs_on, stored_detail)
             logins = [(runs_on, stored_name, None, stored_seen, stored_detail), (own, "usage.json", own, seen, detail)]
+        # a start with no --account, a resume's included, judges the own login it would land on by its seat token while loginEnded stands, since the config login stops at /login; with no seat it is refused and the split takes another login
+        if not own_pick and login_ended and isinstance(runs_on, str) and runs_on:
+            seat_name, seat_seen, seat_detail, seated = seat_start(runs_on, f"its Claude Code login has ended (loginEnded: {login_ended})")
+            logins[0] = (runs_on, seat_name, runs_on if seated else None, seat_seen, seat_detail)
         known = {login[0].lower() for login in logins}
         for path in sorted(glob.glob(os.path.join(data_dir, "usage-*.json"))):
             name = os.path.basename(path)
@@ -1054,6 +1059,7 @@ try:
         else:
             chosen = min(passing, key=lambda login: login[3].get("week", 0))
         readings.update(chosen[3])
+        bare_seat = not own_pick and bool(login_ended) and isinstance(chosen[2], str) and chosen[2].lower() == str(runs_on).lower()
         if len(logins) > 1:
             readings["logins"] = {f"{email} ({name})": detail or (f"week {fmt(seen['week'])}%" if "week" in seen else seen["usage"]) for email, name, _, seen, detail in logins}
         if chosen[2]:
@@ -1082,6 +1088,8 @@ elif own_pick and on_seat:
 elif own_pick:
     week = f"its week is at {fmt(readings['week'])}%" if "week" in readings else f"its usage {readings.get('usage', 'unread')}"
     print(f"ok - --account {own_pick} is this machine's own login, so it starts there, the split skipped: {week} ({chosen[1]})")
+elif bare_seat:
+    print(f"ok {readings['account']} no --account, so it starts on {readings['account']}, this machine's own login, whose Claude Code login has ended (loginEnded: {login_ended}), so it starts on its seat token, {why}: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif readings.get("account"):
     print(f"ok {readings['account']} no --account, so it starts on {readings['account']}, {why}: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif "logins" in readings:
@@ -1102,7 +1110,7 @@ PY
       pick=${verdict#ok }
       pick=${pick%% *}
       # the own login on its seat token: seat_start checked its item, and check_account refuses the own login by name
-      [ "$pick" = - ] || { ACCOUNT=$pick; PICKED=1; if [ "$pick" = "$OWN_LOGIN" ]; then plain_account; else check_account; fi; }
+      [ "$pick" = - ] || { ACCOUNT=$pick; PICKED=1; if [ "$pick" = "$OWN_LOGIN" ] || [[ $verdict == "ok $pick no --account, so it starts on $pick, this machine's own login, "* ]]; then plain_account; else check_account; fi; }
       echo "spawn.sh: ${verdict#ok "$pick" }"
       ;;
     *) refuse "$verdict" ;;
@@ -1576,17 +1584,21 @@ if [ "$MODE" = close ]; then
   fi
   exit 0
 fi
-# A manager's column names it once, read as the long form: a lead reports to the first dispatcher, and the first dispatcher is briefed by the session running spawn.sh, its name read from Claude's registry entry for CLAUDE_PID.
-if [ "$MODE" = column ] && [ $# -eq 3 ]; then
-  NAME=$1
-  if [ "$(kind_of "$NAME")" = dispatcher ] && [ "$NAME" != "$(dispatcher_of 2)" ] && ! second_dispatcher "$NAME"; then
-    by=
-    [[ ${CLAUDE_PID:-} =~ ^[0-9]+$ ]] && by=$(python3 -I -c 'import json, sys
+# The session running spawn.sh, by Claude's registry entry for CLAUDE_PID; nothing when it reads none.
+spawner() {
+  [[ ${CLAUDE_PID:-} =~ ^[0-9]+$ ]] || return 0
+  python3 -I -c 'import json, sys
 try:
     name = json.load(open(sys.argv[1])).get("name")
     print(name if isinstance(name, str) else "")
 except Exception:
-    pass' "$REGISTRY/$CLAUDE_PID.json")
+    pass' "$REGISTRY/$CLAUDE_PID.json"
+}
+# A manager's column names it once, read as the long form: a lead reports to the first dispatcher, and the first dispatcher is briefed by the session running spawn.sh, its name read from Claude's registry entry for CLAUDE_PID.
+if [ "$MODE" = column ] && [ $# -eq 3 ]; then
+  NAME=$1
+  if [ "$(kind_of "$NAME")" = dispatcher ] && [ "$NAME" != "$(dispatcher_of 2)" ] && ! second_dispatcher "$NAME"; then
+    by=$(spawner)
     word "$by" || refuse "it reads no session running spawn.sh (CLAUDE_PID's entry in $REGISTRY) to brief $NAME: name it, column dispatcher $NAME <the lead that briefs it> <pane> <brief>"
     set -- dispatcher "$NAME" "$by" "$2" "$3"
   else
@@ -1611,7 +1623,9 @@ case "$MODE" in
       TO=$REPORTS_TO
       word "$TO" || refuse "it reports to a session name, not $TO"
     else
-      if [ "$ROLE" = runner ]; then TO=$(manager_of ops); else TO=$(manager_of builder); fi
+      # a worker reports to the manager whose session ran the start, else to the builder's seat
+      [ "$ROLE" = worker ] && by=$(spawner) && word "$by" && [[ $(kind_of "$by") =~ ^(builder|ops|planner|orchestrator)$ ]] || by=
+      if [ -n "$by" ]; then TO=$by; elif [ "$ROLE" = runner ]; then TO=$(manager_of ops); else TO=$(manager_of builder); fi
       word "$TO" || refuse "roster.ts who gave $TO, not a session name"
     fi
     DIR=$REPO
@@ -2050,7 +2064,8 @@ except Exception:
     sys.exit(1)
 if until <= datetime.datetime.now(datetime.timezone.utc):
     sys.exit(1)
-print(f"{f.get('session')} until {f['until']}")
+why = " ".join(str(f.get("reason") or "").split())
+print(f"{f.get('session')} until {f['until']}" + (f', its reason "{why}"' if why else ""))
 PY
 ); then
   # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --priority start goes on while a priority file passes it, a job's own start file included, since no gate but the machine's own delays a job's ticket start
