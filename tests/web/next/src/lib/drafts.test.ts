@@ -5,6 +5,7 @@ import { attachmentUrl } from "../../../../../web/next/src/lib/attachments"
 import {
   cardDraftKey,
   cardKept,
+  cardStart,
   DRAFTS_KEY,
   draftSaver,
   keptAttachments,
@@ -239,15 +240,12 @@ describe("posterEdit", () => {
   })
 })
 
-// InboxCard's own steps with made-up words: its mount reads the kept copy, its effect saves cardKept through one draftSaver, and a live edit runs posterEdit (PG-3176).
+// InboxCard's own steps with made-up words: its mount reads the kept copy and starts through cardStart, the card's own call, its effect saves cardKept through one draftSaver, and a live edit runs posterEdit (PG-3176, PG-3230).
 describe("a draft card's kept words across a remount", () => {
   const KEY = cardDraftKey("id-made-up")
   const mount = (posted: string) => {
     const kept = readDrafts()[KEY]
-    const start =
-      kept?.base !== undefined && kept.base !== posted
-        ? posterEdit(kept.text, kept.base, posted)
-        : { draft: kept?.text ?? posted, waiting: null }
+    const start = cardStart(kept, posted)
     const save = draftSaver(KEY, kept)
     const effect = (draft: string, at: string, waiting: Waiting | null) =>
       save(cardKept(draft, at, waiting))

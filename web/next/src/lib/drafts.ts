@@ -175,6 +175,15 @@ export const posterEdit = (
   waiting: owner !== base && owner !== posted ? { base, text: owner } : null,
 })
 
+// Pure: a draft card's box as it mounts, from its kept copy and its poster's text: kept words typed over an older text give way to the newer one as posterEdit does, else the kept words or the poster's (PG-3230).
+export const cardStart = (
+  kept: Draft | undefined,
+  posted: string,
+): { draft: string; waiting: Waiting | null } =>
+  kept?.base !== undefined && kept.base !== posted
+    ? posterEdit(kept.text, kept.base, posted)
+    : { draft: kept?.text ?? posted, waiting: null }
+
 // Pure: what a draft card keeps: words waiting to be restored while the box holds the poster's text, so a remount gives them back, else the box's own words over the poster's text, none when they match it.
 export const cardKept = (draft: string, posted: string, waiting: Waiting | null): Draft =>
   waiting && draft === posted
