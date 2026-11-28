@@ -244,6 +244,19 @@ describe("line breaks", () => {
   })
 })
 
+describe("a mermaid block (PG-1252)", () => {
+  test("first paints its plain code block beside the box Pele draws into", () => {
+    const html = render("```mermaid\nflowchart LR\n  ask --> answer\n```")
+    expect(html).toContain('data-mermaid=""')
+    expect(html).toContain('data-language="mermaid"')
+    expect(html).toContain("ask --&gt; answer")
+  })
+
+  test("every other block draws no diagram box", () => {
+    expect(render("```ts\nconst a = 1\n```")).not.toContain("data-mermaid")
+  })
+})
+
 const decode = (markup: string) => markup.replaceAll("&amp;", "&")
 
 // His message sits on the primary colour, which Streamdown also gives a link and inline code's text, so they vanished: on that bubble they take the bubble's own text colour and inline code a tint of it, while a code block keeps the page's own background and colours.

@@ -256,6 +256,7 @@
         "next": "catalog:",
         "next-themes": "catalog:",
         "nuqs": "catalog:",
+        "pele": "catalog:",
         "posthog-js": "catalog:",
         "react": "catalog:",
         "react-day-picker": "catalog:",
@@ -380,6 +381,7 @@
     "nuqs": "^2.10.2",
     "oxfmt": "^0.74.0",
     "oxlint": "^1.89.0",
+    "pele": "^1.13.0",
     "portless": "^0.15.10",
     "postgres": "^3.4.9",
     "posthog-js": "^1.438.21",
@@ -2493,6 +2495,8 @@
     "path-to-regexp": ["path-to-regexp@8.4.2", "", {}, "sha512-qRcuIdP69NPm4qbACK+aDogI5CBDMi1jKe0ry5rSQJz8JVLsC7jV8XpiJjGRLLol3N+R5ihGYcrPLTno6pAdBA=="],
 
     "pathe": ["pathe@2.0.3", "", {}, "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w=="],
+
+    "pele": ["pele@1.13.0", "", {}, "sha512-Ie8UKY9x00MsuR3jO6AzUwzK2Z6MIV3Tf4EDdITiuk8Uaz8K7g0R082WqsqNaSU8DdgkrRvZThzhit83mi/uiw=="],
 
     "picocolors": ["picocolors@1.1.1", "", {}, "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA=="],
 
