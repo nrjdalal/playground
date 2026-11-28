@@ -1751,6 +1751,18 @@ case "$MODE" in
       for home_dir in "$MAIN" ${FROM:+"$FROM"}; do
         [ -e "$(project_of "$home_dir")/$SESSION.jsonl" ] && started=1
       done
+      # EnterWorktree moves the transcript into the entered worktree's project folder, so the one worktree of this checkout whose project holds this session's id is where it resumes.
+      if [ -z "$started" ]; then
+        moved=
+        for tree in "$MAIN/.claude/worktrees/"*/; do
+          [ -d "$tree" ] || continue
+          tree=$(cd -P "$tree" && pwd -P)
+          [ -e "$(project_of "$tree")/$SESSION.jsonl" ] || continue
+          [ -z "$moved" ] || refuse "$SESSION's transcript is in the projects of both $moved and $tree: resume $NAME in the one it ran in"
+          moved=$tree
+        done
+        [ -z "$moved" ] || { DIR=$moved started=1; }
+      fi
       if [ -z "$started" ]; then
         trail
         back="resume it in ${ran:-the folder it ran in}"

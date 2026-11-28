@@ -185,20 +185,69 @@ describe("a resume keeps a session out of the main checkout and out of a removed
       )
     }
 
-  test("a session that ran in its worktree is refused the main checkout at --check, naming that worktree", async () => {
+  test("a session whose transcript EnterWorktree moved to its worktree's project resumes in that worktree (#3265)", async () => {
     const { main, spawnSh, tree } = checkout()
     const r = await spawn(
-      ["resume", "worker-x", main, SESSION, "--runtime", "herdr", "--check"],
+      ["resume", "worker-x", main, SESSION, "--runtime", "herdr"],
       [],
       NONE,
       spawnSh,
       claude,
       ranIn1691(tree),
     )
-    expect(r.code).toBe(1)
-    expect(r.err).toContain(
-      `${main} is the main checkout, and worker-x ran in ${tree}: resume it in ${tree}`,
+    expect(r.err).toBe("")
+    expect(r.code).toBe(0)
+    expect(execLine(r, "worker-x")).toBe(`exec spawn.sh resume worker-x ${tree} ${SESSION}`)
+  })
+
+  // A second worktree of the checkout, holding a transcript of the given session id in its project.
+  const alsoIn3265 = (main: string, id: string) => (home: string) => {
+    const other = join(main, ".claude", "worktrees", "pg-8-y")
+    mkdirSync(other, { recursive: true })
+    const folder = join(home, ".claude", "projects", projectOf(other))
+    mkdirSync(folder, { recursive: true })
+    writeFileSync(
+      join(folder, `${id}.jsonl`),
+      `${JSON.stringify({ cwd: other, gitBranch: "pg-8-y", sessionId: id, type: "user" })}\n`,
     )
+    return other
+  }
+
+  test("another session's newer transcript in a second worktree leaves the resume in the worktree that holds its own id (#3265)", async () => {
+    const { main, spawnSh, tree } = checkout()
+    const r = await spawn(
+      ["resume", "worker-x", main, SESSION, "--runtime", "herdr"],
+      [],
+      NONE,
+      spawnSh,
+      claude,
+      (home) => {
+        ranIn1691(tree)(home)
+        alsoIn3265(main, "00000000-0000-4000-8000-000000000001")(home)
+      },
+    )
+    expect(r.err).toBe("")
+    expect(r.code).toBe(0)
+    expect(execLine(r, "worker-x")).toBe(`exec spawn.sh resume worker-x ${tree} ${SESSION}`)
+  })
+
+  test("a transcript id held by two worktrees' projects is refused, naming both (#3265)", async () => {
+    const { main, spawnSh, tree } = checkout()
+    const r = await spawn(
+      ["resume", "worker-x", main, SESSION, "--runtime", "herdr"],
+      [],
+      NONE,
+      spawnSh,
+      claude,
+      (home) => {
+        ranIn1691(tree)(home)
+        alsoIn3265(main, SESSION)(home)
+      },
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(`${tree}`)
+    expect(r.err).toContain(join(main, ".claude", "worktrees", "pg-8-y"))
+    expect(r.err).toContain("transcript is in the projects of both")
   })
 
   test("a session whose worktree is gone is refused the main checkout, naming the worktree add that brings it back", async () => {
