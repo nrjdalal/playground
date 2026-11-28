@@ -890,7 +890,7 @@ describe("stalledPrs", () => {
     labels?: string[]
     number?: number
     repo?: string
-    suiteAge?: number
+    suiteAges?: number[]
   }
   // open PRs as GitHub's GraphQL search answers them: each opened `createdAge` minutes ago (by default when its head was committed) with its head committed `commitAge` minutes ago, its checks in the rollup state given, and its comments oldest first
   const answer = (prs: Pr[]) =>
@@ -910,8 +910,7 @@ describe("stalledPrs", () => {
                 {
                   commit: {
                     checkSuites: {
-                      nodes:
-                        p.suiteAge === undefined ? [] : [{ createdAt: minutesAgo(p.suiteAge) }],
+                      nodes: (p.suiteAges ?? []).map((age) => ({ createdAt: minutesAgo(age) })),
                     },
                     committedDate: minutesAgo(p.commitAge ?? 5),
                     statusCheckRollup: { state: p.checks ?? "FAILURE" },
@@ -998,9 +997,13 @@ describe("stalledPrs", () => {
   })
 
   // PG-3256: #3249's head was committed at 22:20:48Z and pushed at 23:24:26Z, its first check suite's createdAt, and the sweep read it as idle for 79m about 21 minutes after the push
-  test("reads a head's push, its earliest check suite, as activity, so a head committed an hour ago and pushed 5 minutes ago is not idle", async () => {
-    expect(await lines([{ commitAge: 60, createdAge: 60, suiteAge: 5 }])).toEqual([])
-    expect(await lines([{ commitAge: 60, createdAge: 60, suiteAge: 45 }])).toEqual([
+  test("reads a head's push, its earliest check suite in any order, as activity, so a head committed an hour ago and pushed 5 minutes ago is not idle", async () => {
+    expect(await lines([{ commitAge: 60, createdAge: 60, suiteAges: [5] }])).toEqual([])
+    expect(await lines([{ commitAge: 60, createdAge: 60, suiteAges: [45] }])).toEqual([
+      "no new commit, verdict or comment for 45m",
+    ])
+    // the schema states no order for a commit's suites, so a later re-run's suite listed first still reads the push, the earliest
+    expect(await lines([{ commitAge: 60, createdAge: 60, suiteAges: [5, 45] }])).toEqual([
       "no new commit, verdict or comment for 45m",
     ])
     expect(await lines([{ commitAge: 60, createdAge: 60 }])).toEqual([
@@ -1008,10 +1011,10 @@ describe("stalledPrs", () => {
     ])
   })
 
-  test("asks for each head's earliest check suite in the same search", async () => {
-    const { queries } = await stalled(answer([{ commitAge: 60, suiteAge: 5 }]))
+  test("asks for each head's check suites in the same search", async () => {
+    const { queries } = await stalled(answer([{ commitAge: 60, suiteAges: [5] }]))
     expect(queries).toHaveLength(1)
-    expect(queries[0]).toContain("checkSuites(first: 1) { nodes { createdAt } }")
+    expect(queries[0]).toMatch(/checkSuites\(first: \d+\) \{ nodes \{ createdAt \} \}/)
   })
 
   test("joins both reasons in one entry for a PR that is idle and repeats its score (#454)", async () => {
