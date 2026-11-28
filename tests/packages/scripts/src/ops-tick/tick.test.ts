@@ -1320,6 +1320,140 @@ describe("a lead's stale sweep, in the tick", () => {
   })
 })
 
+// the ship PR from canary into main sat about 22 hours green as a draft, and nothing told Ops it was due (#3203)
+describe("a due ship PR, in the tick", () => {
+  const lockRoot = mkdtempSync(join(tmpdir(), "ops-tick-lock-"))
+  const was = process.env.PLAYGROUND_MERGE_LOCK_DIR
+  beforeAll(() => {
+    process.env.PLAYGROUND_MERGE_LOCK_DIR = lockRoot
+  })
+  afterAll(() => {
+    if (was === undefined) delete process.env.PLAYGROUND_MERGE_LOCK_DIR
+    else process.env.PLAYGROUND_MERGE_LOCK_DIR = was
+    rmSync(lockRoot, { force: true, recursive: true })
+  })
+  const quiet = { ...QUIET_LOAD, "week-marks.py": "acme@example.com: week 40%" }
+  const hoursBefore = (now: Date, hours: number) =>
+    isoAt(new Date(now.getTime() - hours * 3_600_000))
+  // the GitHub reads the tick makes: the ship PR, its head's checks, the last ship into main and canary's commits since it
+  const github = (
+    now: Date,
+    {
+      pr = 3131,
+      subjects = ["feat(PG-1): a", "fix(PG-2): b", "fix(PG-3): c"] as readonly string[],
+      firstHoursAgo = 1,
+      test = "success" as string | null,
+    } = {},
+  ) => ({
+    ...quiet,
+    "remote get-url": "git@github.com:acme/playground.git\n",
+    "state=open": JSON.stringify([
+      { head: { ref: "feature", sha: "f00" }, number: 7 },
+      { head: { ref: "canary", sha: "c0ffee" }, number: pr },
+    ]),
+    "commits/c0ffee/check-runs": JSON.stringify({
+      check_runs: [
+        { conclusion: "failure", id: 1, name: "test" },
+        { conclusion: "success", id: 2, name: "Audit, Lint, and Build" },
+        { conclusion: test, id: 3, name: "test" },
+      ],
+    }),
+    "state=closed": JSON.stringify([
+      { merged_at: null, number: 3120 },
+      { merged_at: hoursBefore(now, 30), number: 3090 },
+      { merged_at: hoursBefore(now, 20), number: 3100 },
+    ]),
+    "commits?sha=canary": JSON.stringify(
+      subjects.map((subject, i) => ({
+        commit: {
+          committer: { date: hoursBefore(now, firstHoursAgo - i * 0.1) },
+          message: `${subject} (#${4000 + i})\n\nbody`,
+        },
+      })),
+    ),
+  })
+  const ops3 = (pr = 3131) =>
+    `#${pr} is due to ship: 3 user-facing merges have landed since the last ship (#3100); ship it by the release skill`
+
+  test("a green ship PR with release.merges user-facing merges since the last ship tells Ops once", async () => {
+    const ops = scratch()
+    const now = at(13, 18)
+    const first = fake(ops, now, github(now))
+    await beat("tick").run(first.ctx)
+    expect(first.sent).toEqual([{ text: ops3(), to: "ops" }])
+    const second = fake(ops, new Date(now.getTime() + 15 * 60_000), github(now))
+    await beat("tick").run(second.ctx)
+    expect(second.sent).toEqual([])
+  })
+
+  test("a green ship PR with release.hours of merging since the first merge after the last ship tells Ops", async () => {
+    const ops = scratch()
+    const now = at(13, 18)
+    const subjects = ["fix(PG-1): a", "chore(PG-2): b", 'revert: "feat(PG-3): c"', "docs(PG-4): d"]
+    const run = fake(ops, now, github(now, { firstHoursAgo: 4.5, subjects }))
+    await beat("tick").run(run.ctx)
+    expect(run.sent).toEqual([
+      {
+        text: "#3131 is due to ship: 4 hours of merging have passed since the last ship (#3100); ship it by the release skill",
+        to: "ops",
+      },
+    ])
+  })
+
+  test.each([
+    ["a red required check", { test: "failure" }],
+    ["a required check still running", { test: null }],
+    [
+      "two user-facing merges in under release.hours",
+      { subjects: ["feat(PG-1): a", "fix(PG-2): b"] },
+    ],
+    ["no merge since the last ship", { subjects: [] }],
+  ] as const)("%s tells no one", async (_case, options) => {
+    const ops = scratch()
+    const now = at(13, 18)
+    const run = fake(ops, now, github(now, options))
+    await beat("tick").run(run.ctx)
+    expect(run.sent).toEqual([])
+  })
+
+  test("a held merge lock tells no one until it goes", async () => {
+    const ops = scratch()
+    const now = at(13, 18)
+    mkdirSync(join(lockRoot, "merge.lock"))
+    try {
+      const held = fake(ops, now, github(now))
+      await beat("tick").run(held.ctx)
+      expect(held.sent).toEqual([])
+    } finally {
+      rmSync(join(lockRoot, "merge.lock"), { force: true, recursive: true })
+    }
+    const freed = fake(ops, new Date(now.getTime() + 15 * 60_000), github(now))
+    await beat("tick").run(freed.ctx)
+    expect(freed.sent).toEqual([{ text: ops3(), to: "ops" }])
+  })
+
+  test("still open an hour after the Ops line tells the dispatcher once, and a new ship PR starts fresh", async () => {
+    const ops = scratch()
+    const now = at(13, 18)
+    const tick = async (minutes: number, pr = 3131) => {
+      const run = fake(ops, new Date(now.getTime() + minutes * 60_000), github(now, { pr }))
+      await beat("tick").run(run.ctx)
+      return run.sent
+    }
+    expect(await tick(0)).toEqual([{ text: ops3(), to: "ops" }])
+    expect(await tick(30)).toEqual([])
+    expect(await tick(60)).toEqual([
+      {
+        text: `#3131 is still open an hour after Ops was told it is due to ship (${isoAt(now)})`,
+        to: "dispatcher",
+      },
+    ])
+    expect(await tick(75)).toEqual([])
+    expect(await tick(180)).toEqual([])
+    expect(await tick(195, 3140)).toEqual([{ text: ops3(3140), to: "ops" }])
+  })
+})
+
 describe("cycle", () => {
   test("starts only the beats due this minute, once a minute, and names a beat that failed", async () => {
     const ran: string[] = []
