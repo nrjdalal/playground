@@ -21,7 +21,7 @@ describe("SESSIONS.md", () => {
   test("a lead that holds a PR tells its reviewer, which stops its push waiter until the resume (#2343)", async () => {
     const fixes =
       (await Bun.file(SESSIONS).text()).split("## Fix pushes and nits")[1]?.split("\n## ")[0] ?? ""
-    expect(fixes).toContain("A lead that holds a PR")
+    expect(fixes).toContain("A lead that names a PR a full hold")
     expect(fixes).toContain("sends its reviewer the hold, then the resume")
     expect(fixes).toContain("The reviewer stops its push waiter with `TaskStop` until the resume")
   })
