@@ -1624,7 +1624,6 @@ case "$MODE" in
       word "$TO" || refuse "it reports to a session name, not $TO"
     else
       # a worker reports to the manager whose session ran the start, else to the builder's seat
-      by=
       [ "$ROLE" = worker ] && by=$(spawner) && word "$by" && [[ $(kind_of "$by") =~ ^(builder|ops|planner|orchestrator)$ ]] || by=
       if [ -n "$by" ]; then TO=$by; elif [ "$ROLE" = runner ]; then TO=$(manager_of ops); else TO=$(manager_of builder); fi
       word "$TO" || refuse "roster.ts who gave $TO, not a session name"

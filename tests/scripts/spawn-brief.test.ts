@@ -112,6 +112,7 @@ describe("a worker with no --reports-to reports to the manager that ran the star
   test.each([
     ["an Ops session", "k3v9q2-ops"],
     ["a Builder session", "k3v9q2-builder"],
+    ["a Planner session", "k3v9q2-planner"],
   ])("run by %s, it names that session in its prompt and its row", async (_case, lead) => {
     const r = await spawn(["worker", "worker-brave-otter", "b.md"], [{ name: lead, pid: 5100 }], {
       CLAUDE_PID: "5100",
@@ -120,6 +121,35 @@ describe("a worker with no --reports-to reports to the manager that ran the star
     expect(launchOf(r)).toContain(`you report to ${lead}.`)
     expect(launchOf(r)).toContain(`Report to ${lead} with SendMessage (to: ${lead}).`)
     expect(reportsTo(r)).toBe(lead)
+  })
+
+  test("run by an orchestrator, whose kind its roster row holds, it names that session", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [{ name: "corvane", pid: 5100 }],
+      {
+        CLAUDE_PID: "5100",
+        ROSTER_JSON: JSON.stringify({
+          agents: [{ name: "corvane", kind: "orchestrator", reportsTo: "dispatcher" }],
+        }),
+      },
+    )
+    expect(r.code).toBe(0)
+    expect(launchOf(r)).toContain("you report to corvane.")
+    expect(reportsTo(r)).toBe("corvane")
+  })
+
+  test("a runner run by a Builder session still reports to ops", async () => {
+    const r = await spawn(
+      ["runner", "runner-brave-otter", "b.md"],
+      [{ name: "k3v9q2-builder", pid: 5100 }],
+      {
+        CLAUDE_PID: "5100",
+      },
+    )
+    expect(r.code).toBe(0)
+    expect(launchOf(r)).toContain("you report to ops.")
+    expect(reportsTo(r)).toBe("ops")
   })
 
   test.each([
