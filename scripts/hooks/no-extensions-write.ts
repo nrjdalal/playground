@@ -3477,6 +3477,8 @@ async function inspect(
         `${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`,
       )
     const steady = steadyAt(cmd)
+    // the steady values and a for loop's literal words, but no bare export, which only a redirect holds
+    const writerSteady: Steady = { ...steady, exported: undefined }
     // a read-only gh call's jq filter is text, never a path, and on a line read whole so is each word wholeText keeps as text
     const filters = whole ? shownText : ghFilters(parsed)
     // each folder the shell may be in, so a program a cd the reader cannot be sure of would run inside the root, or a path of its own that lands there, is judged in every one
@@ -3484,9 +3486,9 @@ async function inspect(
       if (inRoot(here.cwd)) return refuse(`${verb} run inside ${root}`)
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`)
-      // a value the hook cannot read under a remover, as a writer's target, as a file an in-place sed or perl edit edits, or in git's -c, could name the root, so it is refused unless the call holds it
+      // a value the hook cannot read under a remover, as a writer's target, as a file an in-place sed or perl edit edits, or in git's -c, could name the root, so it is refused unless the call holds it, a for loop's literal words each in turn (heldReadings)
       const unheld = (remover ? args : WRITERS.has(tool) ? writes(args) : inPlace(tool, args)).find(
-        (word) => !held(word, here, steady),
+        (word) => !held(word, here, steady) && !heldReadings(word, here, writerSteady),
       )
       if (unheld)
         return refuse(
@@ -3566,7 +3568,12 @@ async function inspect(
           !!sedScripts?.has(word) ||
           (filters.has(word) && !word.glob)
         if (text && !texts(word).some((t) => holds(t.value, here))) continue
-        const named = names(word, here, remover, literal)
+        // a word through a for loop's variable is judged under each value the loop gives it
+        const named = (
+          marked(word.value) ? (heldReadings(word, here, writerSteady) ?? [word]) : [word]
+        )
+          .map((each) => names(each, here, remover, literal))
+          .find(Boolean)
         if (named)
           return (unwritten(named, cmd, here) ? unwrittenRefusal : refuse)(`${verb} on ${named}`)
       }

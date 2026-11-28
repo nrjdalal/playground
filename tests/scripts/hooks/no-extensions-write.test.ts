@@ -3075,7 +3075,11 @@ describe("a job's setting is the owner's alone (PG-1196)", () => {
 describe("a refusal for a value the hook does not hold names it in readable text", () => {
   test.each([
     ["a variable", "rm -f $X/x", "rm on $X/x,"],
-    ["a loop variable", 'for d in a b; do rm -f "$d/x"; done', 'rm on "$d/x",'],
+    [
+      "a loop variable over a list that expands",
+      'for d in $(ls); do rm -f "$d/x"; done',
+      'rm on "$d/x",',
+    ],
     ["a variable inside a nested shell's script", 'bash -c "rm -f $X/x"', "rm on $…/x,"],
     [
       "a held variable after a command named by a variable from the environment",
@@ -4265,5 +4269,87 @@ describe("a write target is read as the shell expands it", () => {
     "uniq -s 2 payload out.log",
   ])("%s runs", async (command) => {
     expect(await bash(command)).toBeUndefined()
+  })
+})
+
+// PG-3186: a for loop's literal words give its variable each value in turn, so a writer's or a remover's target through it is judged under each, as a redirect's is; the loop's head is judged as any program's words, so a body that reads the variable where the hook judges nothing (an env prefix, an export, a shell's script) never reaches the root
+describe("a for loop's literal words are read as the values its variable takes", () => {
+  const A = join(WORK, "a")
+  const B = join(WORK, "b")
+  test.each([
+    ["a cp into two worktrees' .env", `for d in ${A} ${B}; do cp /dev/null "$d/.env"; done`],
+    ["a tee into two worktrees' .env", `for d in ${A} ${B}; do echo x | tee "$d/.env"; done`],
+    ["a redirect into two worktrees' .env", `for d in ${A} ${B}; do echo x > "$d/.env"; done`],
+    [
+      "a cp in a nested loop",
+      `for d in ${A} ${B}; do for e in x y; do cp /dev/null "$d/$e"; done; done`,
+    ],
+  ])("%s runs", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  // each through the loop with the root, or the data folder above it, among its words; the twins below write the root out, which canary refuses too
+  test.each([
+    ["a cp", `cp /dev/null "$d/.env"`],
+    ["a tee", `echo x | tee "$d/.env"`],
+    ["a redirect", `echo x > "$d/.env"`],
+    ["a remover", `rm -f "$d/.env"`],
+    ["a mv", `mv /tmp/f "$d/x"`],
+    ["an ln", `ln -s /tmp/f "$d/x"`],
+    ["an install", `install /tmp/f "$d/x"`],
+    ["a touch", `touch "$d/x"`],
+    ["a mkdir", `mkdir "$d/x"`],
+    ["a dd", `dd if=/dev/zero of="$d/x" count=1`],
+    ["a cd and a write", `cd "$d" && echo x > f`],
+    ["inline code", `python3 -c "open('$d/x','w')"`],
+    ["git -C", `git -C "$d" commit -m x`],
+    ["env -C", `env -C "$d" touch x`],
+    ["tar -C", `tar -C "$d" -xf /tmp/a.tar`],
+    ["an rsync", `rsync /tmp/f "$d/"`],
+    ["a curl -o", `curl -o "$d/x" https://example.com`],
+    ["an env prefix", `P=$d mytool`],
+    ["a HOME prefix", `HOME=$d mytool`],
+    ["an export", `export d; mytool`],
+    ["a shell's script", `sh -c "echo x > $d/x"`],
+    ["a shell's parameter", `sh -c 'echo x > "$1"/x' _ "$d"`],
+    ["a nested loop", `for e in x y; do cp /dev/null "$d/$e"; done`],
+  ])("%s through the loop's variable is refused", async (_, body) => {
+    for (const words of [`${A} ${ROOT}`, ROOT, `${A} ${DATA}`])
+      expect(await bash(`for d in ${words}; do ${body}; done`)).toContain(
+        "no-extensions-write hook refuses",
+      )
+  })
+
+  test.each([
+    [
+      "a read-only loop over the data folder",
+      `for d in ${A} ${DATA}; do ls -a "$d" | grep env; done`,
+    ],
+    ["a remover of the data folder", `for d in ${A} ${DATA}; do rm -f "$d"; done`],
+    ["a cp over a substitution", `for d in $(printf %s ${A}); do cp /dev/null "$d/.env"; done`],
+    ["a cp over a glob", `for d in ${WORK}/*; do cp /dev/null "$d/.env"; done`],
+    [
+      "a cp whose variable the line sets again",
+      `for d in ${A}; do d=${ROOT}; cp /dev/null "$d/.env"; done`,
+    ],
+    [
+      "a cp after a read into the variable",
+      `for d in ${A} ${B}; do read d; cp /dev/null "$d/.env"; done`,
+    ],
+    [
+      "a cp after a printf -v into the variable",
+      `for d in ${A} ${B}; do printf -v d %s ${ROOT}; cp /dev/null "$d/.env"; done`,
+    ],
+    [
+      "a cp through an inner loop with the root among its words",
+      `for d in ${A} ${B}; do for e in x ${ROOT}; do cp /dev/null "$e/.env"; done; done`,
+    ],
+    ["a cp through a bare export", `export X=${ROOT}; cp /dev/null "$X/.env"`],
+    ["a cp through a bare export of a worktree", `export X=${A}; cp /dev/null "$X/.env"`],
+    ["the twin of an env prefix", `P=${ROOT} mytool`],
+    ["the twin of an export", `export d=${ROOT}; mytool`],
+    ["the twin of a shell's script", `D=${ROOT}; bash -c "echo x > $D/x"`],
+  ])("%s is refused", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook refuses")
   })
 })

@@ -13467,13 +13467,14 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     if (env.cwdAnywhere)
       return refuse(`${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`);
     const steady = steadyAt(cmd);
+    const writerSteady = { ...steady, exported: undefined };
     const filters = whole ? shownText : ghFilters(parsed);
     for (const here of places(env)) {
       if (inRoot(here.cwd))
         return refuse(`${verb} run inside ${root}`);
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`);
-      const unheld = (remover ? args : WRITERS.has(tool) ? writes(args) : inPlace(tool, args)).find((word) => !held3(word, here, steady));
+      const unheld = (remover ? args : WRITERS.has(tool) ? writes(args) : inPlace(tool, args)).find((word) => !held3(word, here, steady) && !heldReadings(word, here, writerSteady));
       if (unheld)
         return refuse(unheld.splits ? `${verb} on ${shown(unheld)}, a value the hook does not hold that the shell may split into several words; quote it ("$X") and hold it in the same call, or write the path literally` : `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`);
       if (name === "git") {
@@ -13520,7 +13521,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
         const text = quiet && /\s/.test(word.value) || !!sedScripts?.has(word) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
           continue;
-        const named = names(word, here, remover, literal);
+        const named = (marked(word.value) ? heldReadings(word, here, writerSteady) ?? [word] : [word]).map((each) => names(each, here, remover, literal)).find(Boolean);
         if (named)
           return (unwritten(named, cmd, here) ? unwrittenRefusal : refuse)(`${verb} on ${named}`);
       }
