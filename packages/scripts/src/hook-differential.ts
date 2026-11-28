@@ -27,7 +27,16 @@ export type Check = (
   main?: string,
 ) => Promise<string | undefined> | string | undefined
 type Form = { command: string; inClass?: boolean }
-type Call = { command: string; cwd: string; loaded?: boolean; name?: string; session?: string }
+type Call = {
+  at?: number
+  command: string
+  cwd: string
+  loaded?: boolean
+  name?: string
+  session?: string
+}
+// The first and last time a session's transcripts wrote a line, the span it reads as live for
+type Span = { from: number; to: number }
 type Env = Record<string, string | undefined>
 type Tally = { inClass: number; outClass: number }
 
@@ -147,7 +156,7 @@ const bare = (home: string) => (): Env => ({ HOME: home, PATH: process.env.PATH 
 // The endpoint spawn.sh's GLM launch points ANTHROPIC_BASE_URL at, which no-glm-heavy-path's onGlm reads as a GLM session
 export const GLM_BASE_URL = "https://api.z.ai/api/anthropic"
 
-// Each call's env: the home, PATH and the scratch data folder, with --glm ANTHROPIC_BASE_URL at the GLM endpoint; PLAYGROUND_ROLE set to --role's role, or with --role session to the role the roster gives the call's session by its transcript name, its session named in a scratch registry (CLAUDE_CONFIG_DIR); a name the roster lacks keeps the default, PLAYGROUND_ROLE unset, where a hook places the session by its name itself
+// Each call's env: the home, PATH and the scratch data folder, with --glm ANTHROPIC_BASE_URL at the GLM endpoint; PLAYGROUND_ROLE set to --role's role, or with --role session to the role the roster gives the call's session by its transcript name, its session named in a scratch registry (CLAUDE_CONFIG_DIR), one folder or the one a function gives the call; a name the roster lacks keeps the default, PLAYGROUND_ROLE unset, where a hook places the session by its name itself
 export const envOf =
   ({
     config,
@@ -157,7 +166,7 @@ export const envOf =
     role,
     roles,
   }: {
-    config?: string
+    config?: string | ((call: Call) => string)
     data: string
     glm?: boolean
     home: string
@@ -168,7 +177,9 @@ export const envOf =
     const own = role === "session" ? roles?.get(call.name ?? "") || undefined : role
     return {
       ...(glm ? { ANTHROPIC_BASE_URL: GLM_BASE_URL } : {}),
-      ...(config === undefined ? {} : { CLAUDE_CONFIG_DIR: config }),
+      ...(config === undefined
+        ? {}
+        : { CLAUDE_CONFIG_DIR: typeof config === "string" ? config : config(call) }),
       HOME: home,
       PATH: process.env.PATH,
       PLAYGROUND_DATA_DIR: data,
@@ -195,24 +206,50 @@ export function scratchData(real: string, base = tmpdir()): string {
 // The config entries a hook reads besides the registry, linked from the real config folder: writing-first's installed skill and plugins
 const CONFIG_LINKS = ["plugins", "settings.json", "skills"]
 
-// The role the roster's kind gives each transcript name, from the real data folder, and a scratch registry naming each named session, for --role session
-export async function sessionRoles(list: Call[], real: Env, base = tmpdir()) {
-  const config = mkdtempSync(join(base, "hook-differential-config-"))
-  mkdirSync(join(config, "sessions"))
+// The role the roster's kind gives each transcript name, from the real data folder, and a scratch registry naming each named session, for --role session; with each session's span, configAt gives a call the registry of the named sessions live at its time, its own always among them, one folder per set, since the live registry holds only the sessions running then and a hook's scan of it costs what a live call's does (issue 3260)
+export async function sessionRoles(
+  list: Call[],
+  real: Env,
+  base = tmpdir(),
+  spans?: Map<string, Span>,
+) {
   const own = real.CLAUDE_CONFIG_DIR || join(real.HOME || homedir(), ".claude")
-  for (const entry of CONFIG_LINKS)
-    if (existsSync(join(own, entry))) symlinkSync(join(own, entry), join(config, entry))
+  const registry = (entries: Map<string, string>) => {
+    const dir = mkdtempSync(join(base, "hook-differential-config-"))
+    mkdirSync(join(dir, "sessions"))
+    for (const entry of CONFIG_LINKS)
+      if (existsSync(join(own, entry))) symlinkSync(join(own, entry), join(dir, entry))
+    for (const [session, name] of entries)
+      writeFileSync(
+        join(dir, "sessions", `${session}.json`),
+        JSON.stringify({ name, sessionId: session }),
+      )
+    return dir
+  }
   const roles = new Map<string, string>()
+  const named = new Map<string, string>()
   for (const { name, session } of list) {
     if (!name) continue
     if (!roles.has(name)) roles.set(name, await rosterRole(name, real))
-    if (session)
-      writeFileSync(
-        join(config, "sessions", `${session}.json`),
-        JSON.stringify({ name, sessionId: session }),
-      )
+    if (session) named.set(session, name)
   }
-  return { config, roles }
+  const config = registry(named)
+  const sets = new Map<string, string>()
+  const configAt = (call: Call): string => {
+    const at = call.at
+    if (!spans || at === undefined || Number.isNaN(at)) return config
+    const live = new Map(
+      [...named].filter(([session]) => {
+        const span = spans.get(session)
+        return session === call.session || (span && span.from <= at && at <= span.to)
+      }),
+    )
+    const key = [...live.keys()].sort().join(" ")
+    let dir = sets.get(key)
+    if (!dir) sets.set(key, (dir = registry(live)))
+    return dir
+  }
+  return { config, configAt, roles }
 }
 
 // Each form from each folder through both hooks: the same, newly allowed and newly refused, each split by the form's class (a form with no class is outside it)
@@ -266,12 +303,13 @@ const typed = (content: unknown) =>
       (TYPED.test(part.text) || COMMAND.test(part.text)),
   )
 
-// Every Bash call of the transcripts under `projects` newer than `since`, a sub-agent's nested ones included, one per folder and command; bySession keeps one per session, load state, folder and command, each with its session, the name its transcript's agent-name lines last gave it, and whether its transcript had loaded writing-for-agents since its last compaction, a load before `since` included; glm keeps only the calls a GLM model made, by each call's own `message.model`, from every transcript whatever its age
+// Every Bash call of the transcripts under `projects` newer than `since`, a sub-agent's nested ones included, one per folder and command; bySession keeps one per session, load state, folder and command, each with its session, the name its transcript's agent-name lines last gave it, and whether its transcript had loaded writing-for-agents since its last compaction, a load before `since` included; glm keeps only the calls a GLM model made, by each call's own `message.model`, from every transcript whatever its age; given spans, each call carries the time its transcript made it, and spans gets each session's first and last line's time (issue 3260)
 export async function calls(
   projects: string,
   since: number,
   bySession = false,
   glm = false,
+  spans?: Map<string, Span>,
 ): Promise<Call[]> {
   const found = new Map<string, Call>()
   const names = new Map<string, string>()
@@ -282,6 +320,18 @@ export async function calls(
     if (statSync(path).mtimeMs < from) continue
     let loaded = false
     for (const line of (await Bun.file(path).text()).split("\n")) {
+      if (spans) {
+        const session = /"sessionId":"([^"]+)"/.exec(line)?.[1]
+        const at = Date.parse(/"timestamp":"([^"]+)"/.exec(line)?.[1] ?? "")
+        if (session && !Number.isNaN(at)) {
+          const span = spans.get(session)
+          if (!span) spans.set(session, { from: at, to: at })
+          else {
+            span.from = Math.min(span.from, at)
+            span.to = Math.max(span.to, at)
+          }
+        }
+      }
       const named = bySession && line.includes('"agent-name"')
       const marks = bySession && (line.includes('"compact_boundary"') || line.includes(SKILL))
       if (!line.includes('"Bash"') && !named && !marks) continue
@@ -329,6 +379,7 @@ export async function calls(
         found.set(
           `${bySession ? `${session}\0${loaded}` : ""}\0${entry.cwd}\0${part.input.command}`,
           {
+            ...(spans ? { at: Date.parse(entry.timestamp ?? "") } : {}),
             command: part.input.command,
             cwd: entry.cwd,
             ...(bySession ? { loaded, session } : {}),
@@ -693,13 +744,22 @@ async function main(args: string[]): Promise<number> {
       }),
     hooks,
   )
+  const spans = new Map<string, Span>()
   const list =
     mode === "replay"
-      ? await calls(projects, Date.now() - hours * 3600 * 1000, role === "session", glm)
+      ? await calls(
+          projects,
+          Date.now() - hours * 3600 * 1000,
+          role === "session",
+          glm,
+          role === "session" ? spans : undefined,
+        )
       : []
   const real = dataDirOf(process.env, home)
   const session =
-    role === "session" ? await sessionRoles(list, { ...process.env, HOME: home }) : undefined
+    role === "session"
+      ? await sessionRoles(list, { ...process.env, HOME: home }, tmpdir(), spans)
+      : undefined
   const defaulted = session
     ? {
         "default role": list.filter((c) => !session.roles.get(c.name ?? "")).length,
@@ -724,7 +784,14 @@ async function main(args: string[]): Promise<number> {
     const head: Check = await checkOf(join(root, "scripts/hooks", `${hook}.ts`), hook, headMain)
     const main = TAKES_MAIN.includes(hook) ? headMain : undefined
     // a scratch data folder per hook, so the marks one hook's replay writes never reach the next's
-    const env = envOf({ ...session, data: scratchData(real), glm, home, role })
+    const env = envOf({
+      config: session?.configAt,
+      data: scratchData(real),
+      glm,
+      home,
+      role,
+      roles: session?.roles,
+    })
     const { changed, counts } =
       mode === "sweep"
         ? await sweep(canary, head, forms, home, main, headMain, env)

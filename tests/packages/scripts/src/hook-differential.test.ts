@@ -558,6 +558,59 @@ describe("a run under a role", () => {
       { command: "ls", cwd: "/h", loaded: false, session: "s2" },
     ])
   })
+
+  test("each call's registry holds only the named sessions live at its time, by each session's first and last line, as the live registry would then", async () => {
+    const projects = join(DIR, "live-projects")
+    mkdirSync(join(projects, "p"), { recursive: true })
+    const base = Date.now() - 5 * 3600_000
+    const at = (minutes: number) => new Date(base + minutes * 60_000).toISOString()
+    const line = (session: string, minutes: number) =>
+      JSON.stringify({
+        message: { content: "hi" },
+        sessionId: session,
+        timestamp: at(minutes),
+        type: "user",
+      })
+    const named = (session: string, name: string) =>
+      JSON.stringify({ agentName: name, sessionId: session, type: "agent-name" })
+    // s1 lives 0 to 120 min, s3 30 to 195, s2 180 to 240; each makes one call
+    const transcripts: Record<string, string[]> = {
+      s1: [line("s1", 0), bashLine("one", "s1", "/h", at(60)), line("s1", 120)],
+      s2: [line("s2", 180), bashLine("two", "s2", "/h", at(210)), line("s2", 240)],
+      s3: [line("s3", 30), bashLine("three", "s3", "/h", at(190)), line("s3", 195)],
+    }
+    for (const [session, lines] of Object.entries(transcripts))
+      writeFileSync(
+        join(projects, "p", `${session}.jsonl`),
+        [named(session, `${session}-worker`), ...lines].join("\n"),
+      )
+    const spans = new Map()
+    const list = await calls(projects, base - 3600_000, true, false, spans)
+    expect(Object.fromEntries(list.map((c) => [c.command, c.at]))).toEqual({
+      one: Date.parse(at(60)),
+      three: Date.parse(at(190)),
+      two: Date.parse(at(210)),
+    })
+    const own = join(DIR, "live-config")
+    mkdirSync(own, { recursive: true })
+    const { config, configAt } = await sessionRoles(
+      list,
+      { CLAUDE_CONFIG_DIR: own, HOME: DIR },
+      DIR,
+      spans,
+    )
+    const env = envOf({ config: configAt, data: "/d", home: DIR })
+    const held = (dir: string) => readdirSync(join(dir, "sessions")).toSorted()
+    const by = Object.fromEntries(list.map((c) => [c.command, held(env(c).CLAUDE_CONFIG_DIR!)]))
+    expect(by).toEqual({
+      one: ["s1.json", "s3.json"],
+      three: ["s2.json", "s3.json"],
+      two: ["s2.json"],
+    })
+    // a call with no time, as a test's or a sweep's, reads the registry of every named session
+    expect(held(configAt({ command: "ls", cwd: "/h", session: "s1" }))).toEqual(held(config))
+    expect(held(config)).toEqual(["s1.json", "s2.json", "s3.json"])
+  })
 })
 
 // A transcript's lines as Claude Code writes them: a Bash or Skill call, a typed prompt and a compaction
