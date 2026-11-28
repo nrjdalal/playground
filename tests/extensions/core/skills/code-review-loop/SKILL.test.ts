@@ -52,15 +52,19 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(await page()).toContain("stays up after its 5/5")
   })
 
-  test("a PR its lead holds keeps no waiter until the lead's resume word, and a ship's freeze is no hold (#2343)", async () => {
+  test("a PR its lead names a full hold keeps no waiter until the lead's resume word, and any other held line holds the merge alone (#2343)", async () => {
     const [step, done] = (
       (await skill()).match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
     ).split("**Done when**")
     expect(step).toContain("stop its waiter with `TaskStop`")
     expect(step).toContain("that lead's resume word")
     expect(step).toContain("a ship's freeze")
-    expect(done ?? "").toContain("on a PR its lead holds, stopped until the lead's resume word")
-    expect(await page()).toContain("stops its waiter while its lead holds the PR")
+    expect(done ?? "").toContain(
+      "on a PR its lead names a full hold, stopped until the lead's resume word",
+    )
+    expect(await page()).toContain(
+      "stops its waiter while its lead names the PR's hold a full hold",
+    )
   })
 
   test("a moved canary touching the PR's files gets its touched tests run on a local merge", async () => {
@@ -439,6 +443,19 @@ describe("code-review-loop's round 1 greps each changed term", () => {
 })
 
 describe("code-review-loop keeps its clone at the head and asks the lead on a trust-widening nit", () => {
+  test("step 4's sub-agent prompts carry the slots and signal rules and a scratch folder inside the reviewer's, and its Done when checks them (#3222, #3244)", async () => {
+    const [step, done] = await part("Fresh read")
+    expect(step).toContain("Their prompts also carry the **slots** and **signal** rules")
+    expect(step).toContain(
+      "`~/.playground/ops/run-slot.sh <your name> --`, or else reasons about the code without running it",
+    )
+    expect(step).toContain("`~/.playground/scratch/<your name>/std/` or `spec/`")
+    expect(done ?? "").toContain(
+      "carried the **slots** and **signal** rules with its scratch folder",
+    )
+    expect(await page()).toContain("Their prompts carry the slots and signal rules too")
+  })
+
   test("step 4's sub-agents read the PR pinned to the head's sha, never the clone's working files, and its Done when checks each prompt pinned them (#1624, #i1069)", async () => {
     const [step, done] = await part("Fresh read")
     expect(step).toContain("git's object reads pinned to the head's sha alone")

@@ -3,15 +3,18 @@ import { homedir } from "node:os"
 
 import { unlinked } from "./playground/unlinked"
 
-// Runs a pre-commit step (the build or a type check) or the pre-push test:skills step through the machine's commit slot, `~/.playground/ops/run-slot.sh commit-<worktree> -- <step>` marked `RUN_SLOT_COMMIT_STEP=1`, which run-slot gives `run-slot-commit` as it gives `run-slot.sh <who> -- git commit` (3 Nov: a plain commit's build waited about an hour in the full queue), when the commit is in a worktree under `.claude/worktrees/` and that script is executable; it runs the step bare anywhere else, in a commit already running under run-slot (whose child carries the `RUN_SLOT_NICE` it exports), so a commit never waits on a slot it holds, and for the build when turbo can replay every build task from its cache, since a replay ran 2 s or less after waits of up to 1,788 s (2 Nov, run-slot.runs.log); a type check reads no such cache, so it takes the slot whenever it would.
+// Runs a pre-commit step (the build, env-keys' build of @packages/env or a type check) or the pre-push test:skills step through the machine's commit slot, `~/.playground/ops/run-slot.sh commit-<worktree> -- <step>` marked `RUN_SLOT_COMMIT_STEP=1`, which run-slot gives `run-slot-commit` as it gives `run-slot.sh <who> -- git commit` (3 Nov: a plain commit's build waited about an hour in the full queue), when the commit is in a worktree under `.claude/worktrees/` and that script is executable; it runs the step bare anywhere else, in a commit already running under run-slot (whose child carries the `RUN_SLOT_NICE` it exports), so a commit never waits on a slot it holds, and for either build when turbo can replay every task of it from its cache, since a replay ran 2 s or less after waits of up to 1,788 s (2 Nov, run-slot.runs.log); a type check reads no such cache, so it takes the slot whenever it would.
 
 const WORKTREE = /\/\.claude\/worktrees\/([^/]+)/
 
 const DRY_RUN = ["bun", "run", "turbo", "run", "build", "--dry=json"]
 
-// The one step whose cost turbo's cache speaks for.
-const BUILD = ["bun", "run", "build"]
-export const isBuild = (step: string[]): boolean => step.join(" ") === BUILD.join(" ")
+// The turbo dry run of a build step, the steps whose cost turbo's cache speaks for: the build, or env-keys' `bunx turbo run build --filter=...` read under its own filters; null for a type check.
+export const dryRun = (step: string[]): string[] | null => {
+  if (step.join(" ") === "bun run build") return DRY_RUN
+  if (step.slice(0, 4).join(" ") !== "bunx turbo run build") return null
+  return [...DRY_RUN, ...step.slice(4).filter((arg) => arg.startsWith("--filter="))]
+}
 
 export const replays = (dry: string): boolean => {
   try {
@@ -65,8 +68,9 @@ if (import.meta.main) {
   const argv = slotted({
     argv: step,
     cached: () => {
-      if (!isBuild(step)) return false
-      const dry = Bun.spawnSync(DRY_RUN, { stderr: "ignore", stdout: "pipe", timeout: 10_000 })
+      const dryArgv = dryRun(step)
+      if (!dryArgv) return false
+      const dry = Bun.spawnSync(dryArgv, { stderr: "ignore", stdout: "pipe", timeout: 10_000 })
       return dry.exitCode === 0 && replays(dry.stdout.toString())
     },
     cwd: process.cwd(),

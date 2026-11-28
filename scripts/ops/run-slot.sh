@@ -1056,7 +1056,7 @@ chain_lane() {
 # Quick slots, outside the queue, one holder each: a plain git commit (its pre-commit build, about 17s) takes run-slot-commit (builder, 13 Oct: five commits waited in a fifteen-deep queue; a commit with a longer hook goes through the queue as <who> -- bash -c '...'), and a node_modules clone (cp -cR <sibling>/node_modules <worktree>/, or cp -R --reflink=auto on Linux: cp and a node_modules path, whatever the flags) takes run-slot-clone (dispatcher, 13 Oct: three load spikes, 77 and 43 among them, each with fseventsd near 100% while clones ran at once); a git merge or pull takes run-slot-commit too, and a bun install or a short bun test, docs:wrap or format:check takes run-slot-quick
 quick_rule() {
   local a first=""
-  # a pre-commit step commit-slot.ts hands over (the build or a type check), marked RUN_SLOT_COMMIT_STEP=1 under its commit-<worktree> name, is a plain git commit's own step, so it takes run-slot-commit too (3 Nov: a plain commit's build waited about an hour in the queue)
+  # a pre-commit step commit-slot.ts hands over (the build, env-keys' build of @packages/env or a type check), marked RUN_SLOT_COMMIT_STEP=1 under its commit-<worktree> name, is a plain git commit's own step, so it takes run-slot-commit too (3 Nov: a plain commit's build waited about an hour in the queue)
   case "$WHO" in commit-*) [ "${RUN_SLOT_COMMIT_STEP:-}" = 1 ] && { echo commit; return; } ;; esac
   # the command's first word past env and VAR=x, as box_fits finds it (optimizer, 19 Oct: a commit run as env NODE_ENV=... git commit waited 14 min in the queue)
   first=$(first_word "$@")
@@ -1234,7 +1234,7 @@ heavy_build() {
         return 1
       fi ;;
   esac
-  # commit-slot.ts's build step (`bun run build`) alone, never its type checks, which build nothing
+  # commit-slot.ts's build steps (`bun run build`, and env-keys' `bunx turbo run build --filter=@packages/env`) alone, never its type checks, which build nothing
   case "$WHO" in commit-*) for a in "$@"; do [ "$a" = build ] && commit=1; done ;; esac
   for a in "$@"; do
     case "$state" in
