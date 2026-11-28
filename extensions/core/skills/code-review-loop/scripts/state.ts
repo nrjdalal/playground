@@ -119,7 +119,7 @@ export const timeoutPlugin = (clone: string): boolean => {
 
 // The skill's whole-suite chunk: one call on more files misses the test sandbox's 1200 s deadline.
 const CHUNK = 200
-// A chunk's summed expected time, the deadline's own 1200 s: the sandbox's 4-worker pass ran a chunk in 0.4 to 0.45 of its sum under load (501 s for 1277 s, 630 s for 1411 s, measured 28 Nov), so about 540 s, under half the deadline, where a 200-file chunk summing 2697 s was cut
+// A chunk's summed serial time from tests/timings.json, not its wall time: a loaded 4-worker pass runs about 0.4 of it (501 s for 1277 s, 630 s for 1411 s, measured on a whole-suite PR on 28 Nov), so about 500 s, under half the sandbox's deadline
 const BUDGET_MS = 1_200_000
 // The suite's own timings, tests/timings.json's files, each file's last passing time in ms; none for a clone without the file
 export const timingsOf = (clone: string): Record<string, number> => {
