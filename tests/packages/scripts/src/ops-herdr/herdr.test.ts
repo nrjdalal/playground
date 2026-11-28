@@ -774,6 +774,17 @@ describe("restoreSummary", () => {
     )
   })
 
+  // PG-3217: focus's own text is free, so a focus line whose text holds a gate's words counts as focus, and only the reason's own prefix names a gate
+  test("reads a gate only from the reason's own prefix, so a focus line naming a gate in its text counts as focus", () => {
+    const output = [
+      "waiting a-worker: focus stands for the load gate holds it: ship it, so no new session starts until it ends but its own reviewer and tester (playground focus off ends it)",
+      "waiting b-worker: the load gate holds it: max(load1, load5) is 17.23",
+    ].join("\n")
+    expect(restoreSummary(`${output}\n`)).toBe(
+      "1 waiting for focus to end · 1 waiting for load to drop (the waiting ones come back on their own)",
+    )
+  })
+
   test("leaves out a kind with none", () => {
     expect(restoreSummary("restored a-worker\nskipped b-worker: live\n")).toBe(
       "1 restored · 1 already running",
