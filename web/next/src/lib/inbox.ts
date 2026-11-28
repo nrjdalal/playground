@@ -6,6 +6,7 @@ import {
   CLOCKS_STOPPED_AT,
   picksOf,
   rowOfAnswer,
+  ticksOf,
 } from "@packages/config/inbox"
 import { useQuery } from "@tanstack/react-query"
 
@@ -532,6 +533,13 @@ export function cardKey(
 export const sendWhy = (pick: ChoiceRow | null): string | null =>
   pick === null ? "Pick an option first" : null
 
+// Pure: a multiSelect ask's ticks once the owner ticks or unticks a row, in the rows' order: a go row comes or goes and clears None of these, which, ticked, stands alone, so what Send takes is always an answer.
+export const tickRow = (rows: ChoiceRow[], ticks: number[], index: number): number[] => {
+  if (ticks.includes(index)) return ticks.filter((at) => at !== index)
+  if (rows[index] && !rows[index].go) return [index]
+  return [...ticks.filter((at) => rows[at]?.go), index].sort((a, b) => a - b)
+}
+
 // Pure: whether Dismiss is offered: an answered decision or draft, one that failed to send included, one he replied to, which stays open, or any update, read or not, still in the list; dismissing an update marks it read.
 export const dismissable = (item: InboxItem): boolean =>
   (item.kind === "update" || item.status !== "open" || chosen(item)?.choice === "replied") &&
@@ -907,7 +915,7 @@ function pickedLine(
   answer: { choice: string; option?: number; options?: number[] },
 ): string {
   if (answer.options && item.kind === "decision") {
-    const picks = picksOf(item.preview, answer.options)
+    const picks = ticksOf(item.preview, answer.options) ?? picksOf(item.preview, answer.options)
     if (picks) return picks.map((p) => `${p.letter}. ${p.label}`).join(" · ")
   }
   const side = answer.choice === "deny" ? "Deny" : "Approve"

@@ -26,6 +26,15 @@ describe("parsePicks", () => {
     expect(parsePicks(JSON.stringify(stored))).toEqual(stored)
   })
 
+  test("reads a multiSelect card's ticks back, an older entry with none reading as no ticks, and drops a bad tick (PG-3177)", () => {
+    const stored = { [ID]: entry({ sig: SIG, ticks: [0, 2] }) }
+    expect(parsePicks(JSON.stringify(stored))).toEqual(stored)
+    const { ticks: _, ...older } = entry({ pick: 1 })
+    expect(parsePicks(JSON.stringify({ [ID]: older }))).toEqual({ [ID]: entry({ pick: 1 }) })
+    expect(parsePicks(JSON.stringify({ [ID]: entry({ ticks: [null] as never }) }))).toEqual({})
+    expect(parsePicks(JSON.stringify({ [ID]: entry({ ticks: [] }) }))).toEqual({})
+  })
+
   test("a missing, broken or foreign value reads as no picks", () => {
     expect(parsePicks(null)).toEqual({})
     expect(parsePicks("{")).toEqual({})

@@ -1,4 +1,10 @@
-import { type ChoicePreview, choicesOf, FACTORY_SCOPE, factoryAsk } from "@packages/config/inbox"
+import {
+  type ChoicePreview,
+  choicesOf,
+  FACTORY_SCOPE,
+  factoryAsk,
+  multiSelect,
+} from "@packages/config/inbox"
 import { roleOfName } from "@packages/config/kinds"
 import { hideSecrets } from "@packages/settings"
 
@@ -22,6 +28,7 @@ export type Card = {
     deny?: string
     // a draft's place: its thread's link, and who it goes to by a short name
     link?: string
+    multiSelect?: boolean
     options?: { description?: string; label: string }[]
     questions?: unknown[]
     scope?: string
@@ -43,6 +50,10 @@ export type Sent = {
   // the card's poll, when one went: its message id and its secret in base64, so the owner's vote reads back as a row
   poll?: { id: string; secret: string }
   rows: { go: boolean; label: string }[]
+  // a multiSelect poll's newest vote, by its rows and when it came, which answers the card once no newer vote comes for VOTE_SETTLE_MS
+  ticked?: { at: number; rows: number[] }
+  // a multiSelect ask's card, whose poll takes several answers and whose reply takes several numbers
+  ticking?: true
 }
 
 // WhatsApp's poll holds 2 to 12 options.
@@ -127,7 +138,8 @@ const tag = (ref: number) => `#i${ref}`
 export function cardOf(
   card: Card,
   terms: Terms,
-): { poll: ReturnType<typeof pollOf>; rows: Sent["rows"]; text: string } {
+): { poll: ReturnType<typeof pollOf>; rows: Sent["rows"]; text: string; ticking?: true } {
+  const ticking = card.kind === "decision" && multiSelect(card.preview as ChoicePreview)
   const files = card.preview.attachments?.length ?? 0
   const lines = [`*${card.title}*`, card.preview.text ?? ""]
   if (files > 0)
@@ -144,7 +156,9 @@ export function cardOf(
       ? rows.map((row, i) => `Reply ${i + 1} ${tag(card.ref)} to ${row.label}`)
       : [`${tag(card.ref)} is an update: it asks nothing.`]),
   )
+  if (ticking) lines.push(`Reply several numbers, as 1 2 ${tag(card.ref)}, to pick more than one.`)
   return {
+    ...(ticking && { ticking: true as const }),
     poll: pollOf(card.ref, redact(card.title, terms), rows),
     rows,
     text: redact(lines.filter(Boolean).join("\n"), terms),
@@ -170,10 +184,18 @@ export const waitingLine = (cards: Pick<Card, "title">[], terms: Terms | undefin
 }
 
 // What a message is, read as an answer to a card: a number and a card's id in either order, a number alone, or an id alone; null for any other message, which goes to the dispatcher.
-export type Reply = { number?: number; ref?: number }
+export type Reply = { number?: number; numbers?: number[]; ref?: number }
 
 export const replyOf = (text: string): Reply | null => {
   const t = text.trim()
+  // several numbers name one card's id, before or after them, so a bare "1 2" stays the owner's own words
+  const many =
+    /^(\d{1,2}(?:[\s,]+\d{1,2})+)\s*#i(\d{1,9})$/i.exec(t) ??
+    /^#i(\d{1,9})\s+(\d{1,2}(?:[\s,]+\d{1,2})+)$/i.exec(t)
+  if (many) {
+    const [numbers, ref] = t.startsWith("#") ? [many[2]!, many[1]!] : [many[1]!, many[2]!]
+    return { numbers: numbers.split(/[\s,]+/).map(Number), ref: Number(ref) }
+  }
   const both = /^(\d{1,2})\s*#i(\d{1,9})$/i.exec(t) ?? /^#i(\d{1,9})\s+(\d{1,2})$/i.exec(t)
   if (both) {
     const [a, b] = [Number(both[1]), Number(both[2])]
@@ -195,6 +217,10 @@ export const noRow = (ref: number, rows: number) =>
     ? `${tag(ref)} asks nothing, so this answers nothing.`
     : `${tag(ref)} has no choice like that, so this answers nothing: reply with 1 to ${rows} and its id.`
 export const answered = (ref: number, label: string) => `Answered ${tag(ref)}: ${label}.`
+export const oneRow = (ref: number) =>
+  `${tag(ref)} takes one choice, so this answers nothing: reply with one number and its id.`
+export const noneAlone = (ref: number, label: string) =>
+  `${tag(ref)} takes ${label} on its own, so this answers nothing: reply with it alone, or with the rows you pick.`
 export const notAnswered = (ref: number, why: string) =>
   `${tag(ref)} was not answered: ${why}. Answer it in the Inbox.`
 

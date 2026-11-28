@@ -4,10 +4,13 @@ import {
   type ChoicePreview,
   type InboxPlace,
   choicesOf,
+  multiSelect,
   orderInboxItems,
   progressItems,
   rankBetween,
   rowOfAnswer,
+  ticksAnswer,
+  ticksOf,
 } from "../../../../packages/config/src/inbox"
 
 describe("choicesOf", () => {
@@ -233,5 +236,45 @@ describe("rankBetween", () => {
       expect(between(low, key, high)).toBe(true)
       high = key
     }
+  })
+})
+
+describe("a multiSelect ask's ticks (PG-3177)", () => {
+  const ask = (extra: object = {}): ChoicePreview => ({
+    options: [{ label: "Nudge Ana" }, { label: "Nudge Bo" }, { label: "Nudge Cy" }],
+    type: "ask",
+    ...extra,
+  })
+
+  test("only a single-question ask that sets multiSelect takes ticks", () => {
+    expect(multiSelect(ask({ multiSelect: true }))).toBe(true)
+    expect(multiSelect(ask())).toBe(false)
+    expect(multiSelect({ type: "delete" })).toBe(false)
+  })
+
+  test("ticksOf names every ticked go row by its letter and label, in the card's order", () => {
+    expect(ticksOf(ask({ multiSelect: true }), [2, 0])).toEqual([
+      { index: 0, label: "Nudge Ana", letter: "A" },
+      { index: 2, label: "Nudge Cy", letter: "C" },
+    ])
+  })
+
+  test("ticksOf is null for no tick, a repeat, a tick past the go rows, or an ask that takes one pick", () => {
+    expect(ticksOf(ask({ multiSelect: true }), [])).toBeNull()
+    expect(ticksOf(ask({ multiSelect: true }), [1, 1])).toBeNull()
+    expect(ticksOf(ask({ multiSelect: true }), [3])).toBeNull()
+    expect(ticksOf(ask(), [0, 1])).toBeNull()
+  })
+
+  test("several go rows approve with every one, None of these alone denies, and None of these beside a go row answers nothing", () => {
+    const rows = [
+      { go: true, label: "Nudge Ana" },
+      { go: true, label: "Nudge Bo" },
+      { go: false, label: "None of these" },
+    ]
+    expect(ticksAnswer(rows, [1, 0])).toEqual({ action: "approve", options: [0, 1] })
+    expect(ticksAnswer(rows, [1])).toEqual({ action: "approve", options: [1] })
+    expect(ticksAnswer(rows, [2])).toEqual({ action: "deny" })
+    expect(ticksAnswer(rows, [0, 2])).toBeNull()
   })
 })

@@ -23,6 +23,7 @@ import {
   UPDATE,
   UPDATE_MS,
   statusOf,
+  VOTE_SETTLE_MS,
 } from "../../../../../packages/scripts/src/ops-wa/bridge"
 import {
   type Card,
@@ -1173,6 +1174,84 @@ describe("Inbox cards on WhatsApp", () => {
     const h = await withCards([card(12)])
     await say(h, "is #i12 merged?")
     expect(h.relayed.at(-1)).toContain("is #i12 merged?")
+  })
+})
+
+describe("a multiSelect ask on WhatsApp (PG-3177)", () => {
+  const ticks = () =>
+    card(
+      7,
+      {},
+      {
+        approve: undefined,
+        deny: undefined,
+        multiSelect: true,
+        options: [{ label: "Nudge Ana" }, { label: "Nudge Bo" }, { label: "Nudge Cy" }],
+      },
+    )
+
+  test("its poll takes several answers", async () => {
+    const h = await withCards([ticks()])
+    expect(h.polls()[0]!.content.poll).toMatchObject({
+      selectableCount: 0,
+      values: ["1. Nudge Ana", "2. Nudge Bo", "3. Nudge Cy", "4. None of these"],
+    })
+  })
+
+  test("each tap's vote waits, and the newest answers the card once, after VOTE_SETTLE_MS with no newer vote", async () => {
+    const h = await withCards([ticks()])
+    // a poll has no Send: each tap sends the selection as it stands then
+    expect(await vote(h, ["1. Nudge Ana"])).toEqual([])
+    expect(await vote(h, ["1. Nudge Ana", "3. Nudge Cy"])).toEqual([])
+    await h.pass()
+    expect(h.answers).toEqual([])
+    h.advance(VOTE_SETTLE_MS)
+    const before = h.fake.sent.length
+    await h.pass()
+    expect(h.answers).toEqual([{ answer: { action: "approve", options: [0, 2] }, id: "id-7" }])
+    expect(h.fake.sent.slice(before).flatMap((s) => s.content.text ?? [])).toContain(
+      "Answered #i7: Nudge Ana · Nudge Cy.",
+    )
+    h.advance(VOTE_SETTLE_MS)
+    await h.pass()
+    expect(h.answers).toHaveLength(1)
+  })
+
+  test("a vote still settling when a typed reply answers the card answers nothing more and says nothing", async () => {
+    const h = await withCards([ticks()])
+    await vote(h, ["1. Nudge Ana", "3. Nudge Cy"])
+    expect(await say(h, "1 2 #i7")).toEqual(["Answered #i7: Nudge Ana · Nudge Bo."])
+    h.advance(VOTE_SETTLE_MS)
+    const before = h.fake.sent.length
+    await h.pass()
+    expect(h.answers).toHaveLength(1)
+    expect(h.fake.sent.slice(before).flatMap((s) => s.content.text ?? [])).toEqual([])
+  })
+
+  test("a vote taken back before it settles answers nothing", async () => {
+    const h = await withCards([ticks()])
+    await vote(h, ["2. Nudge Bo"])
+    await vote(h, [])
+    h.advance(VOTE_SETTLE_MS)
+    await h.pass()
+    expect(h.answers).toEqual([])
+  })
+
+  test("a reply of several numbers counts as the same picks, and None of these beside a pick answers nothing", async () => {
+    const h = await withCards([ticks()])
+    expect(await say(h, "4 1 #i7")).toEqual([
+      "#i7 takes None of these on its own, so this answers nothing: reply with it alone, or with the rows you pick.",
+    ])
+    expect(await say(h, "1 3 #i7")).toEqual(["Answered #i7: Nudge Ana · Nudge Cy."])
+    expect(h.answers).toEqual([{ answer: { action: "approve", options: [0, 2] }, id: "id-7" }])
+  })
+
+  test("a one-pick card takes one number, so several answer nothing", async () => {
+    const h = await withCards([card(12)])
+    expect(await say(h, "1 2 #i12")).toEqual([
+      "#i12 takes one choice, so this answers nothing: reply with one number and its id.",
+    ])
+    expect(h.answers).toEqual([])
   })
 })
 
