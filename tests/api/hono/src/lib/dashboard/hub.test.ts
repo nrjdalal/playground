@@ -299,6 +299,22 @@ describe("DashboardHub", () => {
     leave()
   })
 
+  // The web raises the board's problem on the second error frame in a row, so an error frame equal to the last one still goes out.
+  test("a sessions read that fails the same way twice sends both error frames", async () => {
+    const { calls, hub } = hubWith()
+    const frames: DashboardFrame[] = []
+    const leave = hub.subscribe((frame) => frames.push(frame))
+    await until("the hub's first read", () => calls.length === 1)
+    calls[0]?.reject(new Error("the sessions read failed"))
+    await until("the first error frame", () => frames.length === 1)
+    hub.subscribe(() => {})()
+    await until("the second read", () => calls.length === 2)
+    calls[1]?.reject(new Error("the sessions read failed"))
+    await until("the second error frame", () => frames.length === 2)
+    expect(frames.map((f) => f.type)).toEqual(["error", "error"])
+    leave()
+  })
+
   // A sessions read once took 12.7s at load 19 (9 Oct), longer than a refresh waits, and a new read started beside each slow one stacked them until the live chat went down.
   test("a slow sessions read times out with an error frame, and no new read starts until it settles", async () => {
     const { calls, hub } = hubWith(200)
