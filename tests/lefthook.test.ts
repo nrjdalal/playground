@@ -385,6 +385,7 @@ const PUSH_SCRIPTS = {
   "commit-trailer.sh": 'bun --no-env-file packages/scripts/src/commit-trailer.ts --push "$1"',
   "conflict-markers.sh": "bun --no-env-file packages/scripts/src/conflict-markers.ts --push",
   "keeps-canary.sh": "bun --no-env-file packages/scripts/src/pr-merge/prepush.ts",
+  "touched-green.sh": "bun --no-env-file packages/scripts/src/touched-green.ts --push",
 }
 
 type PrePush = {
