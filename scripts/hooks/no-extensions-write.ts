@@ -89,10 +89,10 @@ import {
   NONE,
   QUALIFIER,
   quotedBodiesOut,
+  scriptSteadies,
   singleQuotesOut,
   type Steady,
   startingVariables,
-  steadyNames,
   unquoted,
 } from "./steady"
 
@@ -3798,7 +3798,8 @@ async function inspect(
   const lexed = lex(command, known)
   if (!loneCall(lexed.commands)) tuning = NO_TUNING
   // a writer's file a cd's && chain sets to a literal is held past the chain too, never a folder, since a failed cd leaves it empty and a cd to it then stays put
-  steadyAt = steadyNames(named, lexed.commands, true)
+  const steadies = scriptSteadies(command, named, lexed.commands, true)
+  steadyAt = steadies.at
   const env: Env = {
     cwd: directory,
     // the line starts in the folder the tool names, which the reader has proved by the payload itself
@@ -3811,6 +3812,7 @@ async function inspect(
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },
     process: environment,
+    script: steadies.script,
     vars: new Map(),
     visitShells: true,
   }

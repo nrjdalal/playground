@@ -566,6 +566,25 @@ export function steadyNames(
   }
 }
 
+// The steady variables of a line and of each script it wrote that the walk reads (Env.script): a script a shell of its own runs holds what its own text sets, by steadyNames' rule over that text, and one source or . reads in the line's shell holds the same with each name counted over the line and the script together, the script's text, its last newline aside, taken once out of the line that spells it (a heredoc's body, an echo's quoted word), so a name the line sets or ties too (`readonly OUT=…`) holds none; the line itself holds none once it sources (RUNS_TEXT)
+export function scriptSteadies(
+  command: string,
+  named: Namings,
+  commands: Command[],
+  past = false,
+): { at: (cmd: Command) => Steady; script: NonNullable<Env["script"]> } {
+  const line = steadyNames(named, commands, past)
+  const scripts = new Map<Command, Steady>()
+  return {
+    at: (cmd) => scripts.get(cmd) ?? line(cmd),
+    script: (text, own, alone) => {
+      const both = `${command.replace(text.replace(/\n$/, ""), "")}\n${text}`
+      const steady = steadyNames(namings(alone ? text : both), own, past)
+      for (const cmd of own) scripts.set(cmd, steady(cmd))
+    },
+  }
+}
+
 // The variables of the session's starting environment, the hook's own, that hold their value for every command of a line, beside known (the line's HOME, TMPDIR and PWD), so a cd or a -C through one (`cd "${PLAYGROUND_REPO:?}"`, `git -C "$W"`) is judged by the folder it names: an uppercase name (zsh keeps its lowercase parameters apart from the environment) that the line names nowhere but by reading it, on a line setterCounts holds something on, and none the shell sets or ties to another, nor IFS or ZDOTDIR, which the shell takes from no environment as is, nor one led by CLAUDE (CLAUDECODE, CLAUDE_*), some of which Claude Code sets in a hook's environment alone (CLAUDE_PROJECT_DIR)
 export function startingVariables(
   command: string,

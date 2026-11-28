@@ -9216,9 +9216,12 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     verdict = (here.visitShells ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
   else if ((name === "source" || name === ".") && (args[0]?.procs || stdinPath(args[0]?.value ?? "", here) || args[0] && writtenScript(args[0], here))) {
     const scripts = await scriptOf(args[0], cmd, here);
+    const written = wroteScript(args[0], here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
     for (const script of verdict ? [] : scripts) {
-      verdict = await nested(cmd, env, () => run2(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
+      const text = known(script);
+      const lexed = written ? writtenLexed(text, env, false) : lexScript(text, env);
+      verdict = await nested(cmd, env, () => run2(again(lexed, cmd, parsed), here, visit, builtins));
       if (verdict)
         break;
     }
@@ -9228,7 +9231,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     verdict = await visit(cmd, parsed, here);
     const own = parsed.first?.value.includes("/") ? writtenScript(parsed.first, here) : undefined;
     if (!verdict && own)
-      verdict = await nested(cmd, env, () => run2(lexScript(known(own), env), subshell(here), visit, builtins));
+      verdict = await nested(cmd, env, () => run2(writtenLexed(known(own), env, true), subshell(here), visit, builtins));
   }
   await record2(cmd, name, args, here);
   return verdict;
@@ -9542,12 +9545,20 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     }
     return;
   }
+  const written = !!operand && wroteScript(operand, env);
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script);
-    const verdict = await run2(lexScript(text, env), subshell(env), visit, builtins);
+    const lexed = written ? writtenLexed(text, env, true) : lexScript(text, env);
+    const verdict = await run2(lexed, subshell(env), visit, builtins);
     if (verdict)
       return verdict;
   }
+}
+var wroteScript = (operand, env) => !operand.procs && !stdinPath(operand.value, env) && !!writtenScript(operand, env);
+function writtenLexed(text, env, own) {
+  const lexed = lexScript(text, env);
+  env.script?.(text, lexed.commands, own);
+  return lexed;
 }
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);

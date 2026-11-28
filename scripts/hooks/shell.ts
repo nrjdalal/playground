@@ -125,6 +125,8 @@ export type Env = {
   remoteDots?: boolean
   // The glob-option switch a remote line or the script a remote shell reads holds (globSwitch), which no-extensions-write refuses rather than reads
   remoteSwitch?: string
+  // Set by a hook that holds steady variables: called with a script the line wrote as the walk lexes it, its text, its commands, and whether it runs in a shell of its own (sh, ./file) rather than the line's (source, .), so the hook holds the script's own steady variables too
+  script?: (text: string, commands: Command[], own: boolean) => void
   vars: Map<string, Text>
   // Set by a hook that judges a shell the line starts as a program too, so its visit sees the shell's own words and assignments before the walk follows its script; a script file the walk cannot read is otherwise followed as an empty one
   visitShells?: boolean
@@ -3759,11 +3761,12 @@ async function examineReading(
       (args[0] && writtenScript(args[0], here)))
   ) {
     const scripts = await scriptOf(args[0], cmd, here)
+    const written = wroteScript(args[0], here)
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined
     for (const script of verdict ? [] : scripts) {
-      verdict = await nested(cmd, env, () =>
-        run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins),
-      )
+      const text = known(script)
+      const lexed = written ? writtenLexed(text, env, false) : lexScript(text, env)
+      verdict = await nested(cmd, env, () => run(again(lexed, cmd, parsed), here, visit, builtins))
       if (verdict) break
     }
   } else if (name === "eval") {
@@ -3779,7 +3782,7 @@ async function examineReading(
     const own = parsed.first?.value.includes("/") ? writtenScript(parsed.first, here) : undefined
     if (!verdict && own)
       verdict = await nested(cmd, env, () =>
-        run(lexScript(known(own), env), subshell(here), visit, builtins),
+        run(writtenLexed(known(own), env, true), subshell(here), visit, builtins),
       )
   }
   await record(cmd, name, args, here)
@@ -4224,11 +4227,24 @@ async function shell(
     }
     return
   }
+  const written = !!operand && wroteScript(operand, env)
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script)
-    const verdict = await run(lexScript(text, env), subshell(env), visit, builtins)
+    const lexed = written ? writtenLexed(text, env, true) : lexScript(text, env)
+    const verdict = await run(lexed, subshell(env), visit, builtins)
     if (verdict) return verdict
   }
+}
+
+// Whether a shell's or a source's operand is a script the line wrote, as scriptOf reads it: no process substitution or stdin's name, and a file the line wrote
+const wroteScript = (operand: Word, env: Env): boolean =>
+  !operand.procs && !stdinPath(operand.value, env) && !!writtenScript(operand, env)
+
+// A script the line wrote, lexed for the walk, its commands handed to the hook's `script` first, so each holds the steady variables its own text sets
+function writtenLexed(text: string, env: Env, own: boolean): Lexed {
+  const lexed = lexScript(text, env)
+  env.script?.(text, lexed.commands, own)
+  return lexed
 }
 
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.

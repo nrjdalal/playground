@@ -338,6 +338,60 @@ const writesRun = (): Row[] => [
     "a script uniq -w 9 writes, then run",
     `echo 'touch ${SCRIPT}' > in.txt; uniq -w 9 in.txt run.sh; sh run.sh`,
   ],
+  // a script's own steady variable is held as the line's is, so each of these writes where its variable names, the root
+  [
+    "a script holding the root in a variable, a mkdir on it, then run",
+    `echo 'OUT=${SCRIPT}; mkdir -p "$OUT"' > run.sh; bash run.sh`,
+  ],
+  [
+    "a script holding the root in a variable, an rm on it unquoted, then run",
+    `echo 'D=${SCRIPT}; rm -rf $D' > run.sh; bash run.sh`,
+  ],
+  [
+    "a script holding the root in a variable, a cd to it and a cp, then run",
+    "echo 'D=~/.playground/extensions/login; cd $D; f=x.ts; cp /tmp/a.ts $f' > run.sh; bash run.sh",
+  ],
+  [
+    "a script holding the root in a variable, a cd to it and python, run by its own path",
+    `echo 'W=~/.playground/extensions/login; cd "$W"; python3 -m pytest -q' > run.sh; chmod +x run.sh; ./run.sh`,
+  ],
+  [
+    "a script holding the root in a variable, a cd to it or exit and a write, then run",
+    `echo 'W=~/.playground/extensions/login; cd "$W" || exit 1; echo x > f.ts' > run.sh; bash run.sh`,
+  ],
+  [
+    "a script holding the root in a variable, a mkdir on it, then sourced",
+    `echo 'OUT=${SCRIPT}; mkdir -p "$OUT"' > run.sh; source run.sh`,
+  ],
+  [
+    "a script whose variable the line made readonly at the root, a mkdir on it, then sourced",
+    `readonly OUT=${SCRIPT}; echo 'OUT=out.d; mkdir -p "$OUT"' > run.sh; source run.sh`,
+  ],
+  [
+    "a script that evals each word of a list, then run",
+    `echo 'for sp in true echo; do eval "$sp"; done' > run.sh; bash run.sh`,
+  ],
+  // what a script's steady variables leave unheld, as the line's do
+  [
+    "a script that sets its variable twice, the root once, a mkdir on it, then run",
+    `echo 'OUT=out.d; [ -n "$Z" ] && OUT=${SCRIPT}; mkdir -p "$OUT"' > run.sh; bash run.sh`,
+  ],
+  [
+    "a script reading a variable the line set to the root before sourcing it, a mkdir on it",
+    `OUT=${SCRIPT}; echo 'mkdir -p "$OUT"' > run.sh; source run.sh`,
+  ],
+  [
+    "a script reading a variable only the line exported, at the root, a mkdir on it, then run",
+    `export OUT=${SCRIPT}; echo 'mkdir -p "$OUT"' > run.sh; bash run.sh`,
+  ],
+  [
+    "a script on stdin holding the root in a variable, a mkdir on it",
+    `bash <<'EOF'\nOUT=${SCRIPT}\nmkdir -p "$OUT"\nEOF`,
+  ],
+  [
+    "a -c script holding the root in a variable, a mkdir on it",
+    `bash -c 'OUT=${SCRIPT}; mkdir -p "$OUT"'`,
+  ],
 ]
 const writeControls = (): Row[] => [
   ["a plain script written in another case, then run", `echo 'touch out.log' > Run.sh; sh run.sh`],
@@ -434,6 +488,34 @@ const writeControls = (): Row[] => [
   ],
   ["a program copied from the system, then run by its path", "cp /bin/ls t; ./t"],
   ["a program copied from the system, then run by sh", "cp /bin/ls t; sh t"],
+  [
+    "a plain script holding a folder in a variable, a mkdir on it, then run",
+    `echo 'OUT=out.d; mkdir -p "$OUT"' > run.sh; bash run.sh`,
+  ],
+  [
+    "a plain script holding a folder in a variable, an rm on it unquoted, then run",
+    `echo 'D=out.d; rm -rf $D; mkdir -p $D' > run.sh; bash run.sh`,
+  ],
+  [
+    "a plain script holding a folder in a variable, a cd to it and a cp, then run",
+    "echo 'D=/tmp/pg-3067-d; cd $D; f=x.ts; cp /tmp/a.ts $f' > run.sh; bash run.sh",
+  ],
+  [
+    "a plain script holding a folder in a variable, a cd to it and python, run by its own path",
+    `echo 'W=/tmp/pg-3067-w; cd "$W"; python3 -m pytest -q' > run.sh; chmod +x run.sh; ./run.sh`,
+  ],
+  [
+    "a plain script holding a folder in a variable, a cd to it or exit and a write, then run",
+    `echo 'W=/tmp/pg-3067-w; cd "$W" || exit 1; echo x > f.ts' > run.sh; bash run.sh`,
+  ],
+  [
+    "a plain script holding a folder in a variable, a mkdir on it, then sourced",
+    `echo 'OUT=out.d; mkdir -p "$OUT"' > run.sh; source run.sh`,
+  ],
+  [
+    "a plain script holding a folder in a variable, a mkdir on it, then run by .",
+    `echo 'OUT=out.d; mkdir -p "$OUT"' > run.sh; . ./run.sh`,
+  ],
 ]
 // shell.ts reads a script's ~ as the process's homedir() while this test sets the root's home by env HOME, so the ~ glob row is judged in the process worktree alone, where the two are one home
 const worktreeRuns = (): Row[] => [
