@@ -1,4 +1,4 @@
-// precommit:light: the checks that take seconds and bounce a commit or test:skills, run before a chain is queued through run-slot, so a bounce costs no place in the queue
+// precommit:light: the checks that take seconds and bounce a commit or test:skills, run before a chain is queued through run-slot, so a bounce costs no place in the queue; env-keys' build of @packages/env takes the commit slot first in a worktree whose turbo cache lacks it, as pre-commit's does
 import { join } from "node:path"
 
 export const CHECKS = [
@@ -15,7 +15,7 @@ export const CHECKS = [
     argv: [
       "bash",
       "-c",
-      'TURBO_CACHE_DIR="${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" bunx turbo run build --filter=@packages/env --output-logs=errors-only && bun packages/scripts/src/env-keys.ts POSTGRES_URL',
+      'TURBO_CACHE_DIR="${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" bun --no-env-file packages/scripts/src/commit-slot.ts bunx turbo run build --filter=@packages/env --output-logs=errors-only && bun packages/scripts/src/env-keys.ts POSTGRES_URL',
     ],
     name: "env-keys",
   },
