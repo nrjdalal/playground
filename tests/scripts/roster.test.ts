@@ -1561,6 +1561,47 @@ describe("holders", () => {
     expect(bytes(config)).toBe(before)
   })
 
+  // PG-3214: a checker's row can hold an extension repo's PR, and a bare number read as the factory repo's alone exited 1 there, which frees a clone that PR still holds
+  test("a bare number counts a live row holding that PR on any repo, an extension repo's included, naming each row", async () => {
+    const config = configWith([
+      ...rows,
+      {
+        name: "m4t8kq-reviewer",
+        pr: "https://github.com/acme/ext/pull/27",
+        status: "working",
+        task: "t",
+      },
+      {
+        name: "p6v3hd-reviewer",
+        prs: ["https://github.com/other/tools/pull/27"],
+        status: "waiting",
+        task: "t",
+      },
+      {
+        name: "w9c2rn-reviewer",
+        pr: "https://github.com/acme/ext/pull/27",
+        status: "ended",
+        task: "t",
+      },
+    ])
+    const before = bytes(config)
+    for (const pr of ["27", "#27"]) {
+      const r = await run(config, ["holders", pr])
+      expect([r.code, r.out.split("\n").filter(Boolean)]).toEqual([
+        0,
+        ["m4t8kq-reviewer", "p6v3hd-reviewer"],
+      ])
+    }
+    const url = await run(config, ["holders", "https://github.com/acme/ext/pull/27"])
+    expect([url.code, url.out.split("\n").filter(Boolean)]).toEqual([0, ["m4t8kq-reviewer"]])
+    const factory = await run(config, ["holders", "7"])
+    expect([factory.code, factory.out.split("\n").filter(Boolean)]).toEqual([
+      0,
+      ["k3m9px-reviewer", "q8r2tx-reviewer"],
+    ])
+    expect(bytes(config)).toBe(before)
+  })
+
   test("a roster that does not read exits 2, never 1, so a bad read never frees a clone", async () => {
     const missing = await run(configWith(null), ["holders", "7"])
     expect([missing.code, missing.out, missing.roster]).toEqual([2, "", null])
