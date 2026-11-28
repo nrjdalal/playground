@@ -135,12 +135,12 @@ pre-commit:
         - "tests/*.py"
       run: bun --no-env-file api/hono/src/bin/dev-running.ts
     env-keys:
-      # before the build, which fails on a short .env one key at a time; this names every key it lacks at once (its own build of @packages/env makes the dist it reads on a fresh worktree)
+      # before the build, which fails on a short .env one key at a time; this names every key it lacks at once (its own build of @packages/env makes the dist it reads on a fresh worktree, and goes through commit-slot.ts as build does, so in a worktree it takes the commit slot unless turbo finds every task cached)
       priority: 5
       exclude:
         - "*.md"
         - "tests/*.py"
-      run: TURBO_CACHE_DIR="${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" bunx turbo run build --filter=@packages/env --output-logs=errors-only && bun packages/scripts/src/env-keys.ts POSTGRES_URL
+      run: TURBO_CACHE_DIR="${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" bun --no-env-file packages/scripts/src/commit-slot.ts bunx turbo run build --filter=@packages/env --output-logs=errors-only && bun packages/scripts/src/env-keys.ts POSTGRES_URL
     build:
       # docs and Python tests feed no build; lefthook skips the step when every staged file matches (its * crosses folders); it stops at once on an unlinked workspace dependency, naming bun install; in a worktree it takes run-slot's commit slot as commit-<worktree>, unless turbo's dry run finds every build task cached; priority 6, so the type checks below run after it
       priority: 6
