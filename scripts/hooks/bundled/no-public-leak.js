@@ -10418,7 +10418,7 @@ async function toolWrites(cmd, name, args, env) {
     const text = input ? from ? await existing(from, env) : unread : await stdinOf(cmd, env);
     const missing = !!from && !writtenFile(from, env) && !await readFile(from);
     const keeps = missing || args.some((a) => /^(?:conv=.*notrunc|o?seek=|oflag=.*append)/.test(a.value));
-    return [[path, keeps ? join4([await kept(path), text]) : text]];
+    return [[path, keeps ? join5([await kept(path), text]) : text]];
   }
   if (tool === "sort") {
     const paths = [];
@@ -10515,7 +10515,7 @@ async function toolWrites(cmd, name, args, env) {
         continue;
       const copied = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread;
       const mayKeep = keeps || tool === "ln" && !forced || from !== undefined && !written && !disk;
-      const text = mayKeep ? join4([await kept(dest), copied]) : copied;
+      const text = mayKeep ? join5([await kept(dest), copied]) : copied;
       const moved = tool === "mv" && from && !mayKeep ? from : undefined;
       writes.push([dest, text, moved]);
       if (from) {
