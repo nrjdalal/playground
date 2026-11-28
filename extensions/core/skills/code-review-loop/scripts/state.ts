@@ -130,12 +130,14 @@ export const timingsOf = (clone: string): Record<string, number> => {
     return {}
   }
 }
+const costOf = (timings: Record<string, number>, file: string): number =>
+  typeof timings[file] === "number" ? timings[file] : BUDGET_MS / CHUNK
 // Chunks in the list's order, each at most CHUNK files and BUDGET_MS of expected time, a file with no timing costing 1/CHUNK of the budget, so an untimed list keeps 200-file chunks; a file past the budget runs alone
 export const chunksOf = (files: string[], timings: Record<string, number> = {}): string[][] => {
   const chunks: string[][] = []
   let spent = 0
   for (const file of files) {
-    const ms = typeof timings[file] === "number" ? timings[file] : BUDGET_MS / CHUNK
+    const ms = costOf(timings, file)
     const last = chunks.at(-1)
     if (last && last.length < CHUNK && spent + ms <= BUDGET_MS) {
       last.push(file)
@@ -1133,6 +1135,21 @@ export const touchedTests = (clone: string, base: string, head: string): string[
   return [...listed].sort()
 }
 
+// merge's own cut of a list file for a run by hand: chunk-01.txt and on in <out>, one path a line, each printed with its file count and expected time
+export const cmdChunks = async (clone: string, list: string, out: string): Promise<void> => {
+  const files = (await Bun.file(list).text())
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const timings = timingsOf(clone)
+  for (const [i, chunk] of chunksOf(files, timings).entries()) {
+    const path = join(out, `chunk-${String(i + 1).padStart(2, "0")}.txt`)
+    await Bun.write(path, `${chunk.join("\n")}\n`)
+    const ms = chunk.reduce((sum, f) => sum + costOf(timings, f), 0)
+    console.log(`${path} ${chunk.length} files, ${Math.round(ms / 1000)} s expected`)
+  }
+}
+
 export const cmdTouchedTests = (clone: string, base: string, head: string): void => {
   for (const f of touchedTests(clone, base, head)) console.log(f)
 }
@@ -1485,6 +1502,7 @@ const COMMANDS: Record<
   { argc: number; more?: true; run: (...args: string[]) => void | Promise<void> }
 > = {
   checks: { argc: 3, more: true, run: cmdChecks },
+  chunks: { argc: 3, run: cmdChunks },
   delta: { argc: 4, run: cmdDelta },
   fresh: { argc: 4, run: cmdFresh },
   merge: { argc: 3, more: true, run: cmdMerge },
