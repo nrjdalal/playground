@@ -18950,8 +18950,10 @@ if (false) {}
 
 // scripts/hooks/no-raw-delete.ts
 import { realpathSync as realpathSync6 } from "fs";
-import { basename as basename10, dirname as dirname10, resolve as resolve11, sep as sep4 } from "path";
+import { homedir as homedir5 } from "os";
+import { basename as basename10, dirname as dirname10, join as join21, resolve as resolve11, sep as sep4 } from "path";
 var INSTEAD4 = "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
+var OWN_PAD = "It sits in your own scratchpad folder, where playground rm <path> moves it whole to the 7-day trash up to 2 GB, with no file limit and its node_modules not counted: run it yourself, since your lead cannot move a live session's scratchpad. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
 var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it (a clean worktree, detached at a commit canary already has, counts as held by none), it holds no uncommitted change and its work has landed on canary or on a branch origin still holds.";
 var refuse13 = (what, why = "a recursive delete is final, and one aimed wrong takes a whole tree", instead = INSTEAD4) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`;
 var shown3 = (word) => word.variable ? `$${word.variable}` : visible(word.value);
@@ -19053,12 +19055,34 @@ function real4(path) {
     return parent === path ? path : resolve11(real4(parent), basename10(path));
   }
 }
-function rootsOf(cwd, session) {
+async function rootsOf(cwd, session, command, environment) {
   const at = cwd ? real4(cwd) : "";
   const worktree = /^(.*\/\.claude\/worktrees\/[^/]+)(?:\/|$)/.exec(at)?.[1];
   const id = typeof session === "string" && /^[\w-]+$/.test(session) ? session : undefined;
   const scratch = id ? new RegExp(`^(?:/private)?/tmp/claude-\\d+/[^/]+/${id}/scratchpad/`) : undefined;
-  return { scratch, worktree };
+  const name = id && /-[A-Za-z]*[rR]|--rec/.test(command) ? await registryName(id, environment).catch(() => {
+    return;
+  }) : undefined;
+  const pad = name && /^[\w.-]+$/.test(name) ? real4(join21(environment.HOME || homedir5(), ".playground", "scratchpad", name)) : undefined;
+  return { pad, scratch, worktree };
+}
+function inPad(args, env, { pad }) {
+  if (!pad)
+    return false;
+  let options = true;
+  const targets = [];
+  for (const a of args) {
+    if (options && a.value === "--")
+      options = false;
+    else if (!(options && a.value.startsWith("-") && a.value !== "-"))
+      targets.push(a);
+  }
+  return targets.length > 0 && targets.every((t) => {
+    if (hidden(t) || marked(t.value))
+      return false;
+    const path = pathOf(t, env);
+    return !!path && real4(path).startsWith(pad + sep4);
+  });
 }
 var inside = (path, { scratch, worktree }) => {
   const at = real4(path);
@@ -19077,7 +19101,7 @@ function judgeRm(args, xargs, env, roots, { nested }) {
     }
     const option = options && a.value.startsWith("-") && a.value !== "-";
     if (option && recursive3(a.value))
-      return refuse13(`a recursive rm (${a.value})`);
+      return refuse13(`a recursive rm (${a.value})`, undefined, !nested && inPad(args, env, roots) ? OWN_PAD : INSTEAD4);
     const spread = marked(a.value) && (!nested || !a.quoted);
     if (spread || options && spellsRecursive(a.value) || option && hidden(a))
       return refuse13(`an rm with a word the hook cannot read (${shown3(a)})`, "it may be -r or any path");
@@ -19116,7 +19140,7 @@ async function inspect16(raw, environment) {
   if (typeof command !== "string" || !CANDIDATE.test(bare(spelledText(command))))
     return;
   const directory = typeof cwd === "string" ? cwd : undefined;
-  const roots = rootsOf(directory, session);
+  const roots = await rootsOf(directory, session, command, environment);
   const text = bare(spelledText(decodedText(command)));
   const named = DELETES.test(text) || globSpells(text, SPELLED);
   const env = {
@@ -19266,8 +19290,8 @@ async function check22(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-raw-spawn.ts
-import { join as join21, resolve as resolve12, sep as sep5 } from "path";
-var SPAWN = join21(__CHECKOUT + "/scripts/hooks", "..", "spawn.sh");
+import { join as join22, resolve as resolve12, sep as sep5 } from "path";
+var SPAWN = join22(__CHECKOUT + "/scripts/hooks", "..", "spawn.sh");
 var HEADS = new Set([
   "agent",
   "agent-hibernation",
@@ -19947,12 +19971,12 @@ async function check24(raw, environment = process.env) {
 
 // scripts/hooks/no-raw-wa.ts
 import { realpathSync as realpathSync8 } from "fs";
-import { homedir as homedir6 } from "os";
+import { homedir as homedir7 } from "os";
 import { resolve as resolve15 } from "path";
 
 // scripts/hooks/no-roster-write.ts
 import { realpathSync as realpathSync7 } from "fs";
-import { homedir as homedir5 } from "os";
+import { homedir as homedir6 } from "os";
 import { basename as basename12, dirname as dirname11, resolve as resolve14 } from "path";
 var GUARDED2 = [
   {
@@ -20195,7 +20219,7 @@ async function judgeBash(command, cwd, environment, { file, noun, refuse }) {
     const out = [];
     for (const place of places(at))
       for (const raw of [word.value, word.value.slice(word.value.indexOf("=") + 1)]) {
-        const value = /^~(?:\/|$)/.test(raw) ? `${environment.HOME || homedir5()}${raw.slice(1)}` : raw;
+        const value = /^~(?:\/|$)/.test(raw) ? `${environment.HOME || homedir6()}${raw.slice(1)}` : raw;
         const path = value.startsWith("/") ? value : place.cwd && resolve14(place.cwd, value);
         if (path)
           out.push({ glob: !!word.glob, path });
@@ -20576,7 +20600,7 @@ async function judgeBash2(command, cwd, environment) {
         if (!word?.value)
           continue;
         for (const raw of [word.value, word.value.slice(word.value.indexOf("=") + 1)]) {
-          const value = /^~(?:\/|$)/.test(raw) ? `${homedir6()}${raw.slice(1)}` : raw;
+          const value = /^~(?:\/|$)/.test(raw) ? `${homedir7()}${raw.slice(1)}` : raw;
           const path = value.startsWith("/") ? value : place.cwd && resolve15(place.cwd, value);
           if (!path)
             continue;
@@ -20634,7 +20658,7 @@ async function check26(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-release-comment.ts
-import { join as join22 } from "path";
+import { join as join23 } from "path";
 var guardedOwners = new Set;
 var WORD2 = /release/i;
 var UNRESOLVED = "a repository the hook cannot resolve";
@@ -20840,8 +20864,8 @@ function candidate7(command) {
   const bare = command.replace(/[\\'"]/g, "");
   return command.includes("$'") || GH3.test(bare) && MAYBE_COMMENT.test(bare);
 }
-async function check27(raw, environment = process.env, lists = join22(coreDir(), "lists")) {
-  const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join22(lists, "release-owners.json"));
+async function check27(raw, environment = process.env, lists = join23(coreDir(), "lists")) {
+  const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join23(lists, "release-owners.json"));
   if (owners.refusal)
     return commentCall(subjectOf3(raw)) ? owners.refusal : undefined;
   guardedOwners = new Set((owners.list ?? []).map((owner) => owner.toLowerCase()));
@@ -20897,7 +20921,7 @@ if (false) {}
 // scripts/hooks/no-unslotted-run.ts
 import { existsSync as existsSync11, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync3 } from "fs";
 import { tmpdir } from "os";
-import { join as join23, resolve as resolve16, sep as sep6 } from "path";
+import { join as join24, resolve as resolve16, sep as sep6 } from "path";
 var refuse17 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var refuseDocker = (what, cd, command, fix) => fix ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}` : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var COMMIT_TAKES3 = new Set([
@@ -20975,11 +20999,11 @@ async function commitLint(cmd, args, env, wrote) {
     stderr: "ignore"
   });
   const root = top.success ? top.stdout.toString().trim() : "";
-  const lint = join23(root, "node_modules", ".bin", "commitlint");
+  const lint = join24(root, "node_modules", ".bin", "commitlint");
   if (!root || !existsSync11(lint))
     return;
-  const folder = mkdtempSync(join23(tmpdir(), "commit-msg-"));
-  const file = join23(folder, "COMMIT_EDITMSG");
+  const folder = mkdtempSync(join24(tmpdir(), "commit-msg-"));
+  const file = join24(folder, "COMMIT_EDITMSG");
   let out = "";
   let err = "";
   let code;
@@ -21194,8 +21218,8 @@ function inspect21(raw, environment, main) {
   if (typeof command !== "string")
     return;
   const worktrees = [
-    join23(main, ".claude", "worktrees"),
-    real(join23(main, ".claude", "worktrees"))
+    join24(main, ".claude", "worktrees"),
+    real(join24(main, ".claude", "worktrees"))
   ].map((w) => w + sep6);
   const inWorktree = (dir) => dir !== undefined && [resolve16(dir), real(resolve16(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
   const directory = typeof cwd === "string" ? cwd : undefined;
