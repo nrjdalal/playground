@@ -3256,18 +3256,25 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
     verdict = (here.visitShells ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
-  else if ((name === "source" || name === ".") && (args[0]?.procs || stdinPath(args[0]?.value ?? "", here))) {
+  else if ((name === "source" || name === ".") && (args[0]?.procs || stdinPath(args[0]?.value ?? "", here) || args[0] && writtenScript(args[0], here))) {
     const scripts = await scriptOf(args[0], cmd, here);
+    const written = wroteScript(args[0], here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
     for (const script of verdict ? [] : scripts) {
-      verdict = await nested(cmd, env, () => run2(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
+      const text = known(script);
+      const lexed = written ? writtenLexed(text, env, false) : lexScript(text, env);
+      verdict = await nested(cmd, env, () => run2(again(lexed, cmd, parsed), here, visit, builtins));
       if (verdict)
         break;
     }
   } else if (name === "eval") {
     verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run2(again(lexScript(evalText(args), env), cmd, parsed), here, visit, builtins));
-  } else
+  } else {
     verdict = await visit(cmd, parsed, here);
+    const own = parsed.first?.value.includes("/") ? writtenScript(parsed.first, here) : undefined;
+    if (!verdict && own)
+      verdict = await nested(cmd, env, () => run2(writtenLexed(known(own), env, true), subshell(here), visit, builtins));
+  }
   await record(cmd, name, args, here);
   return verdict;
 }
@@ -3580,27 +3587,53 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     }
     return;
   }
+  const written = !!operand && wroteScript(operand, env);
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script);
-    const verdict = await run2(lexScript(text, env), subshell(env), visit, builtins);
+    const lexed = written ? writtenLexed(text, env, true) : lexScript(text, env);
+    const verdict = await run2(lexed, subshell(env), visit, builtins);
     if (verdict)
       return verdict;
   }
 }
+var wroteScript = (operand, env) => !operand.procs && !stdinPath(operand.value, env) && !!writtenScript(operand, env);
+function writtenLexed(text, env, own) {
+  const lexed = lexScript(text, env);
+  env.script?.(text, lexed.commands, own);
+  return lexed;
+}
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
-  const scripts = !operand || stdinPath(operand.value, env) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")];
+  const scripts = !operand || stdinPath(operand.value, env) ? await scriptStdin(cmd, env) : [
+    operand.procs ? await outputs(operand.procs, env) : writtenScript(operand, env) ?? unknown("a script file")
+  ];
   if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;
+}
+var writtenScript = (word, env) => {
+  const path = pathOf(word, env);
+  return path === undefined ? undefined : writtenFile(path, env);
+};
+function writtenFile(path, env) {
+  const exact = env.files.get(path);
+  if (exact || process.platform === "linux")
+    return exact;
+  const lower = path.toLowerCase();
+  let found;
+  for (const [each, text] of env.files)
+    if (each.toLowerCase() === lower)
+      found = text;
+  return found;
 }
 async function outputs(cmds, env) {
   return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record(cmd, name, args, env) {
   for (const r of cmd.redirects) {
-    if (r.op !== ">" && r.op !== ">>" && r.op !== ">|")
+    const named = r.op === ">&" && !/^(?:\d+|-)$/.test(r.target?.value ?? "");
+    if (r.op !== ">" && r.op !== ">>" && r.op !== ">|" && !named)
       continue;
     const path = r.target && pathOf(r.target, env);
     if (!path)
@@ -3608,6 +3641,14 @@ async function record(cmd, name, args, env) {
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
     env.files.set(path, held(r.op === ">>" ? join4([await existing(path, env), out]) : out));
+  }
+  if (TOOL_WRITERS.test(name)) {
+    const writes = await toolWrites(cmd, name, args, env).catch(() => []);
+    for (const [, , moved] of writes)
+      if (moved)
+        env.files.delete(moved);
+    for (const [path, text] of writes)
+      env.files.set(path, held(text));
   }
   if (name !== "tee")
     return;
@@ -3618,6 +3659,140 @@ async function record(cmd, name, args, env) {
     if (path)
       env.files.set(path, held(append ? join4([await existing(path, env), input]) : input));
   }
+}
+var TOOL_WRITERS = /^g?(cp|dd|install|ln|mv|sort|uniq)$/;
+var COPY_VALUES = { cp: "St", install: "gmoSt", ln: "St", mv: "St" };
+async function toolWrites(cmd, name, args, env) {
+  const tool = TOOL_WRITERS.exec(name)?.[1];
+  if (!tool)
+    return [];
+  const at = (value) => marked(value) ? undefined : pathOf({ value }, env);
+  const unread = unknown(`what ${name} writes`);
+  const kept = async (dest) => {
+    const written = writtenFile(dest, env);
+    if (written)
+      return written;
+    const old = await readFile(dest).catch(() => unread) ?? { value: "" };
+    return old.unknown || marked(old.value) ? { value: "" } : old;
+  };
+  if (tool === "dd") {
+    const of = args.find((a) => a.value.startsWith("of="));
+    const path = of && at(of.value.slice(3));
+    if (!path)
+      return [];
+    const input = args.find((a) => a.value.startsWith("if="));
+    const from = input && at(input.value.slice(3));
+    const text = input ? from ? await existing(from, env) : unread : await stdinOf(cmd, env);
+    const missing = !!from && !writtenFile(from, env) && !await readFile(from);
+    const keeps = missing || args.some((a) => /^(?:conv=.*notrunc|o?seek=|oflag=.*append)/.test(a.value));
+    return [[path, keeps ? join4([await kept(path), text]) : text]];
+  }
+  if (tool === "sort") {
+    const paths = [];
+    for (const [i, a] of args.entries()) {
+      const v = a.value;
+      const long = /^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(=.*)?$/.exec(v);
+      const value = long ? long[1] ? long[1].slice(1) : args[i + 1]?.value : /^-[^-]*o/.test(v) ? v.slice(v.indexOf("o") + 1) || args[i + 1]?.value : undefined;
+      const path = value && at(value);
+      if (path)
+        paths.push(path);
+    }
+    return paths.map((path) => [path, unread]);
+  }
+  const operands = [];
+  let ended = false;
+  if (tool === "uniq") {
+    for (let i = 0;i < args.length; i++) {
+      const v = args[i].value;
+      if (ended || !v.startsWith("-") || v === "-")
+        operands.push(args[i]);
+      else if (v === "--")
+        ended = true;
+      else if (/^--(?:skip-fields|skip-chars|check-chars)$/.test(v))
+        i++;
+      else if (/^-[^-]*[fsw]$/.test(v))
+        i++;
+    }
+    const path = operands[1] && at(operands[1].value);
+    return path ? [[path, unread]] : [];
+  }
+  let target;
+  let symbolic = false;
+  let forced = false;
+  let keeps = false;
+  for (let i = 0;i < args.length; i++) {
+    const v = args[i].value;
+    if (ended || !v.startsWith("-") || v === "-") {
+      operands.push(args[i]);
+      continue;
+    }
+    if (v === "--")
+      ended = true;
+    else if (v.startsWith("--target-directory="))
+      target = v.slice(19);
+    else if (v === "--target-directory")
+      target = args[++i]?.value;
+    else if (v === "--symbolic")
+      symbolic = true;
+    else if (v === "--force")
+      forced = true;
+    else if (/^--(?:no-clobber|interactive|update|directory)/.test(v))
+      keeps = true;
+    else if (!v.startsWith("--"))
+      for (let k = 1;k < v.length; k++) {
+        if (v[k] === "s")
+          symbolic = true;
+        if (v[k] === "f")
+          forced = true;
+        if ((tool === "install" ? "d" : "inu").includes(v[k]))
+          keeps = true;
+        if (!COPY_VALUES[tool].includes(v[k]))
+          continue;
+        const value = v.slice(k + 1) || args[++i]?.value;
+        if (v[k] === "t")
+          target = value;
+        break;
+      }
+  }
+  const folder = target ?? (operands.length > 2 ? operands.at(-1)?.value : undefined);
+  const sources = target ? operands : operands.slice(0, -1);
+  const last = folder ? undefined : operands.at(-1);
+  const base = at(folder ?? last?.value ?? "");
+  if (!base || sources.length === 0)
+    return [];
+  let into = !!folder;
+  if (!into)
+    try {
+      into = statSync(base).isDirectory();
+    } catch {}
+  const writes = [];
+  for (const source of sources) {
+    const inside = resolve2(base, basename(source.value));
+    const dests = into ? [inside] : [base, inside];
+    const stdin = /^\/dev\/(?:stdin|fd\/0)$/.test(source.value);
+    for (const dest of dests) {
+      const from = stdin ? undefined : tool === "ln" && symbolic && !isAbsolute2(source.value) && !marked(source.value) ? resolve2(dirname2(dest), source.value) : at(source.value);
+      const written = from === undefined ? undefined : writtenFile(from, env);
+      const disk = from === undefined || written ? undefined : await readFile(from);
+      let file = false;
+      try {
+        file = from !== undefined && statSync(from).isFile();
+      } catch {}
+      if (file && disk && (disk.unknown || marked(disk.value)))
+        continue;
+      const copied = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread;
+      const mayKeep = keeps || tool === "ln" && !forced || from !== undefined && !written && !disk;
+      const text = mayKeep ? join4([await kept(dest), copied]) : copied;
+      const moved = tool === "mv" && from && !mayKeep ? from : undefined;
+      writes.push([dest, text, moved]);
+      if (from) {
+        for (const [path, written] of env.files)
+          if (path.startsWith(`${from}/`))
+            writes.push([dest + path.slice(from.length), written, moved ? path : undefined]);
+      }
+    }
+  }
+  return writes;
 }
 async function existing(path, env) {
   return env.files.get(path) ?? await readFile(path) ?? { value: "" };
@@ -12674,6 +12849,20 @@ function steadyNames(named, commands, past = false) {
     };
   };
 }
+function scriptSteadies(command, named, commands, past = false) {
+  const line = steadyNames(named, commands, past);
+  const scripts = new Map;
+  return {
+    at: (cmd) => scripts.get(cmd) ?? line(cmd),
+    script: (text, own, alone) => {
+      const both = `${command.replace(text.replace(/\n$/, ""), "")}
+${text}`;
+      const steady = steadyNames(namings2(alone ? text : both), own, past);
+      for (const cmd of own)
+        scripts.set(cmd, steady(cmd));
+    }
+  };
+}
 function startingVariables(command, environment, known) {
   const commands = lex(command, known).commands;
   const counts = setterCounts(namings2(command), commands, commands.map((cmd) => parse(cmd)));
@@ -14907,7 +15096,7 @@ async function inspect5(raw, environment, main) {
         return refuse6(`a write to ${pathOf(wrote, here)}`, fixFor2(sure));
     }
   };
-  const steadyAt = steadyNames(namings2(command), lexed.commands);
+  const { at: steadyAt, script } = scriptSteadies(command, namings2(command), lexed.commands);
   const env = {
     cwd: directory,
     cwdSure: directory,
@@ -14916,6 +15105,7 @@ async function inspect5(raw, environment, main) {
     known,
     old: { dir: directory },
     process: environment,
+    script,
     vars: new Map
   };
   return run2(lexed, env, visit, true);
@@ -15111,6 +15301,7 @@ var RUNS_TEXT2 = new Set([".", "eval", "source"]);
 var MOVES_ARGS = new Set(["getopts", "set", "shift"]);
 var SILENT = new Set([":", "[", "cd", "false", "test", "true"]);
 var hookFolders = new Map;
+var linkEnds = new Map;
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
 async function guarded(raw, environment = process.env, wait = 12000, url = new URL(`./no-extensions-write-worker.${import.meta.path.endsWith(".js") ? "js" : "ts"}`, import.meta.url).href) {
   const worker = new Worker(url);
@@ -16827,7 +17018,7 @@ async function inspect7(raw, environment, load5, limit) {
     ...repo ? { PLAYGROUND_REPO: repo } : {}
   };
   const lexed = lex(command, known);
-  const steadyAt = steadyNames(named, lexed.commands);
+  const { at: steadyAt, script } = scriptSteadies(command, named, lexed.commands);
   const own = named.blind ? {} : Object.fromEntries(Object.entries(environment).filter((entry) => typeof entry[1] === "string" && !named.counts.has(entry[0])));
   const env = {
     cwd: directory,
@@ -16837,6 +17028,7 @@ async function inspect7(raw, environment, load5, limit) {
     known,
     old: {},
     process: environment,
+    script,
     vars: new Map
   };
   const home = guarding ? checkoutOf(directory, orgs, roots) : undefined;

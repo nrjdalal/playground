@@ -145,6 +145,27 @@ writeFileSync(
   "sed 's/PORT/8080/' serve.tmpl > serve-mb.sh\nbash serve-mb.sh\n",
 )
 symlinkSync(ROOT, PATHS.LINK)
+// a dangling link into the root, one onto a hook path the clone's hooks folder lacks, one to a plain place, and a clone's hooks folder holding a hook, for #3067's rows
+symlinkSync(join(SCOPE, "no-such-3067"), join(HOME, "dangling"))
+symlinkSync(join(HOME, "no-such-3067"), join(HOME, "dangling-plain"))
+symlinkSync(join(HOME, "hooked", ".git", "hooks", "pre-push"), join(HOME, "dangling-hook"))
+mkdirSync(join(HOME, "hooked", ".git", "hooks"), { recursive: true })
+// a linked folder holding a relative dangling link whose .. the kernel reads from the folder's real place, the data folder, and a folder holding a file whose name is a glob
+mkdirSync(join(DATA, "sub"))
+symlinkSync(join(DATA, "sub"), join(HOME, "linked-sub"))
+symlinkSync("../extensions/login/new", join(DATA, "sub", "rel"))
+mkdirSync(join(HOME, "starred"))
+writeFileSync(join(HOME, "starred", "a*"), "")
+writeFileSync(join(HOME, "hooked", ".git", "hooks", "pre-commit"), "#!/bin/sh\n")
+// a repo whose hooks run from an empty hk by core.hooksPath, beside a plain logs folder, so a glob there matches nothing
+git(SCRATCH, "init", "-q", join(HOME, "hookspath"))
+git(join(HOME, "hookspath"), "config", "core.hooksPath", "hk")
+for (const dir of ["hk", "logs"]) mkdirSync(join(HOME, "hookspath", dir))
+// a folder already on disk, which a line writes a script into and then copies or moves
+mkdirSync(join(HOME, "ondisk"))
+// an old program on disk, which a copy from a build not made yet leaves in place
+mkdirSync(join(HOME, "oldbin"))
+copyFileSync("/bin/ls", join(HOME, "oldbin", "app"))
 // the main checkout's worktree a, by its .git file, holding a link into the main checkout, and a plain folder beside it that no worktree holds, for #1663's rows
 writeFileSync(join(PATHS.MAIN, ".claude", "worktrees", "a", ".git"), "gitdir: x\n")
 symlinkSync(join(PATHS.MAIN, ".claude"), PATHS.TREE_LINK)
@@ -1258,6 +1279,10 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#2320 a disk check of another machine's homes over ssh | -h",
       "#2320 a disk check of the folder that holds the homes | -h",
       "#2320 a disk check over ssh after its own options | -h",
+      // cp's -r and -R copy the folder named after them, and take no value
+      "#3067 a plain script written into a folder on disk, the folder copied by -r, then run | -r",
+      "#3067 a script written into a folder on disk, the folder copied by -R into a folder, then run | -R",
+      "#3067 a script written into a folder on disk, the folder copied by -r, then run | -r",
       // an ln -s whose source the hook reads on disk names the scratch root by its path, and -s takes no value
       "#3070 an ln -s from the root after another ln -s on its line | -s",
       "#3070 an ln -s from the root and a copy through its link | -s",

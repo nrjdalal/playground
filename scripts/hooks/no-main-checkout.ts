@@ -33,7 +33,7 @@ import {
   type Visit,
   type Word,
 } from "./shell"
-import { heldWord, namings, steadyNames } from "./steady"
+import { heldWord, namings, scriptSteadies } from "./steady"
 
 // The checkout a worktree's .git file points into, or the checkout itself where .git is a directory.
 export function mainCheckout(dir: string): string {
@@ -895,7 +895,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     }
   }
   // a cd through a steady variable is read by the folder that variable names
-  const steadyAt = steadyNames(namings(command), lexed.commands)
+  const { at: steadyAt, script } = scriptSteadies(command, namings(command), lexed.commands)
   const env: Env = {
     cwd: directory,
     // the line starts in the folder the tool names, which the reader has proved by the payload itself
@@ -906,6 +906,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },
     process: environment,
+    script,
     vars: new Map(),
   }
   return run(lexed, env, visit, true)

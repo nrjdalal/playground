@@ -125,6 +125,8 @@ export type Env = {
   remoteDots?: boolean
   // The glob-option switch a remote line or the script a remote shell reads holds (globSwitch), which no-extensions-write refuses rather than reads
   remoteSwitch?: string
+  // Set by a hook that holds steady variables: called with a script the line wrote as the walk lexes it, its text, its commands, and whether it runs in a shell of its own (sh, ./file) rather than the line's (source, .), so the hook holds the script's own steady variables too
+  script?: (text: string, commands: Command[], own: boolean) => void
   vars: Map<string, Text>
   // Set by a hook that judges a shell the line starts as a program too, so its visit sees the shell's own words and assignments before the walk follows its script; a script file the walk cannot read is otherwise followed as an empty one
   visitShells?: boolean
@@ -3754,14 +3756,17 @@ async function examineReading(
       (await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs)))
   else if (
     (name === "source" || name === ".") &&
-    (args[0]?.procs || stdinPath(args[0]?.value ?? "", here))
+    (args[0]?.procs ||
+      stdinPath(args[0]?.value ?? "", here) ||
+      (args[0] && writtenScript(args[0], here)))
   ) {
     const scripts = await scriptOf(args[0], cmd, here)
+    const written = wroteScript(args[0], here)
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined
     for (const script of verdict ? [] : scripts) {
-      verdict = await nested(cmd, env, () =>
-        run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins),
-      )
+      const text = known(script)
+      const lexed = written ? writtenLexed(text, env, false) : lexScript(text, env)
+      verdict = await nested(cmd, env, () => run(again(lexed, cmd, parsed), here, visit, builtins))
       if (verdict) break
     }
   } else if (name === "eval") {
@@ -3771,7 +3776,15 @@ async function examineReading(
       (await nested(cmd, env, () =>
         run(again(lexScript(evalText(args), env), cmd, parsed), here, visit, builtins),
       ))
-  } else verdict = await visit(cmd, parsed, here)
+  } else {
+    verdict = await visit(cmd, parsed, here)
+    // a file the line wrote, run by its own path (`./run.sh`), runs as a script, so its text is walked as a shell's is
+    const own = parsed.first?.value.includes("/") ? writtenScript(parsed.first, here) : undefined
+    if (!verdict && own)
+      verdict = await nested(cmd, env, () =>
+        run(writtenLexed(known(own), env, true), subshell(here), visit, builtins),
+      )
+  }
   await record(cmd, name, args, here)
   return verdict
 }
@@ -4214,25 +4227,58 @@ async function shell(
     }
     return
   }
+  const written = !!operand && wroteScript(operand, env)
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script)
-    const verdict = await run(lexScript(text, env), subshell(env), visit, builtins)
+    const lexed = written ? writtenLexed(text, env, true) : lexScript(text, env)
+    const verdict = await run(lexed, subshell(env), visit, builtins)
     if (verdict) return verdict
   }
+}
+
+// Whether a shell's or a source's operand is a script the line wrote, as scriptOf reads it: no process substitution or stdin's name, and a file the line wrote
+const wroteScript = (operand: Word, env: Env): boolean =>
+  !operand.procs && !stdinPath(operand.value, env) && !!writtenScript(operand, env)
+
+// A script the line wrote, lexed for the walk, its commands handed to the hook's `script` first, so each holds the steady variables its own text sets
+function writtenLexed(text: string, env: Env, own: boolean): Lexed {
+  const lexed = lexScript(text, env)
+  env.script?.(text, lexed.commands, own)
+  return lexed
 }
 
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.
 export const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
 
-// A shell's or source's scripts: stdin's readings with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
+// A shell's or source's scripts: stdin's readings with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, the text this line wrote to the file it names (writtenScript), else unknown; a walk with a budget throws on one too large to hold.
 async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text[]> {
   const scripts =
     !operand || stdinPath(operand.value, env)
       ? await scriptStdin(cmd, env)
-      : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")]
+      : [
+          operand.procs
+            ? await outputs(operand.procs, env)
+            : (writtenScript(operand, env) ?? unknown("a script file")),
+        ]
   if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE)
   return scripts
+}
+
+// The text the line wrote to the file a word names (record: `echo … > run.sh; sh run.sh`), so the script a shell, a source or a ./ runs is walked as it was written; undefined for a file the line did not write
+const writtenScript = (word: Word, env: Env): Text | undefined => {
+  const path = pathOf(word, env)
+  return path === undefined ? undefined : writtenFile(path, env)
+}
+
+// The text the line wrote to a path, matched in any case off Linux, since macOS's filesystem reads a path in any case; undefined for a file the line did not write
+export function writtenFile(path: string, env: Env): Text | undefined {
+  const exact = env.files.get(path)
+  if (exact || process.platform === "linux") return exact
+  const lower = path.toLowerCase()
+  let found: Text | undefined
+  for (const [each, text] of env.files) if (each.toLowerCase() === lower) found = text
+  return found
 }
 
 // The output of a list of commands run in order, unknown when any part is.
@@ -4242,7 +4288,9 @@ async function outputs(cmds: Command[], env: Env): Promise<Text> {
 
 async function record(cmd: Command, name: string, args: Word[], env: Env): Promise<void> {
   for (const r of cmd.redirects) {
-    if (r.op !== ">" && r.op !== ">>" && r.op !== ">|") continue
+    // a >& to a name, not a descriptor, writes stdout there, as &> does
+    const named = r.op === ">&" && !/^(?:\d+|-)$/.test(r.target?.value ?? "")
+    if (r.op !== ">" && r.op !== ">>" && r.op !== ">|" && !named) continue
     const path = r.target && pathOf(r.target, env)
     if (!path) continue
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&"
@@ -4251,6 +4299,13 @@ async function record(cmd: Command, name: string, args: Word[], env: Env): Promi
       : unknown(`what ${name || "a command"} writes to stderr`)
     env.files.set(path, held(r.op === ">>" ? join([await existing(path, env), out]) : out))
   }
+  // a throw here would end the walk past its verdict, and a guard's check lets a call it throws on run, so a writer the hook cannot read leaves its file unrecorded, as before
+  if (TOOL_WRITERS.test(name)) {
+    const writes = await toolWrites(cmd, name, args, env).catch(() => [])
+    // a move's sources leave before its targets land, so a move onto its own path keeps the file
+    for (const [, , moved] of writes) if (moved) env.files.delete(moved)
+    for (const [path, text] of writes) env.files.set(path, held(text))
+  }
   if (name !== "tee") return
   const input = await stdinOf(cmd, env)
   const append = args.some((a) => a.value === "-a" || a.value === "--append")
@@ -4258,6 +4313,147 @@ async function record(cmd: Command, name: string, args: Word[], env: Env): Promi
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env)
     if (path) env.files.set(path, held(append ? join([await existing(path, env), input]) : input))
   }
+}
+
+const TOOL_WRITERS = /^g?(cp|dd|install|ln|mv|sort|uniq)$/
+// A copy's option letters that take a value (install's group, mode, owner, suffix and target folder; the others' suffix and target folder)
+const COPY_VALUES: Record<string, string> = { cp: "St", install: "gmoSt", ln: "St", mv: "St" }
+
+// The files a writer program other than a redirect or tee writes, each with the text it holds after and, for a move, the path it moved from: a copy's, move's or link's its source's (stdin's for /dev/stdin, a symbolic link's read from the link's folder), beside the target's old text when the write may not land, dd's its input's, beside the old text when dd keeps it, and sort's output file and uniq's output operand, past -f, -s and -w's values, text the hook cannot read
+async function toolWrites(
+  cmd: Command,
+  name: string,
+  args: Word[],
+  env: Env,
+): Promise<[string, Text, string?][]> {
+  const tool = TOOL_WRITERS.exec(name)?.[1]
+  if (!tool) return []
+  // a value holding a part the hook cannot read names no path it can read, so its file reads as unread
+  const at = (value: string) => (marked(value) ? undefined : pathOf({ value }, env))
+  const unread = unknown(`what ${name} writes`)
+  // the text a write that may not land leaves at its target: what the line wrote there, else its text on disk, which a file the hook cannot read (a binary) leaves out, as canary reads it
+  const kept = async (dest: string): Promise<Text> => {
+    const written = writtenFile(dest, env)
+    if (written) return written
+    const old = (await readFile(dest).catch(() => unread)) ?? { value: "" }
+    return old.unknown || marked(old.value) ? { value: "" } : old
+  }
+  if (tool === "dd") {
+    const of = args.find((a) => a.value.startsWith("of="))
+    const path = of && at(of.value.slice(3))
+    if (!path) return []
+    const input = args.find((a) => a.value.startsWith("if="))
+    const from = input && at(input.value.slice(3))
+    const text = input ? (from ? await existing(from, env) : unread) : await stdinOf(cmd, env)
+    // an input not there fails dd before it writes, so the target keeps its text too
+    const missing = !!from && !writtenFile(from, env) && !(await readFile(from))
+    const keeps =
+      missing || args.some((a) => /^(?:conv=.*notrunc|o?seek=|oflag=.*append)/.test(a.value))
+    return [[path, keeps ? join([await kept(path), text]) : text]]
+  }
+  if (tool === "sort") {
+    const paths: string[] = []
+    for (const [i, a] of args.entries()) {
+      const v = a.value
+      const long = /^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(=.*)?$/.exec(v)
+      const value = long
+        ? long[1]
+          ? long[1].slice(1)
+          : args[i + 1]?.value
+        : /^-[^-]*o/.test(v)
+          ? v.slice(v.indexOf("o") + 1) || args[i + 1]?.value
+          : undefined
+      const path = value && at(value)
+      if (path) paths.push(path)
+    }
+    return paths.map((path) => [path, unread])
+  }
+  const operands: Word[] = []
+  let ended = false
+  if (tool === "uniq") {
+    for (let i = 0; i < args.length; i++) {
+      const v = args[i].value
+      if (ended || !v.startsWith("-") || v === "-") operands.push(args[i])
+      else if (v === "--") ended = true
+      else if (/^--(?:skip-fields|skip-chars|check-chars)$/.test(v)) i++
+      else if (/^-[^-]*[fsw]$/.test(v)) i++
+    }
+    const path = operands[1] && at(operands[1].value)
+    return path ? [[path, unread]] : []
+  }
+  let target: string | undefined
+  let symbolic = false
+  let forced = false
+  let keeps = false
+  for (let i = 0; i < args.length; i++) {
+    const v = args[i].value
+    if (ended || !v.startsWith("-") || v === "-") {
+      operands.push(args[i])
+      continue
+    }
+    if (v === "--") ended = true
+    else if (v.startsWith("--target-directory=")) target = v.slice(19)
+    else if (v === "--target-directory") target = args[++i]?.value
+    else if (v === "--symbolic") symbolic = true
+    else if (v === "--force") forced = true
+    else if (/^--(?:no-clobber|interactive|update|directory)/.test(v)) keeps = true
+    else if (!v.startsWith("--"))
+      for (let k = 1; k < v.length; k++) {
+        if (v[k] === "s") symbolic = true
+        if (v[k] === "f") forced = true
+        if ((tool === "install" ? "d" : "inu").includes(v[k])) keeps = true
+        if (!COPY_VALUES[tool].includes(v[k])) continue
+        const value = v.slice(k + 1) || args[++i]?.value
+        if (v[k] === "t") target = value
+        break
+      }
+  }
+  const folder = target ?? (operands.length > 2 ? operands.at(-1)?.value : undefined)
+  const sources = target ? operands : operands.slice(0, -1)
+  const last = folder ? undefined : operands.at(-1)
+  const base = at(folder ?? last?.value ?? "")
+  if (!base || sources.length === 0) return []
+  let into = !!folder
+  if (!into)
+    try {
+      into = statSync(base).isDirectory()
+    } catch {}
+  const writes: [string, Text, string?][] = []
+  for (const source of sources) {
+    const inside = resolve(base, basename(source.value))
+    // a target that may be a folder the line made holds the source at both names, its own text in each
+    const dests = into ? [inside] : [base, inside]
+    const stdin = /^\/dev\/(?:stdin|fd\/0)$/.test(source.value)
+    for (const dest of dests) {
+      const from = stdin
+        ? undefined
+        : tool === "ln" && symbolic && !isAbsolute(source.value) && !marked(source.value)
+          ? resolve(dirname(dest), source.value)
+          : at(source.value)
+      const written = from === undefined ? undefined : writtenFile(from, env)
+      const disk = from === undefined || written ? undefined : await readFile(from)
+      let file = false
+      try {
+        file = from !== undefined && statSync(from).isFile()
+      } catch {}
+      // a regular file the line did not write and the hook cannot read from disk (a binary) leaves its target as canary read it, while a folder still carries the files the line wrote in it
+      if (file && disk && (disk.unknown || marked(disk.value))) continue
+      const copied = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread
+      // a write that may not land (no clobber, a link not forced, a source not there) keeps the target's old text beside the new (kept)
+      const mayKeep =
+        keeps || (tool === "ln" && !forced) || (from !== undefined && !written && !disk)
+      const text = mayKeep ? join([await kept(dest), copied]) : copied
+      // a move that may not land leaves its source in place too
+      const moved = tool === "mv" && from && !mayKeep ? from : undefined
+      writes.push([dest, text, moved])
+      // a folder copied or moved carries each file the line wrote under it
+      if (from)
+        for (const [path, written] of env.files)
+          if (path.startsWith(`${from}/`))
+            writes.push([dest + path.slice(from.length), written, moved ? path : undefined])
+    }
+  }
+  return writes
 }
 
 async function existing(path: string, env: Env): Promise<Text> {

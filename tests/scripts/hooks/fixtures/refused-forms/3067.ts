@@ -1,4 +1,4 @@
-import type { Group, Row } from "./_shared"
+import type { Group, Paths, Row } from "./_shared"
 
 // #3067 part 1: a write target read as the shell expands it: a brace sequence or list, a call word that is an array or zsh's split read, which fails closed, a parameter operator, "$@", "$*", a set's words and an indirection, a case-changed hooks folder, and sort's output file and uniq's second operand, each refused into the git hook while its twin into a log runs; rows are data, as refused-forms.ts says.
 const HOOK = ".git/hooks/pre-commit"
@@ -176,7 +176,491 @@ const controls = (): Row[] =>
 
 const dotGit: Row = ["a cat's output into a .GIT-named log", "cat payload > .GIT.log"]
 
-export const allowed: string[] = [...controls(), dotGit].map(([what]) => what)
+// #3067 part 2: a script the line writes and then runs (a shell, source, . or its own path) is walked as it was written, so its writes into the root or a hook are judged, globs and escapes as piped text is; a glob into a hooks folder counts by the files it matches; a dangling link counts by where its chain lands; rows are data, as refused-forms.ts says
+const SCRIPT = "~/.playground/extensions/login/x"
+const runsRoot = (): Row[] => [
+  [
+    "a script written then run by bash, touching the root",
+    `echo 'touch ${SCRIPT}' > run.sh; bash run.sh`,
+  ],
+  ["a script written then run by sh after &&", `echo 'touch ${SCRIPT}' > run.sh && sh run.sh`],
+  ["a script written then sourced", `echo 'touch ${SCRIPT}' > run.sh; source run.sh`],
+  ["a script written then run by .", `echo 'touch ${SCRIPT}' > run.sh; . ./run.sh`],
+  [
+    "a script written then run by its own path",
+    `echo 'touch ${SCRIPT}' > run.sh; chmod +x run.sh; ./run.sh`,
+  ],
+  ["a script written by tee then run", `echo 'touch ${SCRIPT}' | tee run.sh; sh run.sh`],
+  [
+    "a script printf builds from parts, then run",
+    "printf '%s/%s\\n' 'touch ~/.playground' 'extensions/login/x' > run.sh; sh run.sh",
+  ],
+  [
+    "a script printf spells with a \\x escape, then run",
+    "printf 'touch ~/.playground/ext\\x65nsions/login/x\\n' > run.sh; sh run.sh",
+  ],
+  [
+    "a script echo -e spells with a \\x escape, then run",
+    "echo -e 'touch ~/.playground/ext\\x65nsions/login/x' > run.sh; sh run.sh",
+  ],
+  [
+    "a script builtin printf builds from parts, then run",
+    "builtin printf '%s%s\\n' 'touch ~/.playground/exten' 'sions/login/x' > run.sh; sh run.sh",
+  ],
+  [
+    "a script command printf spells with a \\x escape, then run",
+    "command printf 'touch ~/.playground/ext\\x65nsions/login/x\\n' > run.sh; sh run.sh",
+  ],
+]
+// a script the line writes by a form other than a redirect or tee (another case, >&, dd, sort -o, a copy, move or link to its run name or into a folder, a folder copied or moved), then runs, is walked as written, or refused as unread
+const writesRun = (): Row[] => [
+  ["a script written in another case, then run", `echo 'touch ${SCRIPT}' > Run.sh; sh run.sh`],
+  [
+    "a script run by its own path in another case",
+    `echo 'touch ${SCRIPT}' > run.sh; chmod +x run.sh; ./RUN.sh`,
+  ],
+  ["a script written by >& to a name, then run", `echo 'touch ${SCRIPT}' >& run.sh; sh run.sh`],
+  ["a script dd writes, then run", `echo 'touch ${SCRIPT}' | dd of=run.sh; sh run.sh`],
+  ["a script sort -o writes, then run", `echo 'touch ${SCRIPT}' | sort -o run.sh; sh run.sh`],
+  [
+    "a script cp copies from stdin, then run",
+    `echo 'touch ${SCRIPT}' | cp /dev/stdin run.sh; sh run.sh`,
+  ],
+  [
+    "a script moved to its run name, then run",
+    `echo 'touch ${SCRIPT}' > a.sh; mv a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script copied to its run name, then run",
+    `echo 'touch ${SCRIPT}' > a.sh; cp a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script linked to its run name, then run",
+    `echo 'touch ${SCRIPT}' > a.sh; ln -s a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script linked from a value the hook cannot read, then run",
+    `echo 'touch out.log' > a.sh; ln -s "$S" run.sh; sh run.sh`,
+  ],
+  [
+    "a script sort -o writes, run by its own path",
+    `echo 'touch ${SCRIPT}' | sort -o run.sh; chmod +x run.sh; ./run.sh`,
+  ],
+  [
+    "a script copied into a folder the line made, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > a.sh; cp a.sh d; sh d/a.sh`,
+  ],
+  [
+    "a script copied into a folder named with a /, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > a.sh; cp a.sh d/; sh d/a.sh`,
+  ],
+  [
+    "a script moved into a folder the line made, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > a.sh; mv a.sh d; sh d/a.sh`,
+  ],
+  [
+    "a script in a folder copied by -r, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > d/run.sh; cp -r d e; sh e/run.sh`,
+  ],
+  [
+    "a script in a folder copied by -r into a folder, then run",
+    `mkdir d e; echo 'touch ${SCRIPT}' > d/run.sh; cp -r d e/; sh e/d/run.sh`,
+  ],
+  [
+    "a script in a folder moved, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > d/run.sh; mv d e; sh e/run.sh`,
+  ],
+  [
+    "a script in a folder moved to a new name with a /, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > d/run.sh; mv d e/; sh e/run.sh`,
+  ],
+  [
+    "a script in a folder copied by -r to a new name with a /, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > d/run.sh; cp -r d e/; sh e/run.sh`,
+  ],
+  [
+    "a script moved onto its own path by ./, then run",
+    `echo 'touch ${SCRIPT}' > a.sh; mv a.sh ./a.sh; sh a.sh`,
+  ],
+  [
+    "a script moved onto its own name, then run",
+    `echo 'touch ${SCRIPT}' > a.sh; mv a.sh a.sh; sh a.sh`,
+  ],
+  [
+    "a script moved onto its own name by -f, then run",
+    `echo 'touch ${SCRIPT}' > a.sh; mv -f a.sh a.sh; sh a.sh`,
+  ],
+  [
+    "a script in a folder moved onto its own path by ./, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > d/run.sh; mv d ./d; sh d/run.sh`,
+  ],
+  [
+    "a script kept by a cp -n of a plain one onto it, then run",
+    `echo 'touch ${SCRIPT}' > run.sh; echo 'touch out.log' > a.sh; cp -n a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script kept by a cp -i of a plain one onto it, then run",
+    `echo 'touch ${SCRIPT}' > run.sh; echo 'touch out.log' > a.sh; cp -i a.sh run.sh < /dev/null; sh run.sh`,
+  ],
+  [
+    "a script kept by a mv -n of a plain one onto it, then run",
+    `echo 'touch ${SCRIPT}' > run.sh; echo 'touch out.log' > a.sh; mv -n a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script a mv -n leaves at its source, then run",
+    `echo 'touch out.log' > run.sh; echo 'touch ${SCRIPT}' > a.sh; mv -n a.sh run.sh; sh a.sh`,
+  ],
+  [
+    "a script kept by an ln -s with no -f onto it, then run",
+    `echo 'touch ${SCRIPT}' > run.sh; echo 'touch out.log' > a.sh; ln -s a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script kept by a cp from a source not there, then run",
+    `echo 'touch ${SCRIPT}' > run.sh; cp no-such-3067.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script whose tail a dd conv=notrunc keeps, then run",
+    `echo 'touch ${SCRIPT}' > run.sh; echo ':' | dd of=run.sh conv=notrunc; sh run.sh`,
+  ],
+  [
+    "a script the hook cannot read, kept by a dd from an input not there, then run",
+    `echo "$(cat payload)" > a.sh; dd if=no-such-3067.in of=a.sh; sh a.sh`,
+  ],
+  [
+    "a script uniq -f 1 writes, then run",
+    `echo 'touch ${SCRIPT}' > in.txt; uniq -f 1 in.txt run.sh; sh run.sh`,
+  ],
+  [
+    "a script uniq -s 1 writes, then run",
+    `echo 'touch ${SCRIPT}' > in.txt; uniq -s 1 in.txt run.sh; sh run.sh`,
+  ],
+  [
+    "a script uniq -w 9 writes, then run",
+    `echo 'touch ${SCRIPT}' > in.txt; uniq -w 9 in.txt run.sh; sh run.sh`,
+  ],
+  // a script's own steady variable is held as the line's is, so each of these writes where its variable names, the root
+  [
+    "a script holding the root in a variable, a mkdir on it, then run",
+    `echo 'OUT=${SCRIPT}; mkdir -p "$OUT"' > run.sh; bash run.sh`,
+  ],
+  [
+    "a script holding the root in a variable, an rm on it unquoted, then run",
+    `echo 'D=${SCRIPT}; rm -rf $D' > run.sh; bash run.sh`,
+  ],
+  [
+    "a script holding the root in a variable, a cd to it and a cp, then run",
+    "echo 'D=~/.playground/extensions/login; cd $D; f=x.ts; cp /tmp/a.ts $f' > run.sh; bash run.sh",
+  ],
+  [
+    "a script holding the root in a variable, a cd to it and python, run by its own path",
+    `echo 'W=~/.playground/extensions/login; cd "$W"; python3 -m pytest -q' > run.sh; chmod +x run.sh; ./run.sh`,
+  ],
+  [
+    "a script holding the root in a variable, a cd to it or exit and a write, then run",
+    `echo 'W=~/.playground/extensions/login; cd "$W" || exit 1; echo x > f.ts' > run.sh; bash run.sh`,
+  ],
+  [
+    "a script holding the root in a variable, a mkdir on it, then sourced",
+    `echo 'OUT=${SCRIPT}; mkdir -p "$OUT"' > run.sh; source run.sh`,
+  ],
+  [
+    "a script whose variable the line made readonly at the root, a mkdir on it, then sourced",
+    `readonly OUT=${SCRIPT}; echo 'OUT=out.d; mkdir -p "$OUT"' > run.sh; source run.sh`,
+  ],
+  [
+    "a script that evals each word of a list, then run",
+    `echo 'for sp in true echo; do eval "$sp"; done' > run.sh; bash run.sh`,
+  ],
+  // what a script's steady variables leave unheld, as the line's do
+  [
+    "a script that sets its variable twice, the root once, a mkdir on it, then run",
+    `echo 'OUT=out.d; [ -n "$Z" ] && OUT=${SCRIPT}; mkdir -p "$OUT"' > run.sh; bash run.sh`,
+  ],
+  [
+    "a script reading a variable the line set to the root before sourcing it, a mkdir on it",
+    `OUT=${SCRIPT}; echo 'mkdir -p "$OUT"' > run.sh; source run.sh`,
+  ],
+  [
+    "a script reading a variable only the line exported, at the root, a mkdir on it, then run",
+    `export OUT=${SCRIPT}; echo 'mkdir -p "$OUT"' > run.sh; bash run.sh`,
+  ],
+  [
+    "a script on stdin holding the root in a variable, a mkdir on it",
+    `bash <<'EOF'\nOUT=${SCRIPT}\nmkdir -p "$OUT"\nEOF`,
+  ],
+  [
+    "a -c script holding the root in a variable, a mkdir on it",
+    `bash -c 'OUT=${SCRIPT}; mkdir -p "$OUT"'`,
+  ],
+]
+const writeControls = (): Row[] => [
+  ["a plain script written in another case, then run", `echo 'touch out.log' > Run.sh; sh run.sh`],
+  ["a plain script written by >& to a name, then run", `echo 'touch out.log' >& run.sh; sh run.sh`],
+  ["a plain script dd writes, then run", `echo 'touch out.log' | dd of=run.sh; sh run.sh`],
+  [
+    "a plain script cp copies from stdin, then run",
+    `echo 'touch out.log' | cp /dev/stdin run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script moved to its run name, then run",
+    `echo 'touch out.log' > a.sh; mv a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script copied to its run name, then run",
+    `echo 'touch out.log' > a.sh; cp a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script linked to its run name, then run",
+    `echo 'touch out.log' > a.sh; ln -s a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script copied into a folder the line made, then run",
+    `mkdir d; echo 'touch out.log' > a.sh; cp a.sh d; sh d/a.sh`,
+  ],
+  [
+    "a plain script copied into a folder named with a /, then run",
+    `mkdir d; echo 'touch out.log' > a.sh; cp a.sh d/; sh d/a.sh`,
+  ],
+  [
+    "a plain script moved into a folder the line made, then run",
+    `mkdir d; echo 'touch out.log' > a.sh; mv a.sh d; sh d/a.sh`,
+  ],
+  [
+    "a plain script in a folder copied by -r, then run",
+    `mkdir d; echo 'touch out.log' > d/run.sh; cp -r d e; sh e/run.sh`,
+  ],
+  [
+    "a plain script in a folder moved, then run",
+    `mkdir d; echo 'touch out.log' > d/run.sh; mv d e; sh e/run.sh`,
+  ],
+  ["a plain copy to a file, then run", `echo 'touch out.log' > a.sh; cp a.sh d; sh d`],
+  [
+    "a plain script in a folder moved to a new name with a /, then run",
+    `mkdir d; echo 'touch out.log' > d/run.sh; mv d e/; sh e/run.sh`,
+  ],
+  [
+    "a plain script in a folder copied by -r to a new name with a /, then run",
+    `mkdir d; echo 'touch out.log' > d/run.sh; cp -r d e/; sh e/run.sh`,
+  ],
+  [
+    "a plain script moved onto its own path by ./, then run",
+    `echo 'touch out.log' > a.sh; mv a.sh ./a.sh; sh a.sh`,
+  ],
+  [
+    "a plain script moved onto its own name, then run",
+    `echo 'touch out.log' > a.sh; mv a.sh a.sh; sh a.sh`,
+  ],
+  [
+    "a plain script moved onto its own name by -f, then run",
+    `echo 'touch out.log' > a.sh; mv -f a.sh a.sh; sh a.sh`,
+  ],
+  [
+    "a plain script in a folder moved onto its own path by ./, then run",
+    `mkdir d; echo 'touch out.log' > d/run.sh; mv d ./d; sh d/run.sh`,
+  ],
+  [
+    "a plain script kept by a cp -n of a plain one onto it, then run",
+    `echo 'touch out.log' > run.sh; echo 'touch out.log' > a.sh; cp -n a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script kept by a mv -n of a plain one onto it, then run",
+    `echo 'touch out.log' > run.sh; echo 'touch out.log' > a.sh; mv -n a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script a mv -n leaves at its source, then run",
+    `echo 'touch out.log' > run.sh; echo 'touch out.log' > a.sh; mv -n a.sh run.sh; sh a.sh`,
+  ],
+  [
+    "a plain script kept by an ln -s with no -f onto it, then run",
+    `echo 'touch out.log' > run.sh; echo 'touch out.log' > a.sh; ln -s a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script kept by a cp from a source not there, then run",
+    `echo 'touch out.log' > run.sh; cp no-such-3067.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script kept by a dd from an input not there, then run",
+    `echo 'touch out.log' > a.sh; dd if=no-such-3067.in of=a.sh; sh a.sh`,
+  ],
+  [
+    "a plain script whose tail a dd conv=notrunc keeps, then run",
+    `echo 'touch out.log' > run.sh; echo ':' | dd of=run.sh conv=notrunc; sh run.sh`,
+  ],
+  ["a program copied from the system, then run by its path", "cp /bin/ls t; ./t"],
+  ["a program copied from the system, then run by sh", "cp /bin/ls t; sh t"],
+  [
+    "a plain script holding a folder in a variable, a mkdir on it, then run",
+    `echo 'OUT=out.d; mkdir -p "$OUT"' > run.sh; bash run.sh`,
+  ],
+  [
+    "a plain script holding a folder in a variable, an rm on it unquoted, then run",
+    `echo 'D=out.d; rm -rf $D; mkdir -p $D' > run.sh; bash run.sh`,
+  ],
+  [
+    "a plain script holding a folder in a variable, a cd to it and a cp, then run",
+    "echo 'D=/tmp/pg-3067-d; cd $D; f=x.ts; cp /tmp/a.ts $f' > run.sh; bash run.sh",
+  ],
+  [
+    "a plain script holding a folder in a variable, a cd to it and python, run by its own path",
+    `echo 'W=/tmp/pg-3067-w; cd "$W"; python3 -m pytest -q' > run.sh; chmod +x run.sh; ./run.sh`,
+  ],
+  [
+    "a plain script holding a folder in a variable, a cd to it or exit and a write, then run",
+    `echo 'W=/tmp/pg-3067-w; cd "$W" || exit 1; echo x > f.ts' > run.sh; bash run.sh`,
+  ],
+  [
+    "a plain script holding a folder in a variable, a mkdir on it, then sourced",
+    `echo 'OUT=out.d; mkdir -p "$OUT"' > run.sh; source run.sh`,
+  ],
+  [
+    "a plain script holding a folder in a variable, a mkdir on it, then run by .",
+    `echo 'OUT=out.d; mkdir -p "$OUT"' > run.sh; . ./run.sh`,
+  ],
+]
+// shell.ts reads a script's ~ as the process's homedir() while this test sets the root's home by env HOME, so the ~ glob row is judged in the process worktree alone, where the two are one home
+const worktreeRuns = (): Row[] => [
+  [
+    "a script naming the root by a glob, then run",
+    "echo 'touch ~/.playground/ext*/login/x' > run.sh; sh run.sh",
+  ],
+  [
+    "a script written then run, writing the git hook",
+    `echo 'cat payload > ${HOOK}' > run.sh; bash run.sh`,
+  ],
+  [
+    "a script printf builds from parts, writing the git hook, then run",
+    "printf '%s/%s\\n' 'cat payload > .git' 'hooks/pre-commit' > run.sh; sh run.sh",
+  ],
+]
+// a clone's hooks folder holding a hook, and a dangling link into the root, that refused-forms.test.ts makes in the scratch home, and the glob row by the scratch home's absolute path
+const linked = ({ DATA, HOME }: Paths): Row[] => [
+  [
+    "a script naming the root by an absolute glob, then run",
+    `echo 'touch ${DATA}/ext*/login/x' > run.sh; sh run.sh`,
+  ],
+  ["a cat's output into a hook by a ? glob", `cat payload > ${HOME}/hooked/.git/hook?/pre-commit`],
+  [
+    "a script written then run, writing a hook by a * glob",
+    `echo 'cat payload > ${HOME}/hooked/.git/hook*/pre-commit' > run.sh; sh run.sh`,
+  ],
+  ["a touch through a dangling link into the root", `touch ${HOME}/dangling`],
+  ["a redirect through a dangling link into the root", `cat payload > ${HOME}/dangling`],
+  ["a cp through a dangling link into the root", `cp payload ${HOME}/dangling`],
+  ["a tee through a dangling link into the root", `cat payload | tee ${HOME}/dangling`],
+  ["a touch through a relative dangling link in a linked folder", `touch ${HOME}/linked-sub/rel`],
+  [
+    "a redirect through a relative dangling link in a linked folder",
+    `cat payload > ${HOME}/linked-sub/rel`,
+  ],
+  [
+    "an echo naming the root through a dangling link onto a hook",
+    `echo 'touch ${SCRIPT}' > ${HOME}/dangling-hook`,
+  ],
+  [
+    "a cat's output into a core.hooksPath folder by a * glob that matches nothing",
+    `cat payload > ${HOME}/hookspath/hk/pre-commit*`,
+  ],
+  [
+    "a cat's output into a core.hooksPath folder by a quoted ?",
+    `cat payload > '${HOME}/hookspath/hk/pre-commi?'`,
+  ],
+  [
+    "a cat's output into a core.hooksPath folder by a [ ] glob that matches nothing",
+    `cat payload > ${HOME}/hookspath/hk/pre-commi[t]`,
+  ],
+  [
+    "a script written into a folder on disk, the folder copied by -r, then run",
+    `echo 'touch ${SCRIPT}' > ${HOME}/ondisk/run.sh; cp -r ${HOME}/ondisk e; sh e/run.sh`,
+  ],
+  [
+    "a script written into a folder on disk, the folder moved, then run",
+    `echo 'touch ${SCRIPT}' > ${HOME}/ondisk/run.sh; mv ${HOME}/ondisk e; sh e/run.sh`,
+  ],
+  [
+    "a script written into a folder on disk, the folder copied by -R into a folder, then run",
+    `mkdir e; echo 'touch ${SCRIPT}' > ${HOME}/ondisk/run.sh; cp -R ${HOME}/ondisk e; sh e/ondisk/run.sh`,
+  ],
+  [
+    "a cat's output into a core.hooksPath folder by a * glob in a name",
+    `cat payload > ${HOME}/hookspath/hk/lib*.sh`,
+  ],
+]
+// what part 2 leaves running: a script written and not run is data, a plain script runs, a glob that matches no hook, a dangling link to a plain place, and sed's scripts that run nothing
+const runControls = (): Row[] => [
+  ["a script naming the root, written and not run", `echo 'touch ${SCRIPT}' > run.sh`],
+  [
+    "a script naming the root by a glob, written and not run",
+    "echo 'touch ~/.playground/ext*/login/x' > run.sh",
+  ],
+  [
+    "a script printf builds from parts, written and not run",
+    "printf '%s/%s\\n' 'touch ~/.playground' 'extensions/login/x' > run.sh",
+  ],
+  ["a plain script written then run by bash", "echo 'touch out.log' > run.sh; bash run.sh"],
+  [
+    "a plain script written then run by its own path",
+    "echo 'touch out.log' > run.sh; chmod +x run.sh; ./run.sh",
+  ],
+  [
+    "a plain script printf builds from parts, then run",
+    "printf '%s/%s\\n' 'touch out' 'x.log' > run.sh; sh run.sh",
+  ],
+  ["a sed s between slashes", "sed 's/one/two/' notes.md"],
+  ["a sed print of lines matching e", "sed '/e/p' notes.md"],
+  ["a sed s whose replacement is e, with g", "sed 's/x/e/g' notes.md"],
+]
+const worktreeControls = (): Row[] => [
+  ["a cat's output into a log by a ? glob", "cat payload > out?.log"],
+  ["a plain script with a glob, written then run", "echo 'touch out*.log' > run.sh; sh run.sh"],
+]
+const linkControls = ({ HOME }: Paths): Row[] => [
+  ["a touch through a dangling link to a plain place", `touch ${HOME}/dangling-plain`],
+  [
+    "an echo naming the root into a glob onto a file named with *",
+    `echo 'touch ${SCRIPT}' > ${HOME}/starred/a*`,
+  ],
+  [
+    "an echo naming the root through a dangling link to a plain place",
+    `echo 'touch ${SCRIPT}' > ${HOME}/dangling-plain`,
+  ],
+  [
+    "a build not made yet copied over an old program, then the program run",
+    `cp ${HOME}/build/app ${HOME}/oldbin/app; ${HOME}/oldbin/app --version`,
+  ],
+  [
+    "a build not made yet copied by -f over an old program, then the program run",
+    `cp -f ${HOME}/build/app ${HOME}/oldbin/app && ${HOME}/oldbin/app`,
+  ],
+  [
+    "a plain script written into a folder on disk, the folder copied by -r, then run",
+    `echo 'touch out.log' > ${HOME}/ondisk/run.sh; cp -r ${HOME}/ondisk e; sh e/run.sh`,
+  ],
+  [
+    "a plain script written into a folder on disk, the folder moved, then run",
+    `echo 'touch out.log' > ${HOME}/ondisk/run.sh; mv ${HOME}/ondisk e; sh e/run.sh`,
+  ],
+  [
+    "a cat's output into a plain folder of a core.hooksPath repo by a * glob that matches nothing",
+    `cat payload > ${HOME}/hookspath/logs/out*.log`,
+  ],
+  [
+    "a cat's output into a plain folder of a core.hooksPath repo by a quoted ?",
+    `cat payload > '${HOME}/hookspath/logs/out?.log'`,
+  ],
+  [
+    "a cat's output into a plain folder of a core.hooksPath repo by a [ ] glob that matches nothing",
+    `cat payload > ${HOME}/hookspath/logs/ou[t].log`,
+  ],
+]
+
+export const allowed: string[] = [
+  ...controls(),
+  dotGit,
+  ...runControls(),
+  ...writeControls(),
+  ...worktreeControls(),
+  ...linkControls({ HOME: "" } as Paths),
+].map(([what]) => what)
 export const groups: Group[] = [
   { folders: ["process worktree"], guards: ["no-extensions-write"], rows: held },
   { folders: ["process worktree"], guards: ["no-extensions-write"], rows: closed },
@@ -190,5 +674,31 @@ export const groups: Group[] = [
     folders: ["process worktree"],
     guards: ["no-extensions-write"],
     rows: () => [...controls(), dotGit],
+  },
+  {
+    folders: ["data folder", "home", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [...runsRoot(), ...runControls(), ...writesRun(), ...writeControls()],
+  },
+  {
+    folders: ["process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [...worktreeRuns(), ...worktreeControls()],
+  },
+  {
+    folders: ["data folder", "home"],
+    guards: ["no-extensions-write"],
+    rows: (paths) => [...linked(paths), ...linkControls(paths)],
+  },
+  // every guard that walks a line reads a script the line writes and runs, so no-extension-repo-write judges a push in one as typed, on 1354.ts's made-up repository
+  {
+    folders: ["checkout"],
+    guards: ["no-extension-repo-write"],
+    rows: () => [
+      [
+        "a push by --repo, in a script the line writes and runs",
+        "echo 'git push --repo=https://github.com/quillco/acme-skills.git HEAD:feature' > run.sh; sh run.sh",
+      ],
+    ],
   },
 ]

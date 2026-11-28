@@ -46,7 +46,7 @@ import {
   type Visit,
   type Word,
 } from "./shell"
-import { heldReadings, heldWord, namings, NONE, type Steady, steadyNames } from "./steady"
+import { heldReadings, heldWord, namings, NONE, scriptSteadies, type Steady } from "./steady"
 
 type Environment = Record<string, string | undefined>
 
@@ -1785,7 +1785,7 @@ async function inspect(
     ...(repo ? { PLAYGROUND_REPO: repo } : {}),
   }
   const lexed = lex(command, known)
-  const steadyAt = steadyNames(named, lexed.commands)
+  const { at: steadyAt, script } = scriptSteadies(command, named, lexed.commands)
   const own = named.blind
     ? {}
     : Object.fromEntries(
@@ -1804,6 +1804,7 @@ async function inspect(
     // the folder the shell last left, which ~- names, is one no call records, so it reads as unknown until a cd on the line
     old: {},
     process: environment,
+    script,
     vars: new Map(),
   }
   const home = guarding ? checkoutOf(directory, orgs, roots) : undefined

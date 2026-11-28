@@ -1,5 +1,5 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
-import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join, resolve, sep } from "node:path"
 
@@ -79,6 +79,7 @@ import {
   withDeadline,
   type Word,
   WRAPPERS,
+  writtenFile,
 } from "./shell"
 import {
   held,
@@ -88,10 +89,10 @@ import {
   NONE,
   QUALIFIER,
   quotedBodiesOut,
+  scriptSteadies,
   singleQuotesOut,
   type Steady,
   startingVariables,
-  steadyNames,
   unquoted,
 } from "./steady"
 
@@ -2224,14 +2225,64 @@ function outputFiles(tool: "sort" | "uniq", args: Word[]): { files: Word[]; stdi
   }
 }
 // Whether a path is a hook file: one in a .git/hooks folder in any case, since macOS's filesystem reads a path in any case, or in the folder its repo's hooks run from, or, unless `sure`, any file in a folder git could not answer for; never a device under /dev
-function hookFile(path: string | undefined, sure = false): boolean {
+function hookFile(path: string | undefined, sure = false, literal = false): boolean {
   if (!path) return false
   if (/(?:^|\/)\.git\/hooks\//i.test(path)) return true
+  // a glob the shell expands on the filesystem (`.git/hook?/pre-commit`) counts by each file it matches (hookGlobFiles), each a literal path, and by its own text as one, since a glob that matches nothing writes its own name and a file's own name may hold a glob character, and as a file the hook cannot read past GLOB_MATCHES of them
+  if (!literal && /[*?[]/.test(path) && isAbsolute(path)) {
+    const matches = hookGlobFiles(path)
+    if (matches === undefined ? !sure : matches.some((each) => hookFile(each, sure, true)))
+      return true
+    return hookFile(path, sure, true)
+  }
+  const end = linkEnd(path)
+  if (end && hookFile(end, sure, true)) return true
   if (resolve(path).startsWith("/dev/")) return false
   const dir = dirname(path)
   if (!hookFolders.has(dir)) hookFolders.set(dir, readHookFolder(dir))
   const folder = hookFolders.get(dir)
   return (!sure && folder === true) || folder === real(dir)
+}
+const LINK_HOPS = 40
+// Where a link's readlink chain lands, which realpath cannot follow once the target is missing, each hop read from the real folder the link sits in, as the kernel reads it; undefined for a path that is no link, or a chain past LINK_HOPS
+function linkEnd(path: string): string | undefined {
+  const start = resolve(path)
+  if (!linkEnds.has(start)) linkEnds.set(start, followLink(start))
+  return linkEnds.get(start)
+}
+// each path's linkEnd for one call, reset by inspect, since a long line asks again for the same path and each ask costs an lstat
+let linkEnds = new Map<string, string | undefined>()
+function followLink(start: string): string | undefined {
+  let at = start
+  for (let hop = 0; hop <= LINK_HOPS; hop++) {
+    try {
+      if (!lstatSync(at).isSymbolicLink()) return hop > 0 ? at : undefined
+      at = resolve(real(dirname(at)), readlinkSync(at))
+    } catch {
+      return hop > 0 ? at : undefined
+    }
+  }
+}
+const GLOB_MATCHES = 256
+// The files an absolute glob matches, scanned from its last folder with no glob character, dotfiles included; undefined past GLOB_MATCHES entries
+function hookGlobFiles(path: string): string[] | undefined {
+  const parts = path.split(sep)
+  const at = parts.findIndex((part) => /[*?[]/.test(part))
+  const base = parts.slice(0, at).join(sep) || sep
+  const found: string[] = []
+  try {
+    for (const each of new Bun.Glob(parts.slice(at).join(sep)).scanSync({
+      absolute: true,
+      cwd: base,
+      dot: true,
+      onlyFiles: false,
+    })) {
+      if (found.push(each) > GLOB_MATCHES) return undefined
+    }
+  } catch {
+    // a folder it cannot read matches nothing there
+  }
+  return found
 }
 // Each spelling of a text that a hook may run: as typed, with its backslash-newlines joined as the shell joins a word across one, with its escapes read as a sed's or perl's replacement reads them (\U, \L, \E and their kin dropped, \n a newline, any other escaped character itself) and then joined, and each of those in lower case outside its variables, since macOS's filesystem reads a path in any case
 function hookSpellings(text: string): string[] {
@@ -2627,10 +2678,14 @@ async function inspect(
   const root = real(extensionsDir(dataDir(environment)))
   const home = environment.HOME || homedir()
   const needle = root.startsWith(real(home) + sep) ? root.slice(real(home).length) : root
+  // a dangling link counts by where its chain lands too (linkEnd), since a write through it makes the file there
   const inRoot = (path: string | undefined) => {
     if (path === undefined) return false
-    const at = real(path)
-    return at === root || at.startsWith(root + sep)
+    return [path, linkEnd(path)].some((each) => {
+      if (each === undefined) return false
+      const at = real(each)
+      return at === root || at.startsWith(root + sep)
+    })
   }
   // a folder that holds the root, but the filesystem's own root, which only a remover names to harm
   const above = (path: string | undefined, remover: boolean) => {
@@ -2970,6 +3025,13 @@ async function inspect(
       }
       return (await visit(own, parse(own), env)) ?? run(remote, at, visit, true)
     }
+    // a file this line wrote with text the hook cannot read, run by its own path (`./run.sh`), is refused as a shell running it is (below)
+    const ownPath = parsed.first?.value.includes("/") ? pathOf(parsed.first, env) : undefined
+    const ownScript = ownPath === undefined ? undefined : writtenFile(ownPath, env)
+    if (ownScript && (ownScript.unknown || marked(ownScript.value)))
+      return refuse(
+        `${shown(parsed.first!)}, a script this line wrote with text the hook cannot read; run its commands as calls of their own`,
+      )
     // the reader walks the script a shell or a source runs, so the hook judges only one it cannot read: a -c script it reads none of, or a file this line wrote with such text
     if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
       const shellCall = SHELLS.has(parsed.name)
@@ -2984,7 +3046,7 @@ async function inspect(
       if (inline && operand && evaluatedParts(operand.value).some((part) => touches(part, env)))
         return refuse(EVALUATES_ROOT)
       const path = !inline && operand ? pathOf(operand, env) : undefined
-      const written = path === undefined ? undefined : env.files.get(path)
+      const written = path === undefined ? undefined : writtenFile(path, env)
       if (written && (written.unknown || marked(written.value)))
         return refuse(
           `${parsed.name} ${shown(operand!)}, a script this line wrote with text the hook cannot read; run its commands as calls of their own`,
@@ -3081,7 +3143,7 @@ async function inspect(
       const inner = c.inner?.()
       return inner && (inner.length > 0 || c.words.length === 0) ? inner : bodies.get(c)
     }
-    // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), a function body's positional parameter by its call's words as the shell gives them (positionals), one a call word the hook cannot read gives refused even when the check must be sure, and any other whose value the hook cannot read counts unless the check must be sure, failing closed as an unanswered git folder does
+    // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), a function body's positional parameter by its call's words as the shell gives them (positionals), one a call word the hook cannot read gives refused even when the check must be sure, a top-level set's words and an operator worked out on the value (operatedWords) only adding a refusal, and any other whose value the hook cannot read counts unless the check must be sure, failing closed as an unanswered git folder does
     const hookWord = (word: Word, here: Env, sure = false): boolean => {
       // a brace list or sequence counts by each value it expands to, and one the reader cannot expand as any other unread target does
       const braced = braceValues(word)
@@ -3736,7 +3798,8 @@ async function inspect(
   const lexed = lex(command, known)
   if (!loneCall(lexed.commands)) tuning = NO_TUNING
   // a writer's file a cd's && chain sets to a literal is held past the chain too, never a folder, since a failed cd leaves it empty and a cd to it then stays put
-  steadyAt = steadyNames(named, lexed.commands, true)
+  const steadies = scriptSteadies(command, named, lexed.commands, true)
+  steadyAt = steadies.at
   const env: Env = {
     cwd: directory,
     // the line starts in the folder the tool names, which the reader has proved by the payload itself
@@ -3749,6 +3812,7 @@ async function inspect(
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },
     process: environment,
+    script: steadies.script,
     vars: new Map(),
     visitShells: true,
   }
@@ -3807,6 +3871,7 @@ async function inspect(
     lexed.commands.filter((cmd) => !!symlinkSource(cmd, parse(cmd))).length === 1 &&
     lexed.commands.every((cmd) => !!symlinkSource(cmd, parse(cmd)) || linkSafe(cmd, env))
   lineFindings = new Map()
+  linkEnds = new Map()
   // a line holding an ext score is refused whole once any command on it changes who the session reads as, so a shell it runs or pipes into carries the change
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER)
