@@ -179,9 +179,10 @@ export const posterEdit = (
 export const cardStart = (
   kept: Draft | undefined,
   posted: string,
-): { draft: string; waiting: Waiting | null } => {
-  throw new Error(`cardStart is not built yet: ${String(kept)} ${posted}`)
-}
+): { draft: string; waiting: Waiting | null } =>
+  kept?.base !== undefined && kept.base !== posted
+    ? posterEdit(kept.text, kept.base, posted)
+    : { draft: kept?.text ?? posted, waiting: null }
 
 // Pure: what a draft card keeps: words waiting to be restored while the box holds the poster's text, so a remount gives them back, else the box's own words over the poster's text, none when they match it.
 export const cardKept = (draft: string, posted: string, waiting: Waiting | null): Draft =>

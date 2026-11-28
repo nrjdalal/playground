@@ -138,7 +138,15 @@ import { HOLDS_RELOAD } from "@/lib/build-reload"
 import { copyToClipboard } from "@/lib/clipboard"
 import { config } from "@/lib/config"
 import { dispatcherOf, useNow } from "@/lib/dashboard"
-import { cardDraftKey, cardKept, draftSaver, posterEdit, readDrafts, saveDraft } from "@/lib/drafts"
+import {
+  cardDraftKey,
+  cardKept,
+  cardStart,
+  draftSaver,
+  posterEdit,
+  readDrafts,
+  saveDraft,
+} from "@/lib/drafts"
 import {
   answerItem,
   canDraft,
@@ -1129,11 +1137,7 @@ export function InboxCard({
   const keptKey = cardDraftKey(item.id)
   const [kept] = useState(() => (keeps ? readDrafts()[keptKey] : undefined))
   // kept words typed over an earlier text of the poster's give way to his newer one, as a live edit does below (PG-3176)
-  const [start] = useState(() =>
-    kept?.base !== undefined && kept.base !== posted
-      ? posterEdit(kept.text, kept.base, posted)
-      : { draft: kept?.text ?? posted, waiting: null },
-  )
+  const [start] = useState(() => cardStart(kept, posted))
   const [draft, setDraft] = useState(start.draft)
   // his words a poster's edit replaced, one click from coming back until the next edit or the card closes
   const [restorable, setRestorable] = useState(start.waiting)
