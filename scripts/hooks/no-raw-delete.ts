@@ -1,10 +1,12 @@
 // PreToolUse hook, acting for every session and sub-agent: refuses a recursive delete, an option that deletes the files a program reads, and the calls that strip a file's delete protection, since a recursive delete is final and a prompt line against one does not hold (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders), and names playground rm, which moves a path into a 7-day trash. A speed bump: a script file a session writes and runs passes it.
 
 import { realpathSync } from "node:fs"
-import { basename, dirname, resolve, sep } from "node:path"
+import { basename, dirname, join, resolve, sep } from "node:path"
 
+import { dataDirOf } from "../../packages/env/src/data-dir"
 import { input } from "./input"
 import { gitCommand } from "./no-stash"
+import { registryName } from "./role"
 import {
   type Command,
   type Env,
@@ -38,6 +40,10 @@ import {
 
 const INSTEAD =
   "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs."
+
+// playground rm's whole case for a path inside the caller's own data-folder scratchpad: the byte cap alone, node_modules uncounted (safe-delete's `whole`).
+const OWN_PAD =
+  "It sits in your own scratchpad folder, where playground rm <path> moves it whole to the 7-day trash up to 2 GB, with no file limit and its node_modules not counted: run it yourself, since your lead cannot move a live session's scratchpad. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs."
 
 const WORKTREE =
   "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it (a clean worktree, detached at a commit canary already has, counts as held by none), it holds no uncommitted change and its work has landed on canary or on a branch origin still holds."
@@ -186,17 +192,50 @@ function real(path: string): string {
   }
 }
 
-// The folders a plain rm may delete files in: the worktree the session works in, and its own scratchpad.
-type Roots = { scratch?: RegExp; worktree?: string }
+// The folders a plain rm may delete files in: the worktree the session works in, and its own scratchpad; pad is the caller's own data-folder scratchpad, where playground rm moves a folder whole.
+type Roots = { pad?: string; scratch?: RegExp; worktree?: string }
 
-function rootsOf(cwd: string | undefined, session: unknown): Roots {
+async function rootsOf(
+  cwd: string | undefined,
+  session: unknown,
+  command: string,
+  environment: Record<string, string | undefined>,
+): Promise<Roots> {
   const at = cwd ? real(cwd) : ""
   const worktree = /^(.*\/\.claude\/worktrees\/[^/]+)(?:\/|$)/.exec(at)?.[1]
   const id = typeof session === "string" && /^[\w-]+$/.test(session) ? session : undefined
   const scratch = id
     ? new RegExp(`^(?:/private)?/tmp/claude-\\d+/[^/]+/${id}/scratchpad/`)
     : undefined
-  return { scratch, worktree }
+  // the registry is read only for a call that may hold a recursive option
+  const name =
+    id && /-[A-Za-z]*[rR]|--rec/.test(command)
+      ? await registryName(id, environment).catch(() => undefined)
+      : undefined
+  const pad =
+    name && /^[\w.-]+$/.test(name)
+      ? real(join(dataDirOf(environment), "scratchpad", name))
+      : undefined
+  return { pad, scratch, worktree }
+}
+
+// Whether every path rm names sits strictly inside the caller's own data-folder scratchpad, each word readable.
+function inPad(args: Word[], env: Env, { pad }: Roots): boolean {
+  if (!pad) return false
+  let options = true
+  const targets: Word[] = []
+  for (const a of args) {
+    if (options && a.value === "--") options = false
+    else if (!(options && a.value.startsWith("-") && a.value !== "-")) targets.push(a)
+  }
+  return (
+    targets.length > 0 &&
+    targets.every((t) => {
+      if (hidden(t) || marked(t.value)) return false
+      const path = pathOf(t, env)
+      return !!path && real(path).startsWith(pad + sep)
+    })
+  )
 }
 
 const inside = (path: string, { scratch, worktree }: Roots): boolean => {
@@ -224,7 +263,12 @@ function judgeRm(
       continue
     }
     const option = options && a.value.startsWith("-") && a.value !== "-"
-    if (option && recursive(a.value)) return refuse(`a recursive rm (${a.value})`)
+    if (option && recursive(a.value))
+      return refuse(
+        `a recursive rm (${a.value})`,
+        undefined,
+        !nested && inPad(args, env, roots) ? OWN_PAD : INSTEAD,
+      )
     // a variable may split into -r and any path, but a quoted one among another program's words stays one word (`docker rm -fv "$ID"`); a brace may spell -r, and a glob in an option any option
     const spread = marked(a.value) && (!nested || !a.quoted)
     if (spread || (options && spellsRecursive(a.value)) || (option && hidden(a)))
@@ -275,7 +319,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
   const command = (input as { command?: unknown } | null)?.command
   if (typeof command !== "string" || !CANDIDATE.test(bare(spelledText(command)))) return
   const directory = typeof cwd === "string" ? cwd : undefined
-  const roots = rootsOf(directory, session)
+  const roots = await rootsOf(directory, session, command, environment)
   // an array run whole or a glob program word the reader cannot read (unreadRun) may be any delete, in a call that reads as one, in its text, an ANSI-C string or a brace list or zsh group spelled out (spelledText), or holds a glob that may match a delete program
   const text = bare(spelledText(decodedText(command)))
   const named = DELETES.test(text) || globSpells(text, SPELLED)

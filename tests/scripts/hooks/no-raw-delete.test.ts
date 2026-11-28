@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { boxEnv } from "../../../packages/scripts/src/box-env"
 import { check } from "../../../scripts/hooks/no-raw-delete"
 import { NEVER_MADE } from "./fixtures/refused-forms"
 
@@ -191,6 +192,56 @@ describe("a delete the hook refuses, naming playground rm", () => {
       "no-raw-delete hook ",
     )
     expect(await check("not json")).toBeUndefined()
+  })
+})
+
+// a worker read the 5,000-file cap as its own scratchpad's too and left a 1.0 GB clone for its lead, whose Ops cannot move a live session's scratchpad (#3153)
+describe("a recursive rm in the caller's own data-folder scratchpad names playground rm's whole move", () => {
+  const home = mkdtempSync(join(tmpdir(), "raw-delete-pad-"))
+  const config = join(home, ".claude")
+  mkdirSync(join(config, "sessions"), { recursive: true })
+  writeFileSync(
+    join(config, "sessions", "5100.json"),
+    JSON.stringify({ name: "k3v9q2-worker", sessionId: SESSION }),
+  )
+  const pads = join(home, ".playground", "scratchpad")
+  const own = join(pads, "k3v9q2-worker")
+  mkdirSync(join(own, "clone"), { recursive: true })
+  const env = boxEnv(home, { CLAUDE_CONFIG_DIR: config })
+  const OWN = "moves it whole to the 7-day trash up to 2 GB, with no file limit"
+  const CAP = "which takes up to 5,000 files or 2 GB"
+
+  test.each([
+    ["a folder in it", `rm -rf ${own}/clone`, WORKTREE],
+    ["a folder in it, by a relative path from the pad", "rm -r clone", own],
+    ["two folders in it", `rm -rf ${own}/clone ${own}/other`, WORKTREE],
+  ])("%s: the whole move, run by the caller", async (_case, command, cwd) => {
+    const reason = await check(input(command, {}, cwd), env)
+    expect(reason).toContain("no-raw-delete hook refuses a recursive rm")
+    expect(reason).toContain(OWN)
+    expect(reason).toContain("run it yourself")
+    expect(reason).not.toContain(CAP)
+    expect(reason).not.toContain("for your lead's cleanup")
+  })
+
+  test.each([
+    ["the scratchpad folder itself", `rm -rf ${own}`, env],
+    ["another session's scratchpad", `rm -rf ${join(pads, "other-worker")}/clone`, env],
+    ["a folder in it beside one outside it", `rm -rf ${own}/clone ${WORKTREE}/x`, env],
+    ["a word it cannot read", `rm -rf "$D"`, env],
+    [
+      "a session the registry does not name",
+      `rm -rf ${own}/clone`,
+      boxEnv(home, { CLAUDE_CONFIG_DIR: join(home, "none") }),
+    ],
+    ["a worktree's folder", "rm -rf node_modules", env],
+  ] as const)("%s keeps the trash's cap and the lead's cleanup", async (_case, command, at) => {
+    const reason = await check(input(command), at)
+    expect(reason).toContain(CAP)
+    expect(reason).toContain(
+      "leave a bigger tree or a scratch folder in place for your lead's cleanup",
+    )
+    expect(reason).not.toContain(OWN)
   })
 })
 
