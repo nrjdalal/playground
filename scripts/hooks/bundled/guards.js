@@ -4629,7 +4629,7 @@ if (false) {}
 
 // scripts/hooks/no-extension-repo-write.ts
 import { existsSync as existsSync6, statSync as statSync4 } from "fs";
-import { join as join10 } from "path";
+import { join as join11 } from "path";
 
 // packages/settings/src/folder.ts
 import {
@@ -4726,7 +4726,7 @@ function remotes(cwd) {
 // scripts/hooks/no-playground-leak.ts
 import { AsyncLocalStorage as AsyncLocalStorage3 } from "async_hooks";
 import { existsSync as existsSync5, readdirSync as readdirSync3, readFileSync as readFileSync4, statSync as statSync3 } from "fs";
-import { basename as basename3, join as join9 } from "path";
+import { basename as basename3, join as join10 } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
@@ -10910,7 +10910,7 @@ async function check4(raw, environment = process.env) {
 }
 
 // packages/scripts/src/playground/setting.ts
-import { resolve as resolve4 } from "path";
+import { join as join9, resolve as resolve4 } from "path";
 
 // packages/settings/src/accounts.ts
 var email2 = string2().email();
@@ -12990,9 +12990,9 @@ function chipsSigned(blocks, signature) {
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var HANDLE = /^[a-z\d][\w.-]{1,63}$/i;
 var MAX_ROSTER_BYTES = 1048576;
-var CHECKOUT2 = join9(__CHECKOUT + "/scripts/hooks", "..", "..");
+var CHECKOUT2 = join10(__CHECKOUT + "/scripts/hooks", "..", "..");
 function rosterNames(environment) {
-  const path = join9(dataDirOf(environment), "roster.json");
+  const path = join10(dataDirOf(environment), "roster.json");
   try {
     if (statSync3(path).size > MAX_ROSTER_BYTES)
       return [];
@@ -13009,9 +13009,9 @@ function rosterNames(environment) {
 }
 var notEveryday = (name) => HANDLE.test(name) && !terms.everyday.some((w) => w.toLowerCase() === name.toLowerCase());
 function skillNames(checkout = CHECKOUT2) {
-  const ours = join9(checkout, "skills", "playground");
+  const ours = join10(checkout, "skills", "playground");
   try {
-    return readdirSync3(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync5(join9(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
+    return readdirSync3(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync5(join10(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
   } catch {
     return [];
   }
@@ -14158,18 +14158,18 @@ function candidate2(command) {
   const maybe = state().policy.anyWrite ? MAYBE_ANY : MAYBE;
   return command.includes("$'") || maybe.test(command.replace(/[\\'"]/g, ""));
 }
-async function factoryTerms(environment = process.env, checkout = CHECKOUT2, lists = join9(coreDir(), "lists")) {
-  const loaded = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join9(lists, "playground-terms.json"));
+async function factoryTerms(environment = process.env, checkout = CHECKOUT2, lists = join10(coreDir(), "lists")) {
+  const loaded = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join10(lists, "playground-terms.json"));
   if (loaded.refusal !== undefined)
     return { refusal: loaded.refusal };
   terms = loaded.list;
   return { pattern: pattern(environment, checkout) };
 }
-async function check6(raw, environment = process.env, checkout = CHECKOUT2, lists = join9(coreDir(), "lists")) {
+async function check6(raw, environment = process.env, checkout = CHECKOUT2, lists = join10(coreDir(), "lists")) {
   const loadedTerms = await factoryTerms(environment, checkout, lists);
   if (loadedTerms.refusal !== undefined)
     return refusedList(raw, loadedTerms.refusal);
-  const loadedCleared = await guardList("no-playground-leak", "slack-cleared", isCleared, {}, environment, join9(lists, "slack-cleared.json"));
+  const loadedCleared = await guardList("no-playground-leak", "slack-cleared", isCleared, {}, environment, join10(lists, "slack-cleared.json"));
   if (loadedCleared.refusal !== undefined)
     return refusedList(raw, loadedCleared.refusal);
   const read = await readPolicy(dataDir(environment));
@@ -14279,7 +14279,7 @@ function guardedRepos(data, values, environment) {
   const repos = new Set(named.values());
   const scopes = scopesIn(data);
   for (const scope of scopes) {
-    const repo = remoteRepo(originUrl(join10(extensionsDir(data), scope, ".git", "config")));
+    const repo = remoteRepo(originUrl(join11(extensionsDir(data), scope, ".git", "config")));
     if (repo)
       repos.add(`${repo.owner}/${repo.repo}`.toLowerCase());
   }
@@ -14343,7 +14343,7 @@ async function check7(raw, environment = process.env, budget = 8000) {
 if (false) {}
 
 // scripts/hooks/no-extensions-write.ts
-import { dirname as dirname5, isAbsolute as isAbsolute5, join as join12, resolve as resolve7, sep as sep2 } from "path";
+import { dirname as dirname5, isAbsolute as isAbsolute5, join as join13, resolve as resolve7, sep as sep2 } from "path";
 
 // scripts/hooks/codex.ts
 import { isAbsolute as isAbsolute3, resolve as resolve5 } from "path";
@@ -14396,10 +14396,10 @@ async function eachInput(raw, guard, judge) {
 
 // scripts/hooks/no-main-checkout.ts
 import { existsSync as existsSync7, readdirSync as readdirSync4, readFileSync as readFileSync5, realpathSync as realpathSync3 } from "fs";
-import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute4, join as join11, normalize, resolve as resolve6, sep } from "path";
+import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute4, join as join12, normalize, resolve as resolve6, sep } from "path";
 function mainCheckout2(dir) {
   try {
-    const gitdir = /^gitdir: (.+)$/m.exec(readFileSync5(join11(dir, ".git"), "utf8"))?.[1];
+    const gitdir = /^gitdir: (.+)$/m.exec(readFileSync5(join12(dir, ".git"), "utf8"))?.[1];
     const main = gitdir && /^(.+)\/\.git\/worktrees\/[^/]+$/.exec(resolve6(dir, gitdir.trim()))?.[1];
     if (main)
       return main;
@@ -14412,7 +14412,7 @@ function liveCheckout(main, environment) {
     values: {}
   };
   const head = `ref: refs/heads/${liveSettings.get(settings, "live.branch")}`;
-  const worktrees = join11(main, ".git", "worktrees");
+  const worktrees = join12(main, ".git", "worktrees");
   let names;
   try {
     names = readdirSync4(worktrees);
@@ -14421,17 +14421,17 @@ function liveCheckout(main, environment) {
   }
   for (const name of names) {
     try {
-      if (readFileSync5(join11(worktrees, name, "HEAD"), "utf8").trim() !== head)
+      if (readFileSync5(join12(worktrees, name, "HEAD"), "utf8").trim() !== head)
         continue;
-      return dirname4(resolve6(join11(worktrees, name), readFileSync5(join11(worktrees, name, "gitdir"), "utf8").trim()));
+      return dirname4(resolve6(join12(worktrees, name), readFileSync5(join12(worktrees, name, "gitdir"), "utf8").trim()));
     } catch {}
   }
 }
 function inWorktree(path, worktrees) {
   if (!path.startsWith(worktrees))
     return false;
-  const tree = join11(worktrees, path.slice(worktrees.length).split(sep)[0]);
-  return existsSync7(join11(tree, ".git")) || !isFolder(tree);
+  const tree = join12(worktrees, path.slice(worktrees.length).split(sep)[0]);
+  return existsSync7(join12(tree, ".git")) || !isFolder(tree);
 }
 function real(path) {
   const found = resolved(path);
@@ -14447,7 +14447,7 @@ function real(path) {
     else
       low = mid;
   }
-  return join11(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
+  return join12(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
 }
 var resolved = (path) => {
   try {
@@ -14461,7 +14461,7 @@ function nearest(path) {
   for (let dir = path;; dir = dirname4(dir)) {
     const found = resolved(dir);
     if (found !== undefined)
-      return join11(found, ...rest.reverse());
+      return join12(found, ...rest.reverse());
     if (dir === dirname4(dir))
       return path;
     rest.push(basename4(dir));
@@ -14978,7 +14978,7 @@ async function inspect5(raw, environment, main) {
   const input = toolInput ?? {};
   const directory = typeof cwd === "string" ? cwd : undefined;
   const checkout = real(main);
-  const worktrees = join11(checkout, ".claude", "worktrees") + sep;
+  const worktrees = join12(checkout, ".claude", "worktrees") + sep;
   const inMain = (raw) => {
     const path = raw === undefined ? undefined : real(resolve6(directory ?? "", raw));
     return path !== undefined && (path === checkout || path.startsWith(checkout + sep)) && !inWorktree(path, worktrees);
@@ -15159,7 +15159,7 @@ var HOOK_REMOVERS = new Set([
 ]);
 var RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/;
 var TEXT_RUNS = new RegExp(`${RUNS.source}|^(?:AGENT_BROWSER_[A-Z0-9_]+|BROWSER|GH_[A-Z0-9_]+)$`);
-var CLI = join12("packages", "scripts", "src", "playground", "cli.ts");
+var CLI = join13("packages", "scripts", "src", "playground", "cli.ts");
 var varsRun = new WeakMap;
 var GH_READS = new Set([
   "api",
@@ -15475,10 +15475,10 @@ import {
   statSync as statSync5
 } from "fs";
 import { loadavg } from "os";
-import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute6, join as join14, relative as relative2, resolve as resolve8 } from "path";
+import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute6, join as join15, relative as relative2, resolve as resolve8 } from "path";
 
 // scripts/hooks/no-headless-login.ts
-import { join as join13 } from "path";
+import { join as join14 } from "path";
 var TOKEN = "CLAUDE_CODE_OAUTH_TOKEN";
 var ROLE = "PLAYGROUND_ROLE";
 var KEYCHAIN_SERVICE = "playground-claude-oauth";
@@ -15494,7 +15494,7 @@ async function accountOf(id, environment) {
     const name = await registryName(id, environment);
     if (!name)
       return;
-    const record = await Bun.file(join13(dataDir(environment), "resume", `${name}.sh`)).text();
+    const record = await Bun.file(join14(dataDir(environment), "resume", `${name}.sh`)).text();
     return /^# account: (\S+)/m.exec(record)?.[1] ?? /--account (\S+)/.exec(record)?.[1];
   } catch {
     return;
@@ -15624,7 +15624,7 @@ async function onGlm(raw, environment = process.env) {
     const name = await registryName(id, environment);
     if (!name || name.includes("/"))
       return false;
-    const pin = join14(dataDir(environment), "backends", name);
+    const pin = join15(dataDir(environment), "backends", name);
     const backend = readPin(await Bun.file(pin).text())?.backend;
     return backend === "glm" || backend === "local";
   } catch {
@@ -15957,7 +15957,7 @@ function packageScripts2(dir) {
   const found = new Map;
   for (let at = dir;; at = dirname6(at)) {
     try {
-      const { scripts } = JSON.parse(readFileSync6(join14(at, "package.json"), "utf8"));
+      const { scripts } = JSON.parse(readFileSync6(join15(at, "package.json"), "utf8"));
       for (const [name, command] of Object.entries(scripts ?? {}))
         if (!found.has(name) && typeof command === "string")
           found.set(name, { at, command });
@@ -16127,7 +16127,7 @@ var realOf2 = (path, depth = 0) => {
     return realOf2(resolve8(dirname6(path), readlinkSync(path)), depth + 1);
   } catch {}
   const parent = dirname6(path);
-  return parent === path ? path : join14(realOf2(parent, depth + 1), basename5(path));
+  return parent === path ? path : join15(realOf2(parent, depth + 1), basename5(path));
 };
 function checkoutOf(path, orgs, roots) {
   if (!path)
@@ -16140,7 +16140,7 @@ function checkoutOf(path, orgs, roots) {
       break;
     }
     walked.push(at);
-    if (existsSync8(join14(at, ".git"))) {
+    if (existsSync8(join15(at, ".git"))) {
       found = remotes(at).find((r) => isGuarded(orgs, r.owner));
       break;
     }
@@ -16164,10 +16164,10 @@ function checkoutBelow(path, orgs, roots) {
       for (const entry of folderEntries(at)) {
         if (UNWALKED.has(entry.name))
           continue;
-        const child = join14(at, entry.name);
+        const child = join15(at, entry.name);
         if (++walked > BELOW_FOLDERS)
           return "too many";
-        if (entry.isSymbolicLink() || existsSync8(join14(child, ".git"))) {
+        if (entry.isSymbolicLink() || existsSync8(join15(child, ".git"))) {
           const repo = checkoutOf(child, orgs, roots);
           if (repo)
             return repo;
@@ -16310,7 +16310,7 @@ var isFolder2 = (path) => {
   }
 };
 function globRoot(pattern, base) {
-  const full = isAbsolute6(pattern) ? pattern : base && join14(base, pattern);
+  const full = isAbsolute6(pattern) ? pattern : base && join15(base, pattern);
   if (!full)
     return;
   const segments = full.split("/");
@@ -16331,7 +16331,7 @@ var EDIT_TOOLS = {
 };
 function fromCheckout(file) {
   for (let at = dirname6(file);; at = dirname6(at)) {
-    if (existsSync8(join14(at, ".git")))
+    if (existsSync8(join15(at, ".git")))
       return relative2(at, file);
     if (dirname6(at) === at)
       return;
@@ -16485,7 +16485,7 @@ function globbed(value, cwd, deep = []) {
     let candidates = [root];
     for (const segment of pattern.split("/").filter((part) => part !== "")) {
       if (!GLOB_CHARS2.test(segment)) {
-        candidates = candidates.map((at) => join14(at, segment));
+        candidates = candidates.map((at) => join15(at, segment));
         continue;
       }
       if (segment.includes("**"))
@@ -16502,7 +16502,7 @@ function globbed(value, cwd, deep = []) {
         }
         for (const entry of entries)
           if ((hidden || !entry.startsWith(".")) && re.test(entry))
-            next.push(join14(at, entry));
+            next.push(join15(at, entry));
         if (next.length >= 200)
           break;
       }
@@ -16953,7 +16953,7 @@ async function inspect7(raw, environment, load5, limit) {
     if (!Array.isArray(orgs))
       return;
     const given = toolInput?.[READ_TOOLS[tool]];
-    const path = typeof given !== "string" || given === "" ? directory : given.startsWith("~/") && environment.HOME ? join14(environment.HOME, given.slice(2)) : isAbsolute6(given) ? given : directory && resolve8(directory, given);
+    const path = typeof given !== "string" || given === "" ? directory : given.startsWith("~/") && environment.HOME ? join15(environment.HOME, given.slice(2)) : isAbsolute6(given) ? given : directory && resolve8(directory, given);
     if (orgs.length === 0)
       return;
     const roots = new Map;
@@ -17244,7 +17244,7 @@ if (false) {}
 
 // scripts/hooks/no-linear-ticket.ts
 import { realpath } from "fs/promises";
-import { basename as basename7, dirname as dirname7, isAbsolute as isAbsolute7, join as join15, resolve as resolve9, sep as sep3 } from "path";
+import { basename as basename7, dirname as dirname7, isAbsolute as isAbsolute7, join as join16, resolve as resolve9, sep as sep3 } from "path";
 var CREATE = /\bissue(?:batch)?create\b/i;
 var LINEAR = /linear\.app/i;
 var GITHUB = /^https?:\/\/(?:[\w-]+\.)*github\.com(?:[/:?#]|$)/i;
@@ -17269,7 +17269,7 @@ var MAYBE2 = /issue(?:batch)?create|linear|ticket-approvals|curl|\bgh\b|bun|deno
 var MAX_APPROVAL_BYTES = 65536;
 var interpreter = (name) => /^python[\d.]*$/.test(name) ? "python" : name;
 var isDispatcher = (environment) => environment.PLAYGROUND_ROLE === "dispatcher";
-var approvalsDir = (environment) => join15(dataDirOf(environment), "ticket-approvals");
+var approvalsDir = (environment) => join16(dataDirOf(environment), "ticket-approvals");
 var slug = (team) => team.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 var day = (now) => now.toISOString().slice(0, 10);
 var RULE = "A new Linear ticket needs the owner's yes first, and the factory's own work never goes in Linear.";
@@ -17289,7 +17289,7 @@ async function inApprovals(path, environment) {
   const dir = approvalsDir(environment);
   const dirs = [dir, await real2(dir)];
   const target = resolve9(path);
-  const targets = [target, join15(await real2(dirname7(target)), basename7(target))];
+  const targets = [target, join16(await real2(dirname7(target)), basename7(target))];
   return targets.some((t) => dirs.some((d) => within(t, d)));
 }
 function refuseApprovals(what, environment) {
@@ -17434,7 +17434,7 @@ async function mcp2(tool, input, environment, now) {
   if (slug(team) === "" || title === "") {
     return refuse10(what, "it files a new Linear ticket, and the hook cannot read its team and title to match an approval", "Name the team and the title as the owner approved them.");
   }
-  const path = join15(approvalsDir(environment), `${slug(team)}-${day(now)}.json`);
+  const path = join16(approvalsDir(environment), `${slug(team)}-${day(now)}.json`);
   const approval = await readApproval(path);
   if (approval.titles?.includes(title))
     return;
@@ -17539,15 +17539,15 @@ async function inspect10(raw, environment, now) {
 if (false) {}
 
 // scripts/hooks/no-live-sign-in.ts
-import { join as join17 } from "path";
+import { join as join18 } from "path";
 
 // api/hono/src/lib/dev/proxy.ts
 import { existsSync as existsSync9, mkdirSync as mkdirSync3, readFileSync as readFileSync7, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "fs";
 import { homedir as homedir4 } from "os";
-import { basename as basename8, dirname as dirname8, join as join16 } from "path";
+import { basename as basename8, dirname as dirname8, join as join17 } from "path";
 var serving = (dir) => {
   try {
-    const pid = Number(readFileSync7(join16(dir, "proxy.pid"), "utf8").trim());
+    const pid = Number(readFileSync7(join17(dir, "proxy.pid"), "utf8").trim());
     if (!(pid > 0))
       return false;
     process.kill(pid, 0);
@@ -17559,11 +17559,11 @@ var serving = (dir) => {
 var portlessDir = (env = process.env) => {
   if (env.PORTLESS_STATE_DIR)
     return env.PORTLESS_STATE_DIR;
-  const dir = join16(env.HOME || homedir4(), ".portless");
+  const dir = join17(env.HOME || homedir4(), ".portless");
   return !serving(dir) && serving(fallbackDir(dir)) ? fallbackDir(dir) : dir;
 };
 var UNPREFIXED = new Set(["main", "master"]);
-var fallbackDir = (dir) => join16(dir, "fallback");
+var fallbackDir = (dir) => join17(dir, "fallback");
 
 // scripts/hooks/no-live-sign-in.ts
 var SIGN_IN = /\/api\/(?:v1\/onboard\/(?:sign-in|finish)|agents\/sign-in-as)\b/;
@@ -17573,7 +17573,7 @@ async function liveOf(environment) {
   const hosts = new Set(BARE2);
   const ports = new Set;
   try {
-    const routes = await Bun.file(join17(portlessDir(environment), "routes.json")).json();
+    const routes = await Bun.file(join18(portlessDir(environment), "routes.json")).json();
     for (const { hostname, port } of routes)
       if (typeof port === "number" && BARE2.includes(String(hostname)))
         ports.add(port);
@@ -17605,7 +17605,7 @@ async function check15(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-mac-web-build.ts
-import { join as join18 } from "path";
+import { join as join19 } from "path";
 
 // scripts/hooks/docker-build.ts
 var DOCKERS = new Set(["docker", "docker-compose"]);
@@ -17780,7 +17780,7 @@ var API_HERE = "The api image still builds here (docker compose build api).";
 var BOX_ROUTE = `Build the web image on the box instead: commit, then from the checkout run bash ~/.playground/ops/runner-host/ci.sh web HEAD, which builds HEAD's tree there and never on the Mac. ${API_HERE}`;
 var NO_HOST_ROUTE = `No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on, and the live dashboard's Postgres stays up: set one up (a peer machine of your own user, by scripts/ops/README.md's runner-host section, then write its address to that ip file), or build the web image on a machine with no live dashboard running. ${API_HERE}`;
 async function hasRunnerHost(environment) {
-  const ip = environment.RUNNER_HOST || (await Bun.file(join18(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
+  const ip = environment.RUNNER_HOST || (await Bun.file(join19(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
   return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip);
 }
 function composeBuild2({ rest, sub }) {
@@ -17819,7 +17819,7 @@ async function dashboardRuns(what, environment) {
   const cannot = async (why) => `no-mac-web-build hook refuses ${what}: ${why}, so it cannot tell whether the live dashboard's Postgres runs in this Mac's Docker VM, where a web image build's memory takes the VM's out-of-memory killer to the dashboard's database. ${await route()}`;
   let name;
   try {
-    name = (await Bun.file(join18(dataDirOf(environment), "ops", "dashboard", "dashboard-db")).text()).trim();
+    name = (await Bun.file(join19(dataDirOf(environment), "ops", "dashboard", "dashboard-db")).text()).trim();
   } catch (error) {
     if (error.code === "ENOENT")
       return cannot("there is no dashboard-db in the dashboard supervisor's state folder");
@@ -18344,7 +18344,7 @@ if (false) {}
 
 // scripts/hooks/no-outside-pr-code.ts
 import { existsSync as existsSync10, lstatSync as lstatSync2, mkdirSync as mkdirSync4, readFileSync as readFileSync8, realpathSync as realpathSync5 } from "fs";
-import { basename as basename9, dirname as dirname9, isAbsolute as isAbsolute8, join as join19, resolve as resolve10 } from "path";
+import { basename as basename9, dirname as dirname9, isAbsolute as isAbsolute8, join as join20, resolve as resolve10 } from "path";
 var CHECKERS = new Set(["reviewer", "tester"]);
 var TOOLS2 = new Set(["Bash", "Monitor"]);
 var FILE_TOOLS4 = new Map([
@@ -18493,7 +18493,7 @@ function placed(written) {
   const path = resolve10(written);
   for (let at = path;; at = dirname9(at)) {
     if (existsSync10(at))
-      return join19(real3(at), path.slice(at.length));
+      return join20(real3(at), path.slice(at.length));
     if (dirname9(at) === at)
       return path;
   }
@@ -18546,8 +18546,8 @@ function gitAllows(words, folder, lookup, environment) {
 }
 async function inspect14(command, directory, environment, lookup, own = []) {
   const data = dataDirOf(environment);
-  const extensions = join19(lookup.main, "extensions");
-  const slot = join19(data, "ops", "run-slot.sh");
+  const extensions = join20(lookup.main, "extensions");
+  const slot = join20(data, "ops", "run-slot.sh");
   let allowed = true;
   let ownWrites = false;
   let reshapes = false;
@@ -18764,7 +18764,7 @@ async function check19(raw, environment = process.env, lookup = live2(environmen
   try {
     const name = await lookup.name(sessionId);
     const data = dataDirOf(environment);
-    const own = name ? [join19(data, "scratch", name), join19(data, "scratchpad", name)] : [];
+    const own = name ? [join20(data, "scratch", name), join20(data, "scratchpad", name)] : [];
     allowed = await inspect14(command, directory, environment, lookup, own);
   } catch {}
   if (allowed)
@@ -18831,7 +18831,7 @@ function trackedIn(main, script) {
 }
 function live2(environment) {
   const data = dataDirOf(environment);
-  const cache = join19(data, "hook-outside-pr");
+  const cache = join20(data, "hook-outside-pr");
   const pollMs = async () => {
     const read = await readPolicy(data).catch(() => {
       return;
@@ -18841,7 +18841,7 @@ function live2(environment) {
   };
   return {
     author: async (repo, pr) => {
-      const file = join19(cache, `${repo.replace("/", "__")}__${pr}.json`);
+      const file = join20(cache, `${repo.replace("/", "__")}__${pr}.json`);
       try {
         const kept = await Bun.file(file).json();
         if (isPr(kept))
@@ -18863,7 +18863,7 @@ function live2(environment) {
       } catch {}
       return isPr(read) ? read : undefined;
     },
-    holds: (folder, entry) => existsSync10(join19(folder, entry)),
+    holds: (folder, entry) => existsSync10(join20(folder, entry)),
     main: mainCheckout2(process.cwd()),
     name: async (sessionId) => {
       if (typeof sessionId !== "string")
@@ -18879,7 +18879,7 @@ function live2(environment) {
         const name = await registryName(sessionId, environment);
         if (!name)
           return [];
-        const roster = await Bun.file(join19(data, "roster.json")).json();
+        const roster = await Bun.file(join20(data, "roster.json")).json();
         const row = roster.agents?.find((agent) => agent?.name === name);
         const listed = Array.isArray(row?.prs) ? row.prs : [];
         return [...new Set([row?.pr, ...listed])].filter((url) => typeof url === "string");
@@ -19431,8 +19431,8 @@ async function check22(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-raw-spawn.ts
-import { join as join20, resolve as resolve12, sep as sep5 } from "path";
-var SPAWN = join20(__CHECKOUT + "/scripts/hooks", "..", "spawn.sh");
+import { join as join21, resolve as resolve12, sep as sep5 } from "path";
+var SPAWN = join21(__CHECKOUT + "/scripts/hooks", "..", "spawn.sh");
 var HEADS = new Set([
   "agent",
   "agent-hibernation",
@@ -20799,7 +20799,7 @@ async function check26(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-release-comment.ts
-import { join as join21 } from "path";
+import { join as join22 } from "path";
 var guardedOwners = new Set;
 var WORD2 = /release/i;
 var UNRESOLVED = "a repository the hook cannot resolve";
@@ -21005,8 +21005,8 @@ function candidate7(command) {
   const bare = command.replace(/[\\'"]/g, "");
   return command.includes("$'") || GH3.test(bare) && MAYBE_COMMENT.test(bare);
 }
-async function check27(raw, environment = process.env, lists = join21(coreDir(), "lists")) {
-  const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join21(lists, "release-owners.json"));
+async function check27(raw, environment = process.env, lists = join22(coreDir(), "lists")) {
+  const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join22(lists, "release-owners.json"));
   if (owners.refusal)
     return commentCall(subjectOf3(raw)) ? owners.refusal : undefined;
   guardedOwners = new Set((owners.list ?? []).map((owner) => owner.toLowerCase()));
@@ -21062,7 +21062,7 @@ if (false) {}
 // scripts/hooks/no-unslotted-run.ts
 import { existsSync as existsSync11, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync3 } from "fs";
 import { tmpdir } from "os";
-import { join as join22, resolve as resolve16, sep as sep6 } from "path";
+import { join as join23, resolve as resolve16, sep as sep6 } from "path";
 var refuse17 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var refuseDocker = (what, cd, command, fix) => fix ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}` : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var COMMIT_TAKES3 = new Set([
@@ -21140,11 +21140,11 @@ async function commitLint(cmd, args, env, wrote) {
     stderr: "ignore"
   });
   const root = top.success ? top.stdout.toString().trim() : "";
-  const lint = join22(root, "node_modules", ".bin", "commitlint");
+  const lint = join23(root, "node_modules", ".bin", "commitlint");
   if (!root || !existsSync11(lint))
     return;
-  const folder = mkdtempSync(join22(tmpdir(), "commit-msg-"));
-  const file = join22(folder, "COMMIT_EDITMSG");
+  const folder = mkdtempSync(join23(tmpdir(), "commit-msg-"));
+  const file = join23(folder, "COMMIT_EDITMSG");
   let out = "";
   let err = "";
   let code;
@@ -21359,8 +21359,8 @@ function inspect21(raw, environment, main) {
   if (typeof command !== "string")
     return;
   const worktrees = [
-    join22(main, ".claude", "worktrees"),
-    real(join22(main, ".claude", "worktrees"))
+    join23(main, ".claude", "worktrees"),
+    real(join23(main, ".claude", "worktrees"))
   ].map((w) => w + sep6);
   const inWorktree = (dir) => dir !== undefined && [resolve16(dir), real(resolve16(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
   const directory = typeof cwd === "string" ? cwd : undefined;

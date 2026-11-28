@@ -1,11 +1,17 @@
-import { resolve } from "node:path"
+import { readFileSync } from "node:fs"
+import { join, resolve } from "node:path"
 
 import {
+  CORE,
   factorySettings,
   guardedOrgs,
+  loginOf,
   readPolicyOrDefaults,
   readSessionNames,
+  scopeDir,
+  scopesIn,
   type Settings,
+  settingFields,
   settingValue,
 } from "@packages/settings"
 
@@ -53,9 +59,50 @@ export const factoryRepoOf = async (
   return repo
 }
 
+// slots.windowJob as the login's scope sets it, else the first an org's sets, A to Z: its orgs.<org> in policy.json, then an org extension's own settings.json, since an org's window belongs in its scope; "" when none sets it, so no window stands, a read that fails skipping its own source (issue 3187).
+export const windowJob = (
+  settings: Settings,
+  data: string,
+  environment: Record<string, string | undefined> = process.env,
+): string => {
+  const own = settingValue(settings, "slots.windowJob")!.value as string
+  if (own) return own
+  const schema = settingFields().find(({ key }) => key === "slots.windowJob")!.field.schema
+  const valid = (value: unknown): string =>
+    typeof value === "string" && schema.safeParse(value).success ? value : ""
+  // each read on its own, so one that fails (a bad ext.links, a scope with no settings.json or one that does not parse) skips that source alone
+  const tried = <T>(read: () => T, none: T): T => {
+    try {
+      return read()
+    } catch {
+      return none
+    }
+  }
+  for (const org of tried(() => guardedOrgs(settings.values), [] as string[])) {
+    const value = valid(
+      tried(() => readPolicyOrDefaults(data, org).settings?.values["slots.windowJob"], ""),
+    )
+    if (value) return value
+  }
+  const login = tried(() => loginOf(data, environment), "")
+  for (const scope of tried(() => scopesIn(data), [] as string[])) {
+    if (scope === login || scope === CORE) continue
+    const file = join(scopeDir(data, scope), "settings.json")
+    const value = valid(
+      tried(() => JSON.parse(readFileSync(file, "utf8"))?.["slots.windowJob"], ""),
+    )
+    if (value) return value
+  }
+  return ""
+}
+
 // A key a reader resolves past its stored value.
-const RESOLVED: Record<string, (settings: Settings) => unknown> = {
-  "factory.repo": factoryRepo,
+const RESOLVED: Record<
+  string,
+  (settings: Settings, data: string, environment: Record<string, string | undefined>) => unknown
+> = {
+  "factory.repo": (settings) => factoryRepo(settings),
+  "slots.windowJob": windowJob,
 }
 
 // The settings reader for a caller that is not TypeScript (a shell or Python script): `bun packages/scripts/src/playground/setting.ts [--text] <key>...` prints each key's value on a line of its own, as JSON, or with --text a string as it is and a list of strings joined by spaces; a key's default on a machine with no store or none written yet, exit 0. It exits 2 naming why, printing nothing, for a key no piece defines or a store whose policy.json it cannot read. `--guarded-orgs` prints guardedOrgs() over ext.links as JSON, and a value ext.links' schema refuses exits 2 naming why, so a guard fails closed.
@@ -85,7 +132,8 @@ export const settingExit = async (
     err("usage: bun packages/scripts/src/playground/setting.ts [--text] <key>... | --guarded-orgs")
     return 2
   }
-  const read = readPolicyOrDefaults(dataDir(environment))
+  const data = dataDir(environment)
+  const read = readPolicyOrDefaults(data)
   if (read.refusal !== undefined) {
     err(read.refusal)
     return 2
@@ -98,7 +146,7 @@ export const settingExit = async (
       return 2
     }
     const resolved = RESOLVED[key]
-    values.push(resolved ? resolved(read.settings) : found.value)
+    values.push(resolved ? resolved(read.settings, data, environment) : found.value)
   }
   for (const value of values) out(text ? shown(value) : JSON.stringify(value))
   return 0
