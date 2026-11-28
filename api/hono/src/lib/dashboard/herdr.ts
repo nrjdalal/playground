@@ -187,10 +187,13 @@ const kept = globalThis as {
   [STATE]?: {
     changed: Map<string, Change>
     ids: number
+    // each server's last read that came back whole, which a cut-short read keeps in place of what it could not read
+    lastGood: Map<string, ServerRead>
     problems: string[]
   }
 }
-const state = (kept[STATE] ??= { changed: new Map(), ids: 0, problems: [] })
+const state = (kept[STATE] ??= { changed: new Map(), ids: 0, lastGood: new Map(), problems: [] })
+state.lastGood ??= new Map()
 
 // One line onto a socket, whole: a unix socket on macOS takes at most 8192 bytes a write (net.local.stream.sendspace) and Bun keeps none of the rest, so what it did not take goes out each time it drains.
 type Writable = { write: (bytes: Uint8Array) => number }
@@ -340,11 +343,12 @@ const each = <T>(schema: z.ZodType<T>, values: unknown[]): T[] =>
   })
 
 export type Pane = z.infer<typeof paneSchema> & { processes: z.infer<typeof processSchema>[] }
-// partial: a pane's processes, or the whole server, did not answer whole, so a session missing from this read may still be live.
+// partial: a pane's processes, or the whole server, did not answer whole, so a session missing from this read may still be live; unread: the panes whose processes did not answer.
 export type ServerRead = {
   panes: Pane[]
   partial?: true
   server: string
+  unread?: string[]
   workspaces: z.infer<typeof workspaceSchema>[]
 }
 
@@ -366,25 +370,41 @@ export async function readServer(
   )
   if (!parsed.success) throw new HerdrRefused("session.snapshot", "malformed", "no snapshot")
   const panes: Pane[] = []
-  let partial = false
+  const unread: string[] = []
   for (const pane of each(paneSchema, parsed.data.snapshot.panes)) {
-    const info = await request(
-      server.socket,
-      "pane.process_info",
-      { pane_id: pane.pane_id },
-      left(),
-    )
+    // past the deadline the panes left are not asked, so the ones already read still count
+    const info = await Promise.resolve()
+      .then(() => request(server.socket, "pane.process_info", { pane_id: pane.pane_id }, left()))
       .then((result) => processInfoSchema.safeParse(result))
       .catch(() => null)
-    if (!info?.success) partial = true
+    if (!info?.success) unread.push(pane.pane_id)
     const listed = info?.success ? (info.data.process_info.foreground_processes ?? []) : []
     panes.push({ ...pane, processes: each(processSchema, listed) })
   }
   return {
     panes,
-    ...(partial && { partial: true }),
+    ...(unread.length && { partial: true, unread }),
     server: server.name,
     workspaces: each(workspaceSchema, parsed.data.snapshot.workspaces),
+  }
+}
+
+// A read that came back whole becomes the server's last good one; a cut-short read keeps the last good processes of each pane it could not read, and a failed one the last good read whole, so a slow read never empties the board.
+const keepLastGood = (read: ServerRead): ServerRead => {
+  const last: ServerRead | undefined = state.lastGood.get(read.server)
+  if (!read.partial) {
+    state.lastGood.set(read.server, read)
+    return read
+  }
+  if (!last) return read
+  const before = new Map<string, Pane>(last.panes.map((pane: Pane) => [pane.pane_id, pane]))
+  return {
+    ...read,
+    panes: read.panes.map((pane) =>
+      read.unread?.includes(pane.pane_id) && before.has(pane.pane_id)
+        ? { ...pane, processes: before.get(pane.pane_id)!.processes }
+        : pane,
+    ),
   }
 }
 
@@ -397,26 +417,48 @@ export async function readHerdr(
   deadlineMs = SERVER_READ_MS,
 ): Promise<ServerRead[]> {
   const reads = await Promise.all(
-    servers.map((server) =>
-      readServer(server, deadlineMs).then(
-        (read) => ({ read }),
-        (error: unknown) => ({ error, server }),
-      ),
-    ),
+    servers.map((server) => {
+      const started = Date.now()
+      const took = () => Date.now() - started
+      return readServer(server, deadlineMs).then(
+        (read) => {
+          if (read.partial)
+            console.warn(
+              `herdr: the ${server.name} server's read came back partial in ${took()} ms`,
+            )
+          return { read }
+        },
+        (error: unknown) => {
+          if (!(error instanceof HerdrDown))
+            console.warn(`herdr: the ${server.name} server's read came back empty in ${took()} ms`)
+          return { error, server }
+        },
+      )
+    }),
   )
   state.problems = reads.flatMap((r) =>
-    "error" in r && !(r.error instanceof HerdrDown)
-      ? [`herdr's ${r.server.name} server could not be read: ${(r.error as Error).message}`]
-      : [],
-  )
-  // a server that is up but did not answer stays in the list, empty and partial, so a reader can tell its sessions from ended ones
-  return reads.flatMap((r) =>
-    "read" in r
-      ? [r.read]
-      : r.error instanceof HerdrDown
+    "error" in r
+      ? r.error instanceof HerdrDown
         ? []
-        : [{ panes: [], partial: true as const, server: r.server.name, workspaces: [] }],
+        : [`herdr's ${r.server.name} server could not be read: ${(r.error as Error).message}`]
+      : r.read.unread
+        ? [`herdr's ${r.read.server} server read ${r.read.unread.length} pane(s) only in part`]
+        : [],
   )
+  // a server that is up but did not answer stays in the list as its last whole read, or empty when it has none, marked partial, so a reader can tell its sessions from ended ones; a server that is down forgets its last read, which a later hang would otherwise send however old
+  return reads.flatMap((r) => {
+    if ("read" in r) return [keepLastGood(r.read)]
+    if (r.error instanceof HerdrDown) {
+      state.lastGood.delete(r.server.name)
+      return []
+    }
+    const last = state.lastGood.get(r.server.name)
+    return [
+      last
+        ? { ...last, partial: true as const }
+        : { panes: [], partial: true as const, server: r.server.name, workspaces: [] },
+    ]
+  })
 }
 
 // herdr's agent status as the lifecycle words lightOf() reads: blocked waits on a person, working runs, idle and done wait for input (the dashboard never tells done from idle, so it never calls focus, the one call that turns done into idle).

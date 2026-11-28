@@ -300,8 +300,13 @@ export class DashboardHub {
       else for (const sessionId of this.tails.keys()) this.queueRead(sessionId)
       this.live = live
       this.activity.update(working(live))
+      // a workers board equal to the last one sent goes nowhere, so a kept board re-renders nothing; an error frame always goes, since the web raises the problem on the second in a row
+      const same =
+        frame.type === "workers" &&
+        this.last !== null &&
+        JSON.stringify(this.last) === JSON.stringify(frame)
       this.last = frame
-      this.broadcast(frame)
+      if (!same) this.broadcast(frame)
     } finally {
       this.refreshing = false
       if (this.dirty) {
