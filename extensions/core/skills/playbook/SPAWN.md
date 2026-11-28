@@ -277,7 +277,7 @@ Every Ops sweep runs `python3 -I <main checkout>/scripts/ops/up.py --sessions`, 
 the session writes a handoff ([Write a handoff](SESSIONS.md#write-a-handoff), `~/.playground/handoffs/<name>.md`), its pane closes ([End](SESSIONS.md#end)), and a spawn under the same name ([Spawn](SESSIONS.md#spawn)) briefs the respawned session with the handoff, which the respawned-session row of ROSTER.md records.
 A resume's `<dir>` is a folder Claude Code already trusts (the Playground checkout or a worktree under it), never a scratchpad or /tmp path.
 In a folder it has never trusted, the session stops on the folder-trust dialog, which no session may approve, and `ListAgents` never lists it.
-A resumed session, a checker included, runs in the worktree or clone it ran in: spawn.sh resume refuses to move a session into the main checkout unless it started there, and refuses a removed folder, naming its branch and, for a the dispatcher worktree, the `git worktree add` line that brings it back.
+A resumed session, a checker included, runs in the worktree or clone it ran in: spawn.sh resume refuses to move a session into the main checkout unless it started there, resumes in its worktree a session whose transcript EnterWorktree moved there, and refuses a removed folder, naming its branch and, for a the dispatcher worktree, the `git worktree add` line that brings it back.
 
 ## --sandbox
 
