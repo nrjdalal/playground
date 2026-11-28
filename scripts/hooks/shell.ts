@@ -1893,7 +1893,10 @@ function dollar(lx: Lexer, plain = false): Text {
   // a positional parameter is one digit unbraced (`$10` is `$1` then `0`), read only from a value a guard binds in `known`
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2
-    return /\d/.test(next) ? variable(next) : unknown("a shell variable")
+    // `$@` and `$*` read only as the one word a `-c` script's positional parameters bind (withPositionals)
+    return /\d/.test(next) || ((next === "@" || next === "*") && lx.known[next] !== undefined)
+      ? variable(next)
+      : unknown("a shell variable")
   }
   lx.i++
   return { value: "$" }
@@ -3532,7 +3535,7 @@ function relexedValue(raw: string, known: Record<string, string>): string | unde
 }
 
 // The home an unquoted assignment expands the value's leading ~ to (`S=~/x`), which the held value keeps as written; a quoted value (`S="~/x"`) keeps its ~ literal, as bash does, so a quoted assignment passes quoted true; splitValue still reads each split word's leading ~ as the home, which errs toward refusing.
-const tildeHome = (value: string, quoted = false): string =>
+export const tildeHome = (value: string, quoted = false): string =>
   quoted || marked(value) ? value : value.replace(/^~(?=\/|$)/, homedir())
 
 // The variables the line set whose value the reader can build, each resolved through those set before it and an unread part kept, over the base environment; a copy's raw holds `key=value`, so its value is read after the first `=`. A copy's value captured where it was set (heldResolved) overrides this read, so a later reassignment of its source does not leak in; the read stands alone across a scope copy, whose fresh vars map carries no capture.
@@ -4203,13 +4206,36 @@ async function shell(
   const { inline, operand } = shellOperand(args, name)
   if (operand && inline) {
     const script = operand.value
-    if (!xargs?.replace || !script.includes(xargs.replace))
-      return run(lexScript(script, env), subshell(env), visit, builtins)
-    // the script is filled with each text xargsTexts reads from stdin and -a's files, so an item -0 or -d splits off runs as xargs runs it (`printf 'x\0pkill node'`), and one it cannot read as unknown
-    const texts = new Set([...(await xargsTexts(cmd, [xargs], env))].map((text) => text ?? UNKNOWN))
+    const after = args.slice(args.indexOf(operand) + 1)
+    const { appends, replace } = xargs ?? {}
+    if (!replace || ![operand, ...after].some((w) => w.value.includes(replace))) {
+      // xargs with no -I, or a -J string no word holds, adds its items after the words (`xargs sh -c 'rm "$@"' sh`)
+      const added = !!xargs && (!replace || !!appends)
+      const inner = withPositionals(env, script, after, (value) => value, added)
+      return run(lexScript(script, inner), inner, visit, builtins)
+    }
+    // BSD xargs -J puts every item at its string's word, so the words from that one on move by the number of items
+    const bound = !appends
+      ? after.length
+      : operand.value.includes(replace)
+        ? 0
+        : after.findIndex((w) => w.value.includes(replace))
+    // the script and its positional parameters are filled with each text xargsTexts reads from stdin and -a's files, so an item -0 or -d splits off runs as xargs runs it (`printf 'x\0pkill node'`), and one it cannot read as unknown
+    const texts = new Set(
+      [...(await xargsTexts(cmd, [xargs!], env))].map((text) => text ?? UNKNOWN),
+    )
     for (const text of texts.size > 0 ? texts : [""]) {
-      const lexed = lexScript(filled(script, xargs.replace, text), env)
-      const verdict = await run(lexed, subshell(env), visit, builtins)
+      const body = filled(script, replace, text)
+      const inner = withPositionals(
+        env,
+        body,
+        after,
+        (value) => filled(value, replace, text),
+        !!appends,
+        bound,
+      )
+      const lexed = lexScript(body, inner)
+      const verdict = await run(lexed, inner, visit, builtins)
       if (verdict) return verdict
     }
     return
@@ -4219,6 +4245,77 @@ async function shell(
     const verdict = await run(lexScript(text, env), subshell(env), visit, builtins)
     if (verdict) return verdict
   }
+}
+
+// The positional parameters a `-c` script's words bind, `$0` to `$9`; one past `$9` stays unread
+const DIGIT_PARAMETERS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const
+
+// The programs a script may run and still bind its positional parameters: each one a program of its own or a builtin that neither runs stored text nor sets a parameter, so only a builtin off this list (shift, set, trap, alias, read, typeset, zparseopts and the rest) can move them
+const KEEPS_POSITIONALS = new Set([
+  "[",
+  "cat",
+  "cd",
+  "cp",
+  "echo",
+  "false",
+  "git",
+  "grep",
+  "head",
+  "ls",
+  "mkdir",
+  "mv",
+  "printf",
+  "pwd",
+  "rm",
+  "tail",
+  "tee",
+  "test",
+  "touch",
+  "true",
+  "wc",
+])
+// An assignment that sets a positional parameter: zsh's `N=` and `argv`, and bash's `BASH_ARGV0` for `$0`
+const MOVING_ASSIGNMENT = /^(?:argv|BASH_ARGV0|\d+)(?:\[[^\]]*\])?\+?=/
+// Text that may set a parameter with its quotes and escapes taken off: an assigning expansion (`${1::=x}`, `${X:=y}`), zsh's `argv`, bash's BASH_ARGV, or a definition's `()`
+const MAY_SET_POSITIONALS = /\$\{[^}]*=|\bargv\b|BASH_ARGV|\(\s*\)/
+
+// A script that may move its positional parameters or read them in a function of its own, read as the shared lexer reads it: every command, inner ones too, binds them only when each of its readings runs a program on KEEPS_POSITIONALS or none (a plain assignment), no word sets a parameter (MOVING_ASSIGNMENT, MAY_SET_POSITIONALS) and no definition opens (`function f`)
+function movesPositionals(script: string, env: Env): boolean {
+  if (MAY_SET_POSITIONALS.test(script.replace(/["'\\]/g, ""))) return true
+  const all = (list: Command[]): Command[] => list.flatMap((c) => [c, ...all(c.inner?.() ?? [])])
+  return all(lexScript(script, env).commands).some((c) => {
+    const lead = c.words.find((w) => w.quoted || !RESERVED.has(w.value))
+    if (lead && !lead.quoted && lead.value === "function") return true
+    if (c.words.some((w) => MOVING_ASSIGNMENT.test(w.value))) return true
+    // zsh's printf -v sets the variable it names, a positional parameter too (`printf -v 1 …`)
+    const setsVariable = (args: Word[]) => args.some((a) => /^-[^-]*v/.test(a.value))
+    return readings(parse(c)).some(
+      ({ args, name }) =>
+        name !== "" && (!KEEPS_POSITIONALS.has(name) || (name === "printf" && setsVariable(args))),
+    )
+  })
+}
+
+// A `-c` script's subshell, its positional parameters read as the words after the script (`$0`, `$1` and on, and `"$@"` or `"$*"` when one word follows `$0` and no xargs adds its items after them), each filled as the script is, and all unread when the script may move them (movesPositionals); `bound` is how many of the words bind, fewer when a BSD xargs -J string moves the rest
+function withPositionals(
+  env: Env,
+  script: string,
+  after: Word[],
+  fill: (value: string) => string,
+  appended: boolean,
+  bound = after.length,
+): Env {
+  const known = { ...env.known }
+  // a function's own parameters, which a guard may bind, are not the script's
+  for (const key of [...DIGIT_PARAMETERS, "@", "*"]) delete known[key]
+  if (!movesPositionals(script, { ...env, known })) {
+    const words = after.slice(0, Math.min(bound, DIGIT_PARAMETERS.length))
+    for (const [k, w] of words.entries()) known[DIGIT_PARAMETERS[k]!] = fill(w.value)
+    // `$0` and one word after it: `"$@"` and `"$*"` are that one word
+    const oneWord = after.length === 2
+    if (oneWord && !appended) known["@"] = known["*"] = known["1"]!
+  }
+  return { ...subshell(env), known }
 }
 
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.

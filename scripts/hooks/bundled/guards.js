@@ -1803,7 +1803,7 @@ function dollar(lx, plain = false) {
   }
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2;
-    return /\d/.test(next) ? variable(next) : unknown("a shell variable");
+    return /\d/.test(next) || (next === "@" || next === "*") && lx.known[next] !== undefined ? variable(next) : unknown("a shell variable");
   }
   lx.i++;
   return { value: "$" };
@@ -3569,12 +3569,20 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   const { inline, operand } = shellOperand(args, name);
   if (operand && inline) {
     const script = operand.value;
-    if (!xargs?.replace || !script.includes(xargs.replace))
-      return run2(lexScript(script, env), subshell(env), visit, builtins);
+    const after = args.slice(args.indexOf(operand) + 1);
+    const { appends, replace } = xargs ?? {};
+    if (!replace || ![operand, ...after].some((w) => w.value.includes(replace))) {
+      const added = !!xargs && (!replace || !!appends);
+      const inner = withPositionals(env, script, after, (value) => value, added);
+      return run2(lexScript(script, inner), inner, visit, builtins);
+    }
+    const bound = !appends ? after.length : operand.value.includes(replace) ? 0 : after.findIndex((w) => w.value.includes(replace));
     const texts = new Set([...await xargsTexts(cmd, [xargs], env)].map((text) => text ?? UNKNOWN));
     for (const text of texts.size > 0 ? texts : [""]) {
-      const lexed = lexScript(filled(script, xargs.replace, text), env);
-      const verdict = await run2(lexed, subshell(env), visit, builtins);
+      const body = filled(script, replace, text);
+      const inner = withPositionals(env, body, after, (value) => filled(value, replace, text), !!appends, bound);
+      const lexed = lexScript(body, inner);
+      const verdict = await run2(lexed, inner, visit, builtins);
       if (verdict)
         return verdict;
     }
@@ -3586,6 +3594,60 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     if (verdict)
       return verdict;
   }
+}
+var DIGIT_PARAMETERS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+var KEEPS_POSITIONALS = new Set([
+  "[",
+  "cat",
+  "cd",
+  "cp",
+  "echo",
+  "false",
+  "git",
+  "grep",
+  "head",
+  "ls",
+  "mkdir",
+  "mv",
+  "printf",
+  "pwd",
+  "rm",
+  "tail",
+  "tee",
+  "test",
+  "touch",
+  "true",
+  "wc"
+]);
+var MOVING_ASSIGNMENT = /^(?:argv|BASH_ARGV0|\d+)(?:\[[^\]]*\])?\+?=/;
+var MAY_SET_POSITIONALS = /\$\{[^}]*=|\bargv\b|BASH_ARGV|\(\s*\)/;
+function movesPositionals(script, env) {
+  if (MAY_SET_POSITIONALS.test(script.replace(/["'\\]/g, "")))
+    return true;
+  const all = (list) => list.flatMap((c) => [c, ...all(c.inner?.() ?? [])]);
+  return all(lexScript(script, env).commands).some((c) => {
+    const lead = c.words.find((w) => w.quoted || !RESERVED.has(w.value));
+    if (lead && !lead.quoted && lead.value === "function")
+      return true;
+    if (c.words.some((w) => MOVING_ASSIGNMENT.test(w.value)))
+      return true;
+    const setsVariable = (args) => args.some((a) => /^-[^-]*v/.test(a.value));
+    return readings(parse(c)).some(({ args, name }) => name !== "" && (!KEEPS_POSITIONALS.has(name) || name === "printf" && setsVariable(args)));
+  });
+}
+function withPositionals(env, script, after, fill, appended, bound = after.length) {
+  const known = { ...env.known };
+  for (const key of [...DIGIT_PARAMETERS, "@", "*"])
+    delete known[key];
+  if (!movesPositionals(script, { ...env, known })) {
+    const words = after.slice(0, Math.min(bound, DIGIT_PARAMETERS.length));
+    for (const [k, w] of words.entries())
+      known[DIGIT_PARAMETERS[k]] = fill(w.value);
+    const oneWord = after.length === 2;
+    if (oneWord && !appended)
+      known["@"] = known["*"] = known["1"];
+  }
+  return { ...subshell(env), known };
 }
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
@@ -12738,11 +12800,11 @@ function heldVars(env, steady, raw) {
     if (key === "TMPDIR" || !held)
       continue;
     if (!text.unknown && !marked(text.value))
-      known[key] = text.value;
+      known[key] = tildeHome(text.value, "quoted" in text && text.quoted === true);
     else if ("raw" in text && typeof text.raw === "string") {
       const again = relexed(text.raw, known)?.value;
       if (again?.startsWith(`${key}=`))
-        known[key] = again.slice(key.length + 1);
+        known[key] = tildeHome(again.slice(key.length + 1));
     }
   }
   return known;
@@ -20239,6 +20301,14 @@ async function judgeBash(command, cwd, environment, { file, noun, refuse }) {
   const holdsWord = (word, at) => pathsOf(word, at)?.some(({ glob, path }) => holds(path, glob)) ?? false;
   const ownFolder = (word, at) => pathsOf(word, at)?.some(({ path }) => targets.some((target) => segments(path).length === segments(target).length - 1 && holds(path, false))) ?? false;
   const lexed = lex(command, env.known);
+  const steadyAt = steadyNames(namings2(command), lexed.commands);
+  env.hold = (word, cmd, here) => {
+    const steady = steadyAt(cmd);
+    return heldWord(word, here, {
+      ...steady,
+      has: (key) => steady.has(key) || !!steady.exported?.(key)
+    });
+  };
   const inOwnFolder = (at) => places(at).some(({ cwd }) => !!cwd && targets.some((t) => resolve14(cwd).toLowerCase() === dirname11(t)));
   const near = named || lexed.commands.some((c) => c.words.some((w) => holdsWord(w, env)));
   const unseenHolds = (at) => near || places(at).some(({ cwd }) => !!cwd && holds(cwd, false));

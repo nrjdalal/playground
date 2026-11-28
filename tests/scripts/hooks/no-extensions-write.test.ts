@@ -4267,3 +4267,44 @@ describe("a write target is read as the shell expands it", () => {
     expect(await bash(command)).toBeUndefined()
   })
 })
+
+// #3130: a -c script that moves its positional parameters, reads them in a function of its own, or runs under xargs with no -I binds none of them, so a read through one on a scratch folder runs
+describe("a -c script's moved positional parameters", () => {
+  test.each([
+    `bash -c 'shift; cat "$1"' _ /tmp/a /tmp/w/x`,
+    "zsh -c 'argv=(/tmp/w/x); cat $1' _ /tmp/a",
+    "zsh -c '1=/tmp/w/x; cat $1' _ /tmp/a",
+    `bash -c 'shift; cat "$1"' _ /tmp/a /tmp/w`,
+    `bash -c 'set -- /tmp/w/x; cat "$1"' _ /tmp/a`,
+    `bash -c 'set /tmp/w/x; cat "$1"' _ /tmp/a`,
+    `sh -c 'f() { cat "$1"; }; f /tmp/w/x' _ /tmp/a`,
+    `bash -c 'shift; cd "$1" && cat x' _ /tmp /tmp/w`,
+    `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'shift; cat "$1"' _ /tmp/a /tmp/w/{}`,
+    `bash -c 'shift; cd "$1" && git status' _ /tmp /tmp/w`,
+    `sh -c 'set -- /tmp/w; cd "$1" && git status' sh /tmp`,
+    `cat /tmp/no-such-names.txt | xargs sh -c 'cat "$@"' sh /tmp/w`,
+    "cat /tmp/no-such-names.txt | xargs sh -c 'cat $*' sh /tmp/a",
+    `echo /tmp/w/x | xargs sh -c 'cat "$@"' sh /tmp/a`,
+    `bash -c '"shift"; cat "$1"' _ /tmp/a /tmp/w/x`,
+    `bash -c 'shift>/dev/null; cat "$1"' _ /tmp/a /tmp/w/x`,
+    `bash -c '\${1+shift}; cat "$1"' _ /tmp/a /tmp/w/x`,
+    `bash -c '"set" -- /tmp/w/x; cat "$1"' _ /tmp/a`,
+    `bash -c 'BASH_ARGV0=/tmp/w/x; cat "$0"' /tmp/a`,
+    // BSD xargs -J: the words before its string's word bind, and the ones from it on are unread
+    `cat /tmp/no-such-names.txt | xargs -J % sh -c 'cat "$2"' sh % /tmp/a`,
+    `cat /tmp/no-such-names.txt | xargs -J % sh -c 'rm -f "$0"' /tmp/w/x %`,
+    // a builtin off the reader's closed list or an assigning expansion binds none, so a read through one runs; a script of listed programs binds them
+    `bash -c 'trap shift DEBUG; cat "$1"' _ /tmp/a /tmp/w/x`,
+    `sh -c 'alias s=shift\ns; cat "$1"' _ /tmp/a /tmp/w/x`,
+    "zsh -c 'zparseopts -D a=o; cat $1' _ -a /tmp/w/x",
+    "zsh -c ': ${1::=/tmp/w/x}; cat $1' _ /tmp/a",
+    "zsh -c 'printf -v 1 %s /tmp/w/x; cat $1' _ /tmp/a",
+    `bash -c 'mkdir -p "$1" && touch "$1/x"' _ /tmp/w`,
+  ])("%s runs", async (command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+  // a glob word run from HOME may name the guarded folder, so zsh's argv[1]= runs from a scratch folder
+  test("zsh -c 'argv[1]=/tmp/w/x; cat $1' _ /tmp/a runs", async () => {
+    expect(await bash("zsh -c 'argv[1]=/tmp/w/x; cat $1' _ /tmp/a", "/tmp")).toBeUndefined()
+  })
+})

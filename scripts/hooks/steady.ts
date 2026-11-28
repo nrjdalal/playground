@@ -10,6 +10,7 @@ import {
   type Parsed,
   PRINTS,
   RUNS_TEXT,
+  tildeHome,
   type Word,
 } from "./shell"
 
@@ -658,10 +659,12 @@ function heldVars(env: Env, steady: Steady, raw?: string): Record<string, string
     const held =
       steady.has(key) || (key === alone && !!steady.past?.(key) && env.process[key] === undefined)
     if (key === "TMPDIR" || !held) continue
-    if (!text.unknown && !marked(text.value)) known[key] = text.value
+    // an unquoted assignment expands its value's leading ~ to the home (`D=~/x`), as the shell does
+    if (!text.unknown && !marked(text.value))
+      known[key] = tildeHome(text.value, "quoted" in text && text.quoted === true)
     else if ("raw" in text && typeof text.raw === "string") {
       const again = relexed(text.raw, known)?.value
-      if (again?.startsWith(`${key}=`)) known[key] = again.slice(key.length + 1)
+      if (again?.startsWith(`${key}=`)) known[key] = tildeHome(again.slice(key.length + 1))
     }
   }
   return known
