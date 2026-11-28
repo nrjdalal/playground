@@ -619,7 +619,7 @@ export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]
     .map((r) => `repo:${r}`)
     .join(" ")}`
   const fields =
-    "number body createdAt repository { nameWithOwner } labels(first: 20) { nodes { name } } comments(last: 100) { nodes { body createdAt } } reviews(last: 1) { nodes { submittedAt } } commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }"
+    "number body createdAt repository { nameWithOwner } labels(first: 20) { nodes { name } } comments(last: 100) { nodes { body createdAt } } reviews(last: 1) { nodes { submittedAt } } commits(last: 1) { nodes { commit { checkSuites(first: 1) { nodes { createdAt } } committedDate statusCheckRollup { state } } } }"
   const query = `{ search(query: ${JSON.stringify(search)}, type: ISSUE, first: 50) { nodes { ... on PullRequest { ${fields} } } } }`
   const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
   let prs: {
@@ -627,7 +627,11 @@ export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]
     comments?: { nodes?: { body?: string; createdAt?: string }[] }
     commits?: {
       nodes?: {
-        commit?: { committedDate?: string; statusCheckRollup?: { state?: string } | null }
+        commit?: {
+          checkSuites?: { nodes?: { createdAt?: string }[] }
+          committedDate?: string
+          statusCheckRollup?: { state?: string } | null
+        }
       }[]
     }
     createdAt?: string
@@ -669,6 +673,8 @@ export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]
       ...[
         pr.createdAt,
         commit?.committedDate,
+        // the head's push: its committedDate is the worker's clock at commit, which a long local run before the push leaves old (PG-3256)
+        commit?.checkSuites?.nodes?.[0]?.createdAt,
         comments.at(-1)?.createdAt,
         pr.reviews?.nodes?.at(-1)?.submittedAt,
       ].map((t) => Date.parse(t ?? "") || 0),
