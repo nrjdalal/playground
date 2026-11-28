@@ -335,7 +335,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   It runs through `packages/scripts/src/commit-slot.ts`, so parallel pushes from several worktrees take the commit slot, where it ran 102 s on 16 Nov (measured); a push of docs or briefs alone, no `SKILL.md` among them, skips it, since no file on the glob changed.
   `tests/lefthook.test.ts` reads the `steps` list, so a step's new file fails there until the glob holds it.
   A command that starts a database or stops a process outside the glob is still yours to check: run `bun run test:skills` by hand before that push.
-- Run the touched tests before every push, beside `test:skills`: its steps leave out a test that pins a skill's wording, which only CI then catches (code-review-loop's **The touched tests** lists them with `state.ts touched-tests`).
+- Run the touched tests before every push, beside `test:skills`, with `bun packages/scripts/src/touched-green.ts <your name>`: its steps leave out a test that pins a skill's wording, which only CI then catches (code-review-loop's **The touched tests** lists them with `state.ts touched-tests`).
+  The run marks the head green in the worktree's git dir (`touched-green`, the head's sha) once every file passes, and lefthook's pre-push script `touched-green` refuses a push of a `PG-` branch whose pushed sha that mark does not name, naming the command to run.
 
 ## bun run hooks:differential
 

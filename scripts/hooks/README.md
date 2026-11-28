@@ -1301,8 +1301,9 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Its refusal names each such commit and the amend that drops the line through commit-msg: `git commit --amend --no-edit` for the checked-out commit alone, else a `git rebase --rebase-merges --exec` of that amend.
   The same script refuses a pushed commit whose message, or a pushed branch or tag whose name, holds a term from no-public-leak's list in the data folder, naming the sha or the ref and the kind alone (`listKindsIn()` in `packages/scripts/src/trace-count/count.ts`); a machine with no list reads nothing, and a list file that is not the list refuses the push, naming its path.
   Its tests are `bun run test:file tests/lefthook.test.ts`.
-- The pre-push jobs that read the pushed refs on stdin, `commit-trailer`, `conflict-markers` and `keeps-canary`, run as lefthook scripts, each a one-line `.lefthook/pre-push/<name>.sh` execing its check, since lefthook 2.2.2 skips every pre-push command and job while the checked-out branch has nothing new against its upstream, a push of another branch included, and runs a script on every push.
-  `audit`, `ensure-branches`, `hooks-bundle` and `test-skills`, which read no pushed ref, stay commands; `tests/lefthook.test.ts` pins the three `.lefthook/pre-push/` scripts and runs them under the real lefthook with the checked-out branch level.
+- The pre-push jobs that read the pushed refs on stdin, `commit-trailer`, `conflict-markers`, `keeps-canary` and `touched-green`, run as lefthook scripts, each a one-line `.lefthook/pre-push/<name>.sh` execing its check, since lefthook 2.2.2 skips every pre-push command and job while the checked-out branch has nothing new against its upstream, a push of another branch included,
+  and runs a script on every push.
+  `audit`, `ensure-branches`, `hooks-bundle` and `test-skills`, which read no pushed ref, stay commands; `tests/lefthook.test.ts` pins the four `.lefthook/pre-push/` scripts and runs them under the real lefthook with the checked-out branch level.
 
 ## no-outside-pr-code
 
