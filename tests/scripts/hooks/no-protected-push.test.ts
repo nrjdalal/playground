@@ -619,6 +619,64 @@ describe("the Builder's hand merge takes its body by file", () => {
   })
 })
 
+// #3145: the Builder's pass holds for the one form's own flags alone, typed with no xargs, since another flag (--admin skips branch protection) or a word xargs adds rides the approved form
+describe("the Builder's hand merge passes with its own flags alone", () => {
+  test.each([
+    [
+      "its body by file",
+      `gh pr merge 5 --squash --body-file ${scratch}/body.md --match-head-commit 0123abc`,
+      "app",
+    ],
+    [
+      "its short flags",
+      `gh pr merge 5 -s -F ${scratch}/body.md --match-head-commit 0123abc`,
+      "app",
+    ],
+    ["a repeated --squash", `${MERGE} --squash`, "app"],
+    ["through run-slot", `run-slot.sh builder -- ${MERGE}`, "app"],
+    [
+      "an org's number from the input",
+      "echo 5 | xargs gh pr merge -R made-up/other --squash",
+      "other",
+    ],
+  ])("passes: %s", async (_, command, dir) => {
+    expect(await as("builder", command, dirs[dir])).toBeUndefined()
+  })
+
+  test.each([
+    ["--admin", `${MERGE} --admin`],
+    ["--auto", `${MERGE} --auto`],
+    ["--delete-branch", `${MERGE} --delete-branch`],
+    ["-d", `${MERGE} -d`],
+    ["an inline --body", `${MERGE} --body x`],
+    ["--subject", `${MERGE} --subject x`],
+    ["-t", `${MERGE} -t x`],
+    ["--author-email", `${MERGE} --author-email a@made-up.test`],
+    ["--disable-auto", `${MERGE} --disable-auto`],
+    ["--merge", `${MERGE} --merge`],
+    ["--rebase", `${MERGE} --rebase`],
+    ["a second pull request", `${MERGE} 6`],
+    ["an unread input appended", `cat list | xargs ${MERGE}`],
+    ["an unread input from a redirect", `xargs ${MERGE} < list`],
+    ["--admin from the input", `echo --admin | xargs ${MERGE}`],
+    ["a second head from the input", `echo --match-head-commit ffff000 | xargs ${MERGE}`],
+    [
+      "the number in place of -I's string",
+      "cat list | xargs -I{} gh pr merge {} --squash --match-head-commit 0123abc",
+    ],
+  ])("is refused with %s", async (_, command) => {
+    expect(await as("builder", command)).toContain(
+      "no-protected-push hook refuses this gh pr merge",
+    )
+  })
+
+  test("is refused with an unread input appended from another checkout", async () => {
+    expect(await as("builder", `cat list | xargs ${MERGE}`, dirs.other)).toContain(
+      "no-protected-push hook refuses this gh pr merge",
+    )
+  })
+})
+
 describe("a call the hook cannot read is refused with the form that runs", () => {
   test.each([
     ["a query built at run time", 'gh api graphql -f query="$Q"'],

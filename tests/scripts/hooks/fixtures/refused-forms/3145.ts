@@ -1,0 +1,157 @@
+import type { Group } from "./_shared"
+
+// #3145: a gh api call xargs gives words from its input is judged with them, so an input that gives this repository's (acme-labs/demo here, the checkout's origin) merge or ref endpoint and a write method is refused, readable or not; an input the hook cannot read is refused where it may give the endpoint, or a method or a base or ref field past the typed ones to a merge or ref endpoint here, appended or in place of -I's string as a flag or of -J's, since gh takes the last; each twin, a read of another endpoint, an org's endpoint (acme-blue/app) or -I's one argument, runs. Rows are data, as refused-forms.ts says.
+export const groups: Group[] = [
+  {
+    folders: ["checkout"],
+    guards: ["no-protected-push"],
+    rows: () => [
+      ["an unread input to gh api with no endpoint", "cat list | xargs gh api"],
+      ["an unread input to api past gh's own -R", "cat list | xargs gh -R acme-blue/app api"],
+      ["an unread input to gh api through mise exec", "cat list | xargs mise exec -- gh api"],
+      ["an unread input to gh api past a GET alone", "cat list | xargs gh api --method GET"],
+      [
+        "an unread input past a GET to this repository's merge endpoint",
+        "cat list | xargs gh api -X GET repos/acme-labs/demo/pulls/5/merge",
+      ],
+      [
+        "an unread input past a GET to this repository's canary ref",
+        "cat list | xargs gh api -X GET repos/acme-labs/demo/git/refs/heads/canary",
+      ],
+      [
+        "a PUT to this repository's merge endpoint from the input",
+        "echo repos/acme-labs/demo/pulls/5/merge -X PUT | xargs gh api",
+      ],
+      [
+        "an api merge of this repository given to gh alone",
+        "echo api -X PUT repos/acme-labs/demo/pulls/5/merge | xargs gh",
+      ],
+      [
+        "an unread input past a GET to this repository's pull request",
+        "cat list | xargs gh api -X GET repos/acme-labs/demo/pulls/5",
+      ],
+      [
+        "an unread input past a GET to this repository's pull requests",
+        "cat list | xargs gh api -X GET repos/acme-labs/demo/pulls",
+      ],
+      [
+        "an unread input to an org's merge endpoint",
+        "cat list | xargs gh api repos/acme-blue/app/pulls/5/merge",
+      ],
+      [
+        "a PUT to an org's merge endpoint from the input",
+        "echo repos/acme-blue/app/pulls/5/merge -X PUT | xargs gh api",
+      ],
+      [
+        "an api merge of an org given to gh alone",
+        "echo api -X PUT repos/acme-blue/app/pulls/5/merge | xargs gh",
+      ],
+      [
+        "a read of this repository's pull requests from the input",
+        "echo repos/acme-labs/demo/pulls -X GET | xargs gh api",
+      ],
+      ["an unread input in place of -I's endpoint", "cat list | xargs -I{} gh api {}"],
+      [
+        "an unread input in place of -I's string in this repository's endpoint",
+        "cat list | xargs -I{} gh api repos/acme-labs/demo/{}",
+      ],
+      [
+        "an unread input in place of -I's string past a GET to this repository's merge endpoint",
+        "cat list | xargs -I{} gh api -X GET repos/acme-labs/demo/pulls/5/merge {}",
+      ],
+      [
+        "an unread input in place of -I's string before this repository's merge endpoint",
+        "cat list | xargs -I{} gh api {} repos/acme-labs/demo/pulls/5/merge",
+      ],
+      [
+        "an unread input in place of -I's string past a GET to this repository's canary ref",
+        "cat list | xargs -I{} gh api -X GET repos/acme-labs/demo/git/refs/heads/canary {}",
+      ],
+      [
+        "an unread input in place of -J's string past a GET to this repository's merge endpoint",
+        "cat list | xargs -J% gh api -X GET repos/acme-labs/demo/pulls/5/merge %",
+      ],
+      [
+        "an unread input in place of -J's string as gh api's words",
+        "cat list | xargs -J% gh api %",
+      ],
+      [
+        "an unread input in place of -J's string past this repository's merges endpoint",
+        "cat list | xargs -J% gh api repos/acme-labs/demo/merges %",
+      ],
+      [
+        "a PUT in place of -I's string past a GET to this repository's merge endpoint",
+        "echo -XPUT | xargs -I{} gh api -X GET repos/acme-labs/demo/pulls/5/merge {}",
+      ],
+      [
+        "an unread input in place of -I's string past a GET to the factory's merge endpoint from another checkout",
+        "cat list | xargs -I{} gh api -X GET repos/acme-labs/demo/pulls/5/merge {}",
+        "outside clone",
+      ],
+      [
+        "an unread input past a GET to this repository's merges endpoint",
+        "cat list | xargs gh api -X GET repos/acme-labs/demo/merges",
+      ],
+      [
+        "an unread input past this repository's merges endpoint and a GET",
+        "cat list | xargs gh api repos/acme-labs/demo/merges -X GET",
+      ],
+      [
+        "an unread input to this repository's merges endpoint",
+        "cat list | xargs gh api repos/acme-labs/demo/merges",
+      ],
+      [
+        "an unread input past a POST to this repository's merges endpoint",
+        "cat list | xargs gh api -X POST repos/acme-labs/demo/merges",
+      ],
+      [
+        "an unread input past a merge into another base of this repository",
+        "cat list | xargs gh api -X POST repos/acme-labs/demo/merges -f base=feature -f head=x",
+      ],
+      [
+        "an unread input past a GET to this repository's refs",
+        "cat list | xargs gh api -X GET repos/acme-labs/demo/git/refs",
+      ],
+      [
+        "an unread input past a POST to this repository's refs",
+        "cat list | xargs gh api -X POST repos/acme-labs/demo/git/refs",
+      ],
+      [
+        "a canary base appended past this repository's merges endpoint",
+        "echo -f base=canary -f head=x | xargs gh api repos/acme-labs/demo/merges",
+      ],
+      [
+        "an unread input to the factory's merges endpoint from another checkout",
+        "cat list | xargs gh api repos/acme-labs/demo/merges",
+        "outside clone",
+      ],
+      [
+        "an unread input to an org's merges endpoint",
+        "cat list | xargs gh api repos/acme-blue/app/merges",
+      ],
+      [
+        "an unread input in place of -J's string past an org's merges endpoint",
+        "cat list | xargs -J% gh api repos/acme-blue/app/merges %",
+      ],
+      [
+        "an unread input in place of -I's string past a GET to this repository's pull request",
+        "cat list | xargs -I{} gh api -X GET repos/acme-labs/demo/pulls/5 {}",
+      ],
+    ],
+  },
+]
+
+// A read, an org's endpoint and -I's one argument, which gh api sends as a GET, run.
+export const allowed = [
+  "an unread input past a GET to this repository's pull request",
+  "an unread input past a GET to this repository's pull requests",
+  "an unread input to an org's merge endpoint",
+  "a PUT to an org's merge endpoint from the input",
+  "an api merge of an org given to gh alone",
+  "a read of this repository's pull requests from the input",
+  "an unread input in place of -I's endpoint",
+  "an unread input in place of -I's string in this repository's endpoint",
+  "an unread input to an org's merges endpoint",
+  "an unread input in place of -J's string past an org's merges endpoint",
+  "an unread input in place of -I's string past a GET to this repository's pull request",
+]
