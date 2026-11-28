@@ -445,10 +445,13 @@ export async function readHerdr(
         ? [`herdr's ${r.read.server} server read ${r.read.unread.length} pane(s) only in part`]
         : [],
   )
-  // a server that is up but did not answer stays in the list, empty and partial, so a reader can tell its sessions from ended ones
+  // a server that is up but did not answer stays in the list as its last whole read, or empty when it has none, marked partial, so a reader can tell its sessions from ended ones; a server that is down forgets its last read, which a later hang would otherwise send however old
   return reads.flatMap((r) => {
     if ("read" in r) return [keepLastGood(r.read)]
-    if (r.error instanceof HerdrDown) return []
+    if (r.error instanceof HerdrDown) {
+      state.lastGood.delete(r.server.name)
+      return []
+    }
     const last = state.lastGood.get(r.server.name)
     return [
       last
