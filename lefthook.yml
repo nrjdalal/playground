@@ -237,3 +237,7 @@ pre-push:
     "keeps-canary.sh":
       runner: bash
       use_stdin: true
+    # refuses a push of a PG- branch whose head no green run of its touched tests marked, since a push that skips them reaches CI red on a test that list names
+    "touched-green.sh":
+      runner: bash
+      use_stdin: true
