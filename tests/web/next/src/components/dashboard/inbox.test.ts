@@ -2438,3 +2438,47 @@ describe("a root step card (PG-2433)", () => {
     )
   })
 })
+
+// A multiSelect ask's card ticks several rows at once on the primitive's checkboxes, and its Send waits for one (PG-3177).
+describe("a multiSelect ask's card (PG-3177)", () => {
+  const OPTIONS = [{ label: "Nudge Ana" }, { label: "Nudge Bo" }, { label: "Nudge Cy" }]
+  const ticking = {
+    ...decision,
+    id: "id-72",
+    preview: { multiSelect: true, options: OPTIONS, text: "Who gets a nudge?", type: "ask" },
+    ref: 72,
+    title: "Nudge whom?",
+  } as InboxItem
+  const sig = choicesKey(choicesOf({ multiSelect: true, options: OPTIONS, type: "ask" }), true)
+  const inputs = (html: string) =>
+    [...html.matchAll(/<[^>]*data-slot="questionnaire-choice-input"[^>]*>/g)].map((m) => m[0])
+  const checked = (html: string) =>
+    inputs(html)
+      .filter((tag) => /data-checked(?:=""|[\s>])/.test(tag))
+      .map((tag) => tag.match(/value="([^"]*)"/)?.[1] ?? "")
+  afterEach(() => savePicks("id-72", EMPTY_PICKS))
+
+  test("shows a checkbox for each option and None of these, with Send off until one is ticked", () => {
+    const html = opened(ticking)
+    expect(inputs(html)).toHaveLength(4)
+    for (const tag of inputs(html)) expect(tag).toContain('type="checkbox"')
+    expect(named(html, "Send")).toContain('aria-disabled="true"')
+    expect(named(html, "Send")).toContain('aria-description="Pick an option first"')
+  })
+
+  test("gives back every tick on remount, and Send takes them", () => {
+    savePicks("id-72", { ...EMPTY_PICKS, sig, ticks: [0, 2] })
+    const html = opened(ticking)
+    expect(checked(html)).toEqual(["A: Nudge Ana", "C: Nudge Cy"])
+    expect(named(html, "Send")).toContain('aria-disabled="false"')
+  })
+
+  test("a one-pick ask's kept pick never reads as its ticks", () => {
+    savePicks("id-72", {
+      ...EMPTY_PICKS,
+      pick: 0,
+      sig: choicesKey(choicesOf({ options: OPTIONS, type: "ask" })),
+    })
+    expect(checked(opened(ticking))).toEqual([])
+  })
+})

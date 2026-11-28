@@ -1,6 +1,7 @@
 import { appendFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
+import { ticksAnswer } from "@packages/config/inbox"
 import { DEFAULT_POLICY, secretIn, shownValue } from "@packages/settings"
 
 import { handOn, type Stuck } from "../ops-job/dispatcher"
@@ -13,9 +14,11 @@ import {
   cardOf,
   goesOut,
   NO_ID,
+  noneAlone,
   noRow,
   notAnswered,
   notSent,
+  oneRow,
   pollOf,
   type Reply,
   replyOf,
@@ -127,8 +130,8 @@ export type Mode = {
   pin?: (id: string, off?: boolean) => Promise<void>
   // the policy lines from wa.replyPolicy and wa.guestPolicy, read afresh for each message; a bridge with none uses DEFAULT_POLICY for both
   policy?: () => Promise<Policy | undefined>
-  // sends a card's choices as a poll to the owner; a bridge with none sends text alone
-  poll?: (name: string, values: string[]) => Promise<PollSent>
+  // sends a card's choices as a poll to the owner, taking one answer, or any number at selectableCount 0; a bridge with none sends text alone
+  poll?: (name: string, values: string[], selectableCount?: 0 | 1) => Promise<PollSent>
   // sends the owner one line at 22 hours of the owner's 24 asking for any reply, once a window; a bridge with none sends none
   remind?: () => Promise<void>
   // reads a vote on a card's poll (votes.ts), so a bridge with none answers no vote
@@ -148,7 +151,7 @@ export type Inbox = {
   answer: (
     id: string,
     answer:
-      | { action: "approve" | "deny"; option?: number }
+      | { action: "approve" | "deny"; option?: number; options?: number[] }
       | { action: "send"; seen?: string; text?: string },
   ) => Promise<string | undefined>
   open: () => Promise<Card[]>
@@ -193,6 +196,8 @@ type Cards = { held?: string; sent?: Record<string, Sent> }
 const draftsFile = (dir: string) => join(dir, "drafts.json")
 type Drafts = { sent?: Record<string, DraftSent> }
 const CARD_KEEP_MS = 30 * 24 * HOUR
+// A multiSelect poll has no Send, so each tap sends a vote: the newest answers its card once none newer comes for this long (ADR 0043).
+export const VOTE_SETTLE_MS = 60_000
 // Each open decision's pin in the owner's chat: its message id, its card and when it was pinned, so it comes off once the card settles.
 const pinsFile = (dir: string) => join(dir, "pins.json")
 type Pin = { at: number; id: string; ref: number }
@@ -574,7 +579,8 @@ async function saved(io: Io & Mode, m: Incoming, message: Record<string, unknown
 }
 
 // A reply with no card id or no number is a card's only while some open card that went out waits on its rows, so the owner's "2" to the dispatcher's own question reaches the dispatcher.
-const bare = (reply: Reply) => reply.ref === undefined || reply.number === undefined
+const bare = (reply: Reply) =>
+  reply.ref === undefined || (reply.number === undefined && reply.numbers === undefined)
 async function rowsWait(io: Io & Mode, inbox: Inbox): Promise<boolean> {
   const sent = (await readOwn<Cards>(cardsFile(io.dir), {})).sent ?? {}
   const open = await inbox.open().catch(() => [])
@@ -604,6 +610,13 @@ async function vote(io: Io & Mode, inbox: Inbox, m: Incoming, me?: Sock["user"])
     pollOf(Number(ref), "", card.rows)?.values ?? [],
   )
   if (picked === undefined) return io.log(`ops-wa: a vote on #i${ref}'s poll could not be read`)
+  // a multiSelect poll's vote is kept as its ticks, the newest standing, and a vote taken back clears them; the card pass answers them once they settle
+  if (card.ticking) {
+    const cards = await readOwn<Cards>(cardsFile(io.dir), {})
+    const { ticked: _, ...rest } = cards.sent![ref]!
+    cards.sent![ref] = picked.length ? { ...rest, ticked: { at: io.now(), rows: picked } } : rest
+    return writeOwn(cardsFile(io.dir), cards)
+  }
   if (picked.length !== 1)
     return io.log(`ops-wa: a vote on #i${ref}'s poll picks no row, so it answers nothing`)
   return answerCard(io, inbox, { number: picked[0]! + 1, ref: Number(ref) })
@@ -616,14 +629,17 @@ async function answerCard(io: Io & Mode, inbox: Inbox, reply: Reply) {
   if (reply.ref === undefined) return say(NO_ID)
   const card = (await readOwn<Cards>(cardsFile(io.dir), {})).sent?.[reply.ref]
   if (!card) return say(notSent(reply.ref))
-  const n = reply.number ?? 0
-  if (n < 1 || n > card.rows.length) return say(noRow(reply.ref, card.rows.length))
-  const why = await inbox
-    .answer(card.id, answerOf(card.rows, n - 1))
-    .catch((error: Error) => error.message)
-  return say(
-    why === undefined ? answered(reply.ref, card.rows[n - 1]!.label) : notAnswered(reply.ref, why),
-  )
+  // a multiSelect card takes several numbers, each once, in any order; any other card takes one
+  const at = [...new Set(reply.numbers ?? [reply.number ?? 0])]
+    .sort((a, b) => a - b)
+    .map((n) => n - 1)
+  if (at.length > 1 && !card.ticking) return say(oneRow(reply.ref))
+  if (at.some((i) => i < 0 || i >= card.rows.length)) return say(noRow(reply.ref, card.rows.length))
+  const answer = card.ticking ? ticksAnswer(card.rows, at) : answerOf(card.rows, at[0]!)
+  if (!answer) return say(noneAlone(reply.ref, card.rows.find((row) => !row.go)!.label))
+  const why = await inbox.answer(card.id, answer).catch((error: Error) => error.message)
+  const label = at.map((i) => card.rows[i]!.label).join(" · ")
+  return say(why === undefined ? answered(reply.ref, label) : notAnswered(reply.ref, why))
 }
 
 // The owner's reply to a draft's message: "send" posts it as written and other words post in its place, through the Inbox's own Send, whose checks run as they do there; one line back says what happened. A draft no longer open, or one with files, posts nothing from here.
@@ -691,6 +707,14 @@ async function cards(io: Io & Mode, inbox: Inbox) {
   let pins = await pinsOf(io.dir, now)
   try {
     const [open, terms] = await Promise.all([inbox.open(), inbox.terms()])
+    // a multiSelect poll's ticks with no newer vote for VOTE_SETTLE_MS answer its card, as a reply of those numbers would, while the card is still open; a card answered another way meanwhile drops them
+    for (const [ref, card] of Object.entries(sent)) {
+      if (!card.ticked || now - card.ticked.at < VOTE_SETTLE_MS) continue
+      const numbers = card.ticked.rows.map((at) => at + 1)
+      delete card.ticked
+      if (open.some((c) => c.id === card.id && c.status === "open"))
+        await answerCard(io, inbox, { numbers, ref: Number(ref) })
+    }
     // the one place a settle shows, by any route: an answer on WhatsApp or in the Inbox, a settle, an ack or a resolve each takes the card off the open list or out of open
     if (io.pin) pins = await unpinSettled(io.pin, pins, open, io.log)
     if (io.draft)
@@ -704,7 +728,7 @@ async function cards(io: Io & Mode, inbox: Inbox) {
       if (!terms || !goesOut(card, terms)) {
         if (waits(card, now)) kept.push(card)
       } else if (!sent[card.ref]) {
-        const { poll, rows, text } = cardOf(card, terms)
+        const { poll, rows, text, ticking } = cardOf(card, terms)
         let textId: string | undefined
         try {
           textId = io.card ? await io.card(text) : void (await io.reply(text))
@@ -713,11 +737,11 @@ async function cards(io: Io & Mode, inbox: Inbox) {
           if ((error as Error).message === QUIET_WAITS) continue
           throw error
         }
-        sent[card.ref] = { at: io.now(), id: card.id, rows }
+        sent[card.ref] = { at: io.now(), id: card.id, rows, ...(ticking && { ticking }) }
         // the poll goes beside the text, and a poll that fails leaves the text's numbered lines to answer by
         if (poll && io.poll)
           try {
-            sent[card.ref]!.poll = await io.poll(poll.name, poll.values)
+            sent[card.ref]!.poll = await io.poll(poll.name, poll.values, ticking ? 0 : 1)
           } catch (error) {
             io.log(`ops-wa: a card's poll: ${(error as Error).message}`)
           }
@@ -1273,7 +1297,11 @@ export function sender(
     await sendNow(REMIND, "reply", undefined, {})
     await writeOwn(remindFile(io.dir), { for: ownerAt })
   }
-  const pollNow = async (name: string, values: string[]): Promise<PollSent> => {
+  const pollNow = async (
+    name: string,
+    values: string[],
+    selectableCount: 0 | 1 = 1,
+  ): Promise<PollSent> => {
     const refusal = refusalOf([name, ...values].join("\n"))
     if (refusal) throw new Error(refusal)
     const now = io.now()
@@ -1282,7 +1310,7 @@ export function sender(
     if (await quietNow(now)) throw new Error(QUIET_WAITS)
     const sends = await recent(now)
     const messageSecret = crypto.getRandomValues(new Uint8Array(32))
-    const poll = { messageSecret, name, selectableCount: 1 as const, values }
+    const poll = { messageSecret, name, selectableCount, values }
     const id = await paced(sends, SEND.gapMs, jidOf(io.owner), { poll })
     if (!id) throw new Error("WhatsApp gave the poll no id, so its votes cannot be read")
     return { id, secret: Buffer.from(messageSecret).toString("base64") }
@@ -1622,7 +1650,8 @@ export function sender(
       out: (body: string, kind: Kind, source?: string, extra: Extra = {}) =>
         queued(() => anySend(body, kind, source, extra)),
       pin: (id: string, off = false) => queued(() => pinNow(id, off)),
-      poll: (name: string, values: string[]) => queued(() => pollNow(name, values)),
+      poll: (name: string, values: string[], selectableCount?: 0 | 1) =>
+        queued(() => pollNow(name, values, selectableCount)),
       remind: () => queued(remindNow),
       react: (emoji: string, on: { id?: string; who?: Who }) => queued(() => reactNow(emoji, on)),
     },

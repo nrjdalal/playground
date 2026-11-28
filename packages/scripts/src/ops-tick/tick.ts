@@ -28,12 +28,13 @@ import {
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import STATUSES from "../../../../scripts/roster-statuses.json"
-import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth, KEYRING_LOCKED } from "../gh-read"
+import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth, ghDown, KEYRING_LOCKED } from "../gh-read"
 import { procSource, readBootTime, readSysctl, readUpSince } from "../ops-machine/readings"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
 import { lapse } from "../playground/priority"
 import { dashboardCheckout, NO_CHECKOUT } from "../playground/probe"
+import { REQUIRED_CHECKS } from "../pr-merge/gates"
 import { lockRootOf } from "../pr-merge/merge"
 import { ALERT_JOB, waiterLive } from "../stuck-alert"
 import { swapBundles, unswapBundles } from "../swap-bundles"
@@ -416,6 +417,7 @@ const tick = async (ctx: Context) => {
   await switchWatch(ctx)
   await settleWeekAlerts(ctx)
   await staleSweeps(ctx)
+  await shipDue(ctx)
 }
 
 // The account the switch watch reads, the one the factory moves off at a full week: usage.switchAccount in the data folder's policy, none while it is unset or the policy cannot be read.
@@ -916,6 +918,100 @@ const staleSweeps = async (ctx: Context) => {
       mark.dispatcher = await ctx.send("dispatcher", text, true)
   }
   if (JSON.stringify(told) !== before) await writeAtomic(path, JSON.stringify(told))
+}
+
+const SHIP_ESCALATE_MS = 60 * 60_000
+
+// A squashed subject the changelog reads as user-facing: a feat( or fix( with its PG scope; a revert counts as none.
+const USER_FACING = /^(feat|fix)\(/
+
+type ShipMark = { dispatcher?: boolean; opsAt?: string; pr: number }
+
+const ghJson = async (ctx: Context, path: string): Promise<unknown> => {
+  const read = await ctx.run(["gh", "api", path], GH_TIMEOUT_MS)
+  if (read.code !== 0) throw new Error(`gh api ${path.split("?")[0]}: ${lines(read.out).at(-1)}`)
+  return JSON.parse(read.out)
+}
+
+// What makes the open ship PR due by the release rule, or undefined while it is not: its required checks green, no merge lock held, and release.merges user-facing merges or release.hours since the first merge after the last ship.
+const dueBy = async (
+  ctx: Context,
+  slug: string,
+  head: string,
+  lockRoot: string,
+): Promise<string | undefined> => {
+  if (await stat(join(lockRoot, "merge.lock")).catch(() => null)) return
+  const runs =
+    (
+      (await ghJson(ctx, `repos/${slug}/commits/${head}/check-runs?per_page=100`)) as {
+        check_runs?: { conclusion?: string | null; id: number; name: string }[]
+      }
+    ).check_runs ?? []
+  const newest = (name: string) =>
+    runs.filter((r) => r.name === name).sort((a, b) => b.id - a.id)[0]
+  if (!REQUIRED_CHECKS.every((name) => newest(name)?.conclusion === "success")) return
+  const shipped = (
+    (await ghJson(
+      ctx,
+      `repos/${slug}/pulls?base=main&state=closed&sort=updated&direction=desc&per_page=10`,
+    )) as { merged_at?: string | null; number: number }[]
+  )
+    .filter((p) => p.merged_at)
+    .sort((a, b) => Date.parse(b.merged_at!) - Date.parse(a.merged_at!))[0]
+  const since = shipped ? Date.parse(shipped.merged_at!) : 0
+  const merges = (
+    (await ghJson(
+      ctx,
+      `repos/${slug}/commits?sha=canary&per_page=100${shipped ? `&since=${shipped.merged_at}` : ""}`,
+    )) as { commit: { committer?: { date?: string }; message: string } }[]
+  )
+    .map((c) => ({
+      at: Date.parse(c.commit.committer?.date ?? ""),
+      subject: c.commit.message.split("\n")[0]!,
+    }))
+    .filter((c) => c.at > since)
+  const read = await readPolicy(dirname(ctx.ops))
+  const settings = read.settings ?? { schemaVersion: 1 as const, values: {} }
+  const wanted = ruleSettings.get(settings, "release.merges")
+  const hours = ruleSettings.get(settings, "release.hours")
+  const after = shipped ? ` since the last ship (#${shipped.number})` : ""
+  const facing = merges.filter((c) => USER_FACING.test(c.subject)).length
+  if (facing >= wanted) return `${facing} user-facing merges have landed${after}`
+  const first = Math.min(...merges.map((c) => c.at))
+  if (merges.length && ctx.now.getTime() - first >= hours * 3_600_000)
+    return `${hours} hours of merging have passed${after}`
+}
+
+// The open ship PR from canary into main, once the release rule makes it due: one line to ops, then the same line to the dispatcher an hour later while it is still open, once per ship PR, marked in tick/ship-due.json.
+export const shipDue = async (ctx: Context, lockRoot = lockRootOf()) => {
+  const path = join(ctx.ops, "tick", "ship-due.json")
+  const before = JSON.stringify((await readJson(path).catch(() => null)) ?? null)
+  let mark = JSON.parse(before) as ShipMark | null
+  const origin = await ctx.run(["git", "-C", ctx.repo, "remote", "get-url", "origin"])
+  const slug = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\s*$/.exec(origin.out)?.[1]
+  // while the sign-in probe reads gh failed, every repeated gh read skips gh, as LIFECYCLE.md's ops-tick list says
+  if (!slug || ghDown(join(ctx.ops, "tick", "gh-auth.json"), ctx.now.getTime())) return
+  const open = (
+    (await ghJson(ctx, `repos/${slug}/pulls?base=main&state=open&per_page=10`)) as {
+      head: { ref: string; sha: string }
+      number: number
+    }[]
+  ).find((p) => p.head.ref === "canary")
+  if (!open) mark = null
+  else {
+    if (!mark || mark.pr !== open.number) mark = { pr: open.number }
+    if (!mark.opsAt) {
+      const why = await dueBy(ctx, slug, open.head.sha, lockRoot)
+      const text = `#${open.number} is due to ship: ${why}; ship it by the release skill`
+      if (why && (await ctx.send("ops", text, true))) mark.opsAt = isoSeconds(ctx.now)
+    } else if (!mark.dispatcher && ctx.now.getTime() - Date.parse(mark.opsAt) >= SHIP_ESCALATE_MS)
+      mark.dispatcher = await ctx.send(
+        "dispatcher",
+        `#${open.number} is still open an hour after Ops was told it is due to ship (${mark.opsAt})`,
+        true,
+      )
+  }
+  if (JSON.stringify(mark) !== before) await writeAtomic(path, JSON.stringify(mark))
 }
 
 // The local models' keep beat (playground model use): each machine whose localModels.hereModel or localModels.peerModel is set gets that model back once another sits idle, or once it is down; loaded only here, since it reads the settings package.

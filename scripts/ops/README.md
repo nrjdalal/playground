@@ -248,6 +248,14 @@ The same line goes to the dispatcher 30 minutes after the lead's while the file 
 
 Tests: `tests/packages/scripts/src/ops-tick/tick.test.ts`'s "the optimizer's beats" and "a lead's stale sweep, in the tick".
 
+## A ship PR that is due
+
+The 15-minute `tick` beat reads the open ship PR from `canary` into `main` through REST and, once the **release** rule makes it due, tells Ops "#<n> is due to ship: <condition> since the last ship (#<m>); ship it by the release skill".
+It is due when its head's required checks (`REQUIRED_CHECKS` in `packages/scripts/src/pr-merge/gates.ts`) are green, no merge lock (`merge.lock`) is held, and either `release.merges` user-facing merges have landed since the last ship (the newest PR merged into `main`), a user-facing merge being a `canary` commit whose subject opens `feat(` or `fix(`, or `release.hours` have passed since the first `canary` commit after it.
+The dispatcher hears "#<n> is still open an hour after Ops was told it is due to ship (<iso>)" when the same PR is still open an hour after the Ops line, each line once per ship PR, kept in `ops/tick/ship-due.json`, so a new ship PR starts fresh.
+
+Tests: `tests/packages/scripts/src/ops-tick/tick.test.ts`'s "a due ship PR, in the tick".
+
 ## runner-host
 
 The runner host is a peer machine that runs heavy runs for run-slot through `ci.sh`, so they leave this machine's run slots; GitHub's workflows run on hosted runners alone ([README's CI](../../README.md#ci)).

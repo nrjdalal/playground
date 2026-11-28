@@ -104,6 +104,81 @@ describe("--brief gives a resumed session its first prompt", () => {
   })
 })
 
+// a worker Ops started with no --reports-to was told to report to the Builder (#3183)
+describe("a worker with no --reports-to reports to the manager that ran the start", () => {
+  const reportsTo = (r: Awaited<ReturnType<typeof spawn>>) =>
+    r.roster?.find((word) => word.startsWith("reportsTo="))?.slice("reportsTo=".length)
+
+  test.each([
+    ["an Ops session", "k3v9q2-ops"],
+    ["a Builder session", "k3v9q2-builder"],
+    ["a Planner session", "k3v9q2-planner"],
+  ])("run by %s, it names that session in its prompt and its row", async (_case, lead) => {
+    const r = await spawn(["worker", "worker-brave-otter", "b.md"], [{ name: lead, pid: 5100 }], {
+      CLAUDE_PID: "5100",
+    })
+    expect(r.code).toBe(0)
+    expect(launchOf(r)).toContain(`you report to ${lead}.`)
+    expect(launchOf(r)).toContain(`Report to ${lead} with SendMessage (to: ${lead}).`)
+    expect(reportsTo(r)).toBe(lead)
+  })
+
+  test("run by an orchestrator, whose kind its roster row holds, it names that session", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [{ name: "corvane", pid: 5100 }],
+      {
+        CLAUDE_PID: "5100",
+        ROSTER_JSON: JSON.stringify({
+          agents: [{ name: "corvane", kind: "orchestrator", reportsTo: "dispatcher" }],
+        }),
+      },
+    )
+    expect(r.code).toBe(0)
+    expect(launchOf(r)).toContain("you report to corvane.")
+    expect(reportsTo(r)).toBe("corvane")
+  })
+
+  test("a runner run by a Builder session still reports to ops", async () => {
+    const r = await spawn(
+      ["runner", "runner-brave-otter", "b.md"],
+      [{ name: "k3v9q2-builder", pid: 5100 }],
+      {
+        CLAUDE_PID: "5100",
+      },
+    )
+    expect(r.code).toBe(0)
+    expect(launchOf(r)).toContain("you report to ops.")
+    expect(reportsTo(r)).toBe("ops")
+  })
+
+  test.each([
+    [
+      "a session that is no manager",
+      [{ name: "k3v9q2-worker", pid: 5100 }],
+      { CLAUDE_PID: "5100" },
+    ],
+    ["a CLAUDE_PID with no registry entry", [], { CLAUDE_PID: "5101" }],
+    ["no CLAUDE_PID", [], {}],
+  ] as const)("run by %s, it keeps the builder's seat", async (_case, sessions, env) => {
+    const r = await spawn(["worker", "worker-brave-otter", "b.md"], [...sessions], { ...env })
+    expect(r.code).toBe(0)
+    expect(launchOf(r)).toContain("you report to builder.")
+    expect(reportsTo(r)).toBe("builder")
+  })
+
+  test("--reports-to still wins over the manager that ran the start", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md", "--reports-to", "planner"],
+      [{ name: "k3v9q2-ops", pid: 5100 }],
+      { CLAUDE_PID: "5100" },
+    )
+    expect(r.code).toBe(0)
+    expect(launchOf(r)).toContain("you report to planner.")
+    expect(reportsTo(r)).toBe("planner")
+  })
+})
+
 describe("--reports-to names the session a worker reports to (#1727)", () => {
   test.each([["worker", "worker-brave-otter"]])(
     "a %s with --reports-to planner reports to planner",
