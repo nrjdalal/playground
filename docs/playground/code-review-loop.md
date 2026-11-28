@@ -30,6 +30,7 @@ A changed skill, agent guide or docs page is also held to core's `writing-for-ag
 The two stay apart in the verdict, so a well-built change that misses the ask cannot hide behind its quality.
 Its two sub-agents start with no memory of earlier rounds, which is what makes the read before the last 5/5 fresh.
 They read the PR through git's object reads pinned to the head's sha, never the clone's working files, so the read can run beside the merge check, since on one PR a HEAD that moved under them showed `canary`'s files as the PR's.
+Their prompts carry the slots and signal rules too: a sub-agent runs a test only through run-slot, or reasons about the code without running it, signals only a process it started, and keeps its scratch folder inside the reviewer's, since on 27 Nov a sub-agent ran a mutation probe outside run-slot while the load was above 30.
 The reviewer pastes the spec's text beside its path into the `code-review` call and on into its Spec sub-agent's prompt, and a Spec read that reports the spec missing runs again rather than passing.
 When the diff adds a schema refusal that a form reads, that prompt also traces each refusal the form can reach to the field that shows it on screen, since a refusal with no field shows as a whole line the person cannot place.
 

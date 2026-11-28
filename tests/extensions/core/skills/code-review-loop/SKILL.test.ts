@@ -439,6 +439,19 @@ describe("code-review-loop's round 1 greps each changed term", () => {
 })
 
 describe("code-review-loop keeps its clone at the head and asks the lead on a trust-widening nit", () => {
+  test("step 4's sub-agent prompts carry the slots and signal rules and a scratch folder inside the reviewer's, and its Done when checks them (#3222, #3244)", async () => {
+    const [step, done] = await part("Fresh read")
+    expect(step).toContain("Their prompts also carry the **slots** and **signal** rules")
+    expect(step).toContain(
+      "`~/.playground/ops/run-slot.sh <your name> --`, or else reasons about the code without running it",
+    )
+    expect(step).toContain("`~/.playground/scratch/<your name>/std/` or `spec/`")
+    expect(done ?? "").toContain(
+      "carried the **slots** and **signal** rules with its scratch folder",
+    )
+    expect(await page()).toContain("Their prompts carry the slots and signal rules too")
+  })
+
   test("step 4's sub-agents read the PR pinned to the head's sha, never the clone's working files, and its Done when checks each prompt pinned them (#1624, #i1069)", async () => {
     const [step, done] = await part("Fresh read")
     expect(step).toContain("git's object reads pinned to the head's sha alone")
