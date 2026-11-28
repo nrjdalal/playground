@@ -269,6 +269,36 @@ describe("DashboardHub", () => {
     second()
   })
 
+  // The owner's tab ran at 168% CPU while a kept board was sent again and again, each a whole re-render of the same rows.
+  test("a board whose rows equal the last one sent sends no update, and a changed one does", async () => {
+    const { calls, hub } = hubWith()
+    const frames: DashboardFrame[] = []
+    const leave = hub.subscribe((frame) => frames.push(frame))
+    const live = (name: string): Live => ({
+      surfaces: new Map(),
+      transcripts: new Map(),
+      workers: [worker(name)],
+    })
+    await until("the hub's first read", () => calls.length === 1)
+    calls[0]?.resolve(live("same"))
+    await until("the first frame", () => frames.length === 1)
+    hub.subscribe(() => {})()
+    await until("the second read", () => calls.length === 2)
+    calls[1]?.resolve(live("same"))
+    // proves the negative: the equal board is never sent
+    await sleep(NO_SECOND_READ_MS)
+    expect(frames).toHaveLength(1)
+    hub.subscribe(() => {})()
+    await until("the third read", () => calls.length === 3)
+    calls[2]?.resolve(live("moved"))
+    await until("the changed frame", () => frames.length === 2)
+    expect(frames.map((f) => (f.type === "workers" ? f.workers[0]?.name : f.type))).toEqual([
+      "same",
+      "moved",
+    ])
+    leave()
+  })
+
   // A sessions read once took 12.7s at load 19 (9 Oct), longer than a refresh waits, and a new read started beside each slow one stacked them until the live chat went down.
   test("a slow sessions read times out with an error frame, and no new read starts until it settles", async () => {
     const { calls, hub } = hubWith(200)
