@@ -119,10 +119,36 @@ export const timeoutPlugin = (clone: string): boolean => {
 
 // The skill's whole-suite chunk: one call on more files misses the test sandbox's 1200 s deadline.
 const CHUNK = 200
-export const chunksOf = (files: string[]): string[][] =>
-  Array.from({ length: Math.ceil(files.length / CHUNK) }, (_, i) =>
-    files.slice(i * CHUNK, (i + 1) * CHUNK),
-  )
+// A chunk's summed serial time from tests/timings.json, not its wall time: a loaded 4-worker pass runs about 0.4 of it (501 s for 1277 s, 630 s for 1411 s, measured on a whole-suite PR on 28 Nov), so about 500 s, under half the sandbox's deadline
+const BUDGET_MS = 1_200_000
+// The suite's own timings, tests/timings.json's files, each file's last passing time in ms; none for a clone without the file
+export const timingsOf = (clone: string): Record<string, number> => {
+  try {
+    const files = JSON.parse(readFileSync(join(clone, "tests", "timings.json"), "utf8")).files
+    return files && typeof files === "object" ? files : {}
+  } catch {
+    return {}
+  }
+}
+const costOf = (timings: Record<string, number>, file: string): number =>
+  typeof timings[file] === "number" ? timings[file] : BUDGET_MS / CHUNK
+// Chunks in the list's order, each at most CHUNK files and BUDGET_MS of expected time, a file with no timing costing 1/CHUNK of the budget, so an untimed list keeps 200-file chunks; a file past the budget runs alone
+export const chunksOf = (files: string[], timings: Record<string, number> = {}): string[][] => {
+  const chunks: string[][] = []
+  let spent = 0
+  for (const file of files) {
+    const ms = costOf(timings, file)
+    const last = chunks.at(-1)
+    if (last && last.length < CHUNK && spent + ms <= BUDGET_MS) {
+      last.push(file)
+      spent += ms
+    } else {
+      chunks.push([file])
+      spent = ms
+    }
+  }
+  return chunks
+}
 
 // The test sandbox's exit on its deadline (timeout(1)'s code).
 const DEADLINE = 124
@@ -1109,6 +1135,21 @@ export const touchedTests = (clone: string, base: string, head: string): string[
   return [...listed].sort()
 }
 
+// merge's own cut of a list file for a run by hand: chunk-01.txt and on in <out>, one path a line, each printed with its file count and expected time
+export const cmdChunks = async (clone: string, list: string, out: string): Promise<void> => {
+  const files = (await Bun.file(list).text())
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const timings = timingsOf(clone)
+  for (const [i, chunk] of chunksOf(files, timings).entries()) {
+    const path = join(out, `chunk-${String(i + 1).padStart(2, "0")}.txt`)
+    await Bun.write(path, `${chunk.join("\n")}\n`)
+    const ms = chunk.reduce((sum, f) => sum + costOf(timings, f), 0)
+    console.log(`${path} ${chunk.length} files, ${Math.round(ms / 1000)} s expected`)
+  }
+}
+
 export const cmdTouchedTests = (clone: string, base: string, head: string): void => {
   for (const f of touchedTests(clone, base, head)) console.log(f)
 }
@@ -1281,7 +1322,7 @@ export const cmdMerge = (...args: string[]): void => {
     return files
   }
   const red = (files: string[], stage: string): string[] => {
-    const chunks = chunksOf(files)
+    const chunks = chunksOf(files, timingsOf(clone))
     return chunks.flatMap((c, i) => chunkRed(c, stage, `chunk ${i + 1} of ${chunks.length}`))
   }
   const treeOf = (sha: string): Set<string> =>
@@ -1461,6 +1502,7 @@ const COMMANDS: Record<
   { argc: number; more?: true; run: (...args: string[]) => void | Promise<void> }
 > = {
   checks: { argc: 3, more: true, run: cmdChecks },
+  chunks: { argc: 3, run: cmdChunks },
   delta: { argc: 4, run: cmdDelta },
   fresh: { argc: 4, run: cmdFresh },
   merge: { argc: 3, more: true, run: cmdMerge },

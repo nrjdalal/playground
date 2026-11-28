@@ -2387,6 +2387,60 @@ test("13a chunksOf splits a whole-suite list of 855 files into 5 chunks of 200 o
   expect(chunks.flat()).toEqual(files)
 })
 
+// The sandbox's deadline cut a 200-file chunk whose slow run-slot and spawn files landed together, every round on a PR that changes bun.lock, so the cut reads each file's expected time from the suite's own timings
+test("13v chunksOf cuts by expected time: slow files that would fill one 200-file chunk past the deadline spread across chunks, and a file with no timing counts as 1/200 of one", () => {
+  const slow = Array.from({ length: 40 }, (_, i) => `tests/slow${i}.test.ts`)
+  const fast = Array.from({ length: 160 }, (_, i) => `tests/fast${i}.test.ts`)
+  const timings = Object.fromEntries([
+    ...slow.map((f) => [f, 120_000]),
+    ...fast.map((f) => [f, 100]),
+  ])
+  const chunks = state.chunksOf([...slow, ...fast], timings)
+  expect(chunks.map((c) => c.length)).toEqual([10, 10, 10, 10, 160])
+  expect(chunks.flat()).toEqual([...slow, ...fast])
+  const untimed = Array.from({ length: 455 }, (_, i) => `tests/u${i}.test.ts`)
+  expect(state.chunksOf(untimed, timings).map((c) => c.length)).toEqual([200, 200, 55])
+  expect(
+    state
+      .chunksOf(["tests/huge.test.ts", ...fast.slice(0, 2)], { "tests/huge.test.ts": 5_000_000 })
+      .map((c) => c.length),
+  ).toEqual([1, 2])
+})
+
+test("13w merge cuts its chunks by the clone's tests/timings.json", () => {
+  const timings = { files: { [t(1)]: 1_000_000, [t(2)]: 1_000_000 } }
+  const [repo, head] = mergeRepo(
+    { ...eight, "tests/timings.json": `${JSON.stringify(timings)}\n` },
+    { "b.txt": "b, from canary\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head)
+  expect(out.lines).toEqual([`CLEAN on ${canary}: 8 touched tests`])
+  expect(out.calls.map((c) => c.slice(1))).toEqual([[t(1)], [2, 3, 4, 5, 6, 7, 8].map(t)])
+})
+
+// A reviewer's run by hand cut by count alone hits the deadline merge's time cut avoids, so chunks writes merge's own cut as list files for it
+test("13x chunks writes the list's time cut as one list file per chunk and prints each one's path, file count and expected time", () => {
+  const clone = scratch()
+  const files = ["tests/a.test.ts", "tests/b.test.ts", "tests/c.test.ts", "tests/d.test.ts"]
+  const timings = { files: { [files[0]!]: 1_000_000, [files[1]!]: 900_000 } }
+  mkdirSync(join(clone, "tests"))
+  writeFileSync(join(clone, "tests", "timings.json"), `${JSON.stringify(timings)}\n`)
+  const list = join(clone, "touched.txt")
+  writeFileSync(list, `${files.join("\n")}\n\n`)
+  const out = join(clone, "chunks")
+  const run = runCli(["chunks", clone, list, out])
+  expect(run.stderr).toBe("")
+  expect(run.code).toBe(0)
+  const paths = [1, 2].map((i) => join(out, `chunk-0${i}.txt`))
+  expect(run.stdout.trim().split("\n")).toEqual([
+    `${paths[0]} 1 files, 1000 s expected`,
+    `${paths[1]} 3 files, 912 s expected`,
+  ])
+  expect(readFileSync(paths[0]!, "utf8")).toBe(`${files[0]}\n`)
+  expect(readFileSync(paths[1]!, "utf8")).toBe(`${files.slice(1).join("\n")}\n`)
+})
+
 test("13b merge runs a touched list past 200 files in chunks, one call each (#3045)", () => {
   const many = Object.fromEntries(
     Array.from({ length: 201 }, (_, i) => [`tests/src/c${i}.test.ts`, "green\n"]),
